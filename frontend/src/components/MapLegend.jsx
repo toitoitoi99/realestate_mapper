@@ -3,14 +3,17 @@ import { useLanguage } from '../LanguageContext'
 import { CATEGORIES, getCategory } from '../projectCategories'
 import { SECURITY_LAYER_CONFIG } from './SecurityLayer'
 import { GROUPS } from '../neighborhoodGroups'
+import { BASE_MAPS } from '../baseMaps'
 
 export default function MapLegend({
+  baseMap, onChangeBaseMap,
   showProjects, onToggleProjects, visibleCategories, onToggleCategory, projects,
   showSecurity, onToggleSecurity, securityPois,
   showNeighborhoods, onToggleNeighborhoods, visibleGroups, onToggleGroup,
   hiddenParishes, onToggleParish,
 }) {
   const { t } = useLanguage()
+  const [collapsed, setCollapsed] = useState(false)
   const [expandedGroups, setExpandedGroups] = useState({})
 
   const SECURITY_LAYERS = [
@@ -59,7 +62,32 @@ export default function MapLegend({
 
   return (
     <div className="absolute bottom-6 right-3 z-[1000] bg-white rounded-lg shadow-md p-3 text-xs min-w-[220px] max-h-[80vh] overflow-y-auto">
-      <div className="font-semibold text-gray-700 mb-2">{t.mapLayers}</div>
+      <div
+        className="font-semibold text-gray-700 flex items-center justify-between cursor-pointer select-none"
+        onClick={() => setCollapsed(c => !c)}
+      >
+        <span>{t.mapLayers}</span>
+        <span className="text-gray-400 text-[10px] ml-2">{collapsed ? '▼' : '▲'}</span>
+      </div>
+
+      {collapsed ? null : <>
+
+      {/* Base map selector */}
+      <div className="mt-2 mb-2 pb-2 border-b border-gray-100">
+        <div className="text-gray-600 font-medium mb-1">{t.baseMap}</div>
+        {Object.entries(BASE_MAPS).map(([key, map]) => (
+          <label key={key} className="flex items-center gap-2 cursor-pointer select-none py-0.5">
+            <input
+              type="radio"
+              name="baseMap"
+              checked={baseMap === key}
+              onChange={() => onChangeBaseMap(key)}
+              className="cursor-pointer"
+            />
+            <span className="text-gray-500">{map.name}</span>
+          </label>
+        ))}
+      </div>
 
       {/* Listings key */}
       <div className="flex items-center gap-2 mb-2">
@@ -208,6 +236,8 @@ export default function MapLegend({
           })}
         </div>
       )}
+
+      </>}
     </div>
   )
 }

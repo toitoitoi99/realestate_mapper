@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes } from './api'
 import { useFilters } from './useFilters'
 import { CATEGORIES } from './projectCategories'
+import { DEFAULT_BASE_MAP } from './baseMaps'
 import StatsBar from './components/StatsBar'
 import Sidebar from './components/Sidebar'
 import Map from './components/Map'
@@ -25,6 +26,7 @@ export default function App() {
   })
   const [parishFeatures, setParishFeatures] = useState([])
   const [hiddenParishes, setHiddenParishes] = useState(new Set())
+  const [baseMap, setBaseMap] = useState(DEFAULT_BASE_MAP)
   const [loading, setLoading] = useState(false)
   const [scraping, setScraping] = useState(false)
   const [selectedNeighborhood, setSelectedNeighborhood] = useState(null)
@@ -105,6 +107,8 @@ export default function App() {
           onClearNeighborhood={() => setSelectedNeighborhood(null)}
         />
         <Map
+          baseMap={baseMap}
+          onChangeBaseMap={setBaseMap}
           listings={listings}
           neighborhoods={neighborhoods}
           onSelectNeighborhood={handleSelectNeighborhood}

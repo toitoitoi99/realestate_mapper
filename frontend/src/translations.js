@@ -85,6 +85,7 @@ export const translations = {
 
     // MapLegend
     mapLayers:       'Map layers',
+    baseMap:         'Base map',
     forSale:         'For sale',
     rentLabel:       'Rent',
     soldLabel:       'Sold',
@@ -163,6 +164,7 @@ export const translations = {
 
     // MapLegend
     mapLayers:       'Camadas do mapa',
+    baseMap:         'Mapa base',
     forSale:         'Venda',
     rentLabel:       'Arrendamento',
     soldLabel:       'Vendido',
