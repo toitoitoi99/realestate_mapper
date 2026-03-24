@@ -7,6 +7,7 @@ import SecurityLayer from './SecurityLayer'
 import NeighborhoodLayer from './NeighborhoodLayer'
 import MapLegend from './MapLegend'
 import AddressSearch from './AddressSearch'
+import ChatPanel from './ChatPanel'
 import { PARISH_TO_GROUP } from '../neighborhoodGroups'
 import RarityBadge from './RarityBadge'
 
@@ -65,8 +66,8 @@ export default function Map({
     <div style={{ flex: 1, position: 'relative' }}>
       <MapContainer center={CENTRE} zoom={ZOOM} style={{ height: '100%', width: '100%' }}>
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>'
+          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
         />
 
         <FlyTo neighborhood={selectedNeighborhood} listings={withCoords} />
@@ -99,8 +100,8 @@ export default function Map({
             <CircleMarker
               key={l.id}
               center={[l.lat, l.lon]}
-              radius={5}
-              pathOptions={{ ...markerColor, fillOpacity: 0.8, weight: 1 }}
+              radius={3}
+              pathOptions={{ ...markerColor, fillOpacity: 0.6, weight: 0.5 }}
             >
               <Popup>
                 <div className="text-sm">
@@ -149,6 +150,8 @@ export default function Map({
 
         <AddressSearch />
       </MapContainer>
+
+      <ChatPanel />
 
       <MapLegend
         showProjects={showProjects}

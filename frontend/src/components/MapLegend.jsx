@@ -157,6 +157,20 @@ export default function MapLegend({
 
       {showProjects && (
         <div className="pl-1 mt-1 space-y-1 border-t border-gray-100 pt-2 mb-2">
+          {/* Heatmap gradient legend */}
+          <div className="mb-2">
+            <div className="text-gray-400 mb-1">{t.density ?? 'Density'}</div>
+            <div
+              className="h-2 rounded-full"
+              style={{
+                background: 'linear-gradient(to right, #e0f7fa, #4dd0e1, #0097a7, #01579b, #0d1b5e)',
+              }}
+            />
+            <div className="flex justify-between text-gray-300 mt-0.5" style={{ fontSize: '9px' }}>
+              <span>{t.low ?? 'Low'}</span>
+              <span>{t.high ?? 'High'}</span>
+            </div>
+          </div>
           {Object.entries(CATEGORIES).map(([key, cat]) => (
             <div
               key={key}
