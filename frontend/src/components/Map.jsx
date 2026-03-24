@@ -41,6 +41,7 @@ function FlyTo({ neighborhood, listings }) {
 export default function Map({
   listings, neighborhoods,
   onSelectNeighborhood, selectedNeighborhood,
+  onSelectListing,
   projects, showProjects, onToggleProjects,
   visibleCategories, onToggleCategory,
   securityPois, showSecurity, onToggleSecurity,
@@ -116,9 +117,12 @@ export default function Map({
                   <br />
                   <RarityBadge score={l.rarity_score} factors={l.rarity_factors} compact />
                   {l.rarity_score != null && ' '}
-                  <a href={l.url} target="_blank" rel="noopener noreferrer" className="text-blue-600">
-                    {t.viewListing}
-                  </a>
+                  <button
+                    onClick={() => onSelectListing(l)}
+                    className="text-blue-600 hover:text-blue-800 cursor-pointer bg-transparent border-none p-0 text-sm"
+                  >
+                    {t.viewDetails}
+                  </button>
                 </div>
               </Popup>
             </CircleMarker>

@@ -115,6 +115,23 @@ export const translations = {
     pspStation:      'PSP station',
     municipalPoliceLabel: 'Municipal police',
     cctvCamera:      'CCTV camera',
+
+    // ListingDetail
+    back:            'Back',
+    details:         'Details',
+    bedrooms:        'Bedrooms',
+    bathrooms:       'Bathrooms',
+    floor:           'Floor',
+    condition:       'Condition',
+    propertyType:    'Type',
+    description:     'Description',
+    viewOnSource:    'View on Idealista →',
+    address:         'Address',
+    postalCode:      'Postal code',
+    parish:          'Parish',
+    scrapedAt:       'Scraped',
+    viewDetails:     'Details →',
+    noImages:        'No images',
   },
 
   pt: {
@@ -193,5 +210,22 @@ export const translations = {
     pspStation:      'Esquadra PSP',
     municipalPoliceLabel: 'Polícia Municipal',
     cctvCamera:      'Câmara CCTV',
+
+    // ListingDetail
+    back:            'Voltar',
+    details:         'Detalhes',
+    bedrooms:        'Quartos',
+    bathrooms:       'Casas de banho',
+    floor:           'Andar',
+    condition:       'Estado',
+    propertyType:    'Tipo',
+    description:     'Descrição',
+    viewOnSource:    'Ver no Idealista →',
+    address:         'Morada',
+    postalCode:      'Código postal',
+    parish:          'Freguesia',
+    scrapedAt:       'Recolhido',
+    viewDetails:     'Detalhes →',
+    noImages:        'Sem imagens',
   },
 }
