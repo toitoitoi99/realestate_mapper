@@ -8,6 +8,7 @@ import NeighborhoodLayer from './NeighborhoodLayer'
 import MapLegend from './MapLegend'
 import AddressSearch from './AddressSearch'
 import { PARISH_TO_GROUP } from '../neighborhoodGroups'
+import { BASE_MAPS } from '../baseMaps'
 import RarityBadge from './RarityBadge'
 
 const CENTRE = [38.68, -9.10]
@@ -39,6 +40,7 @@ function FlyTo({ neighborhood, listings }) {
 }
 
 export default function Map({
+  baseMap, onChangeBaseMap,
   listings, neighborhoods,
   onSelectNeighborhood, selectedNeighborhood,
   projects, showProjects, onToggleProjects,
@@ -65,8 +67,10 @@ export default function Map({
     <div style={{ flex: 1, position: 'relative' }}>
       <MapContainer center={CENTRE} zoom={ZOOM} style={{ height: '100%', width: '100%' }}>
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          key={baseMap}
+          attribution={BASE_MAPS[baseMap].attribution}
+          url={BASE_MAPS[baseMap].url}
+          maxZoom={BASE_MAPS[baseMap].maxZoom}
         />
 
         <FlyTo neighborhood={selectedNeighborhood} listings={withCoords} />
@@ -151,6 +155,8 @@ export default function Map({
       </MapContainer>
 
       <MapLegend
+        baseMap={baseMap}
+        onChangeBaseMap={onChangeBaseMap}
         showProjects={showProjects}
         onToggleProjects={onToggleProjects}
         visibleCategories={visibleCategories}
