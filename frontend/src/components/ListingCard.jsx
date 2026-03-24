@@ -1,16 +1,14 @@
 import { useLanguage } from '../LanguageContext'
 import RarityBadge from './RarityBadge'
 
-export default function ListingCard({ listing }) {
+export default function ListingCard({ listing, onSelect }) {
   const { t } = useLanguage()
   const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
 
   return (
-    <a
-      href={listing.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="block p-3 border border-gray-100 rounded-lg hover:border-blue-300 hover:shadow-sm transition-all text-left"
+    <div
+      onClick={() => onSelect(listing)}
+      className="block p-3 border border-gray-100 rounded-lg hover:border-blue-300 hover:shadow-sm transition-all text-left cursor-pointer"
     >
       <div className="flex justify-between items-start gap-2 mb-1">
         <span className="font-semibold text-gray-900 text-sm leading-tight line-clamp-2">
@@ -32,6 +30,6 @@ export default function ListingCard({ listing }) {
       )}
 
       <RarityBadge score={listing.rarity_score} factors={listing.rarity_factors} />
-    </a>
+    </div>
   )
 }

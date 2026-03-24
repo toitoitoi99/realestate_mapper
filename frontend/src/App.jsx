@@ -30,6 +30,7 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [scraping, setScraping] = useState(false)
   const [selectedNeighborhood, setSelectedNeighborhood] = useState(null)
+  const [selectedListing, setSelectedListing] = useState(null)
 
   const { filters, setFilter, reset } = useFilters()
 
@@ -105,6 +106,8 @@ export default function App() {
           loading={loading}
           selectedNeighborhood={selectedNeighborhood}
           onClearNeighborhood={() => setSelectedNeighborhood(null)}
+          selectedListing={selectedListing}
+          onSelectListing={setSelectedListing}
         />
         <Map
           baseMap={baseMap}
@@ -113,6 +116,7 @@ export default function App() {
           neighborhoods={neighborhoods}
           onSelectNeighborhood={handleSelectNeighborhood}
           selectedNeighborhood={selectedNeighborhood}
+          onSelectListing={setSelectedListing}
           projects={projects}
           showProjects={showProjects}
           onToggleProjects={() => setShowProjects(p => !p)}
