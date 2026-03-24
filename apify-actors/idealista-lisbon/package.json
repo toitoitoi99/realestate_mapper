@@ -1,0 +1,17 @@
+{
+  "name": "idealista-lisbon",
+  "version": "1.0.0",
+  "description": "Idealista.pt Lisbon real estate scraper — Apify Actor",
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js"
+  },
+  "dependencies": {
+    "apify": "^3.2.0",
+    "@crawlee/playwright": "^3.9.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

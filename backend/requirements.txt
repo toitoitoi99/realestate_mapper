@@ -1,0 +1,19 @@
+# Lisbon Real Estate — Python backend dependencies
+# Install with: pip install -r requirements.txt
+
+# Web framework (API server)
+tornado>=6.1
+
+# Headless browser scraping (recommended — handles JS-heavy Idealista pages)
+playwright>=1.40
+playwright-stealth>=2.0
+# After installing, run once: playwright install chromium
+
+# HTTP + HTML parsing (lightweight fallback scraper only)
+requests>=2.28
+beautifulsoup4>=4.12
+lxml>=4.9
+
+# Optional: pull data directly from Apify API
+# (only needed if you use the Apify Actor instead of the standalone scraper)
+# pip install apify-client

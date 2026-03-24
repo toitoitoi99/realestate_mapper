@@ -1,0 +1,44 @@
+{
+  "actorSpecification": 1,
+  "name": "idealista-lisbon",
+  "title": "Idealista.pt — Lisbon Real Estate Scraper",
+  "description": "Scrapes buy listings from idealista.pt for Lisboa. Extracts price, size, rooms, location, coordinates and images via __NEXT_DATA__ and JSON-LD.",
+  "version": "1.0",
+  "input": {
+    "title": "Idealista Lisbon Scraper Input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+      "searchUrl": {
+        "title": "Search URL",
+        "type": "string",
+        "description": "Idealista search URL to start from. Defaults to all buy listings in Lisboa.",
+        "default": "https://www.idealista.pt/comprar-casas/lisboa/",
+        "editor": "textfield"
+      },
+      "maxPages": {
+        "title": "Max pages",
+        "type": "integer",
+        "description": "Maximum number of search result pages to paginate through.",
+        "default": 60,
+        "minimum": 1,
+        "maximum": 120
+      },
+      "maxItems": {
+        "title": "Max listings",
+        "type": "integer",
+        "description": "Stop after pushing this many listings to the dataset.",
+        "default": 1500,
+        "minimum": 1,
+        "maximum": 5000
+      },
+      "proxyConfiguration": {
+        "title": "Proxy configuration",
+        "type": "object",
+        "description": "Apify proxy config. Residential proxies are strongly recommended for Idealista.",
+        "editor": "proxy",
+        "default": { "useApifyProxy": true, "apifyProxyGroups": ["RESIDENTIAL"] }
+      }
+    }
+  }
+}
