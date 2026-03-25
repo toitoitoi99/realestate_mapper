@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { useLanguage } from '../LanguageContext'
 
 export default function FilterPanel({ filters, setFilter, reset, listingCount }) {
   const { t } = useLanguage()
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const input = (key, placeholder) => (
     <input
@@ -11,6 +13,32 @@ export default function FilterPanel({ filters, setFilter, reset, listingCount })
       onChange={e => setFilter(key, e.target.value)}
       className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
     />
+  )
+
+  const textInput = (key, placeholder) => (
+    <input
+      type="text"
+      placeholder={placeholder}
+      value={filters[key]}
+      onChange={e => setFilter(key, e.target.value)}
+      className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+    />
+  )
+
+  const selectInput = (key, label, options) => (
+    <div>
+      <label className="text-xs text-gray-500 mb-1 block">{label}</label>
+      <select
+        value={filters[key]}
+        onChange={e => setFilter(key, e.target.value)}
+        className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+      >
+        <option value="">{t.any}</option>
+        {options.map(([value, label]) => (
+          <option key={value} value={value}>{label}</option>
+        ))}
+      </select>
+    </div>
   )
 
   return (
@@ -92,6 +120,72 @@ export default function FilterPanel({ filters, setFilter, reset, listingCount })
               onChange={e => setFilter('sold_before', e.target.value)}
               className="flex-1 border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-amber-400"
             />
+          </div>
+        </div>
+      )}
+
+      {/* Advanced filters — collapsible */}
+      <div
+        className="flex items-center justify-between cursor-pointer select-none"
+        onClick={() => setAdvancedOpen(v => !v)}
+      >
+        <span className="text-xs font-medium text-gray-600">{t.advancedFilters}</span>
+        <span className="text-gray-400 text-[10px] ml-2">{advancedOpen ? '▲' : '▼'}</span>
+      </div>
+
+      {advancedOpen && (
+        <div className="flex flex-col gap-4">
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">{t.pricePerSqm}</label>
+            <div className="flex gap-2">
+              {input('min_price_per_sqm', 'Min')}
+              {input('max_price_per_sqm', 'Max')}
+            </div>
+          </div>
+
+          {selectInput('bedrooms', t.bedrooms, [
+            ['1', '1'], ['2', '2'], ['3', '3'], ['4', '4'], ['5', '5+'],
+          ])}
+
+          {selectInput('bathrooms', t.bathrooms, [
+            ['1', '1'], ['2', '2'], ['3', '3'], ['4', '4+'],
+          ])}
+
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">{t.floor}</label>
+            {textInput('floor', 'e.g. 3, RC')}
+          </div>
+
+          {selectInput('property_type', t.propertyType, [
+            ['apartment', 'Apartment'],
+            ['house', 'House'],
+            ['studio', 'Studio'],
+          ])}
+
+          {selectInput('condition', t.condition, [
+            ['new', 'New'],
+            ['used', 'Used'],
+            ['renovated', 'Renovated'],
+          ])}
+
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">{t.parish}</label>
+            {textInput('parish', t.parish)}
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">{t.district}</label>
+            {textInput('district', t.district)}
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">{t.city}</label>
+            {textInput('city', t.city)}
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">{t.postalCode}</label>
+            {textInput('postal_code', t.postalCode)}
           </div>
         </div>
       )}
