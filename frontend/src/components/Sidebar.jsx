@@ -1,13 +1,23 @@
 import { useLanguage } from '../LanguageContext'
 import FilterPanel from './FilterPanel'
 import ListingCard from './ListingCard'
+import ListingDetail from './ListingDetail'
 
 export default function Sidebar({
   filters, setFilter, reset,
   listings, loading,
   selectedNeighborhood, onClearNeighborhood,
+  selectedListing, onSelectListing,
 }) {
   const { t } = useLanguage()
+
+  if (selectedListing) {
+    return (
+      <div className="w-80 shrink-0 flex flex-col bg-white border-r border-gray-200 overflow-hidden">
+        <ListingDetail listing={selectedListing} onBack={() => onSelectListing(null)} />
+      </div>
+    )
+  }
 
   return (
     <div className="w-80 shrink-0 flex flex-col bg-white border-r border-gray-200 overflow-hidden">
@@ -36,7 +46,7 @@ export default function Sidebar({
           <div className="text-center text-gray-400 text-sm py-8">{t.noListings}</div>
         )}
         {!loading && listings?.map(l => (
-          <ListingCard key={l.id} listing={l} />
+          <ListingCard key={l.id} listing={l} onSelect={onSelectListing} />
         ))}
       </div>
     </div>

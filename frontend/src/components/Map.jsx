@@ -10,6 +10,7 @@ import AddressSearch from './AddressSearch'
 import ChatPanel from './ChatPanel'
 import SoldTrendsLayer from './SoldTrendsLayer'
 import { PARISH_TO_GROUP } from '../neighborhoodGroups'
+import { BASE_MAPS } from '../baseMaps'
 import RarityBadge from './RarityBadge'
 
 const CENTRE = [38.68, -9.10]
@@ -41,8 +42,10 @@ function FlyTo({ neighborhood, listings }) {
 }
 
 export default function Map({
+  baseMap, onChangeBaseMap,
   listings, neighborhoods,
   onSelectNeighborhood, selectedNeighborhood,
+  onSelectListing,
   projects, showProjects, onToggleProjects,
   visibleCategories, onToggleCategory,
   securityPois, showSecurity, onToggleSecurity,
@@ -68,8 +71,10 @@ export default function Map({
     <div style={{ flex: 1, position: 'relative', isolation: 'isolate' }}>
       <MapContainer center={CENTRE} zoom={ZOOM} style={{ height: '100%', width: '100%', zIndex: 0 }}>
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+          key={baseMap}
+          attribution={BASE_MAPS[baseMap].attribution}
+          url={BASE_MAPS[baseMap].url}
+          maxZoom={BASE_MAPS[baseMap].maxZoom}
         />
 
         <FlyTo neighborhood={selectedNeighborhood} listings={withCoords} />
@@ -183,6 +188,8 @@ export default function Map({
       <ChatPanel />
 
       <MapLegend
+        baseMap={baseMap}
+        onChangeBaseMap={onChangeBaseMap}
         showProjects={showProjects}
         onToggleProjects={onToggleProjects}
         visibleCategories={visibleCategories}

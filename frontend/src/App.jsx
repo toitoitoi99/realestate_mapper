@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes, fetchSoldTrends } from './api'
 import { useFilters } from './useFilters'
 import { CATEGORIES } from './projectCategories'
+import { DEFAULT_BASE_MAP } from './baseMaps'
 import StatsBar from './components/StatsBar'
 import Sidebar from './components/Sidebar'
 import Map from './components/Map'
@@ -28,9 +29,11 @@ export default function App() {
   const [showSoldTrends, setShowSoldTrends] = useState(false)
   const [soldTrendsData, setSoldTrendsData] = useState({ trends: [], points: [] })
   const [soldDateRange, setSoldDateRange] = useState({ start: '2024-06-01', end: '2025-12-31' })
+  const [baseMap, setBaseMap] = useState(DEFAULT_BASE_MAP)
   const [loading, setLoading] = useState(false)
   const [scraping, setScraping] = useState(false)
   const [selectedNeighborhood, setSelectedNeighborhood] = useState(null)
+  const [selectedListing, setSelectedListing] = useState(null)
 
   const { filters, setFilter, reset } = useFilters()
 
@@ -113,12 +116,17 @@ export default function App() {
           loading={loading}
           selectedNeighborhood={selectedNeighborhood}
           onClearNeighborhood={() => setSelectedNeighborhood(null)}
+          selectedListing={selectedListing}
+          onSelectListing={setSelectedListing}
         />
         <Map
+          baseMap={baseMap}
+          onChangeBaseMap={setBaseMap}
           listings={listings}
           neighborhoods={neighborhoods}
           onSelectNeighborhood={handleSelectNeighborhood}
           selectedNeighborhood={selectedNeighborhood}
+          onSelectListing={setSelectedListing}
           projects={projects}
           showProjects={showProjects}
           onToggleProjects={() => setShowProjects(p => !p)}
