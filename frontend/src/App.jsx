@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes } from './api'
+import { fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes, fetchSoldTrends } from './api'
 import { useFilters } from './useFilters'
 import { CATEGORIES } from './projectCategories'
 import { DEFAULT_BASE_MAP } from './baseMaps'
@@ -26,6 +26,9 @@ export default function App() {
   })
   const [parishFeatures, setParishFeatures] = useState([])
   const [hiddenParishes, setHiddenParishes] = useState(new Set())
+  const [showSoldTrends, setShowSoldTrends] = useState(false)
+  const [soldTrendsData, setSoldTrendsData] = useState({ trends: [], points: [] })
+  const [soldDateRange, setSoldDateRange] = useState({ start: '2024-06-01', end: '2025-12-31' })
   const [baseMap, setBaseMap] = useState(DEFAULT_BASE_MAP)
   const [loading, setLoading] = useState(false)
   const [scraping, setScraping] = useState(false)
@@ -45,6 +48,13 @@ export default function App() {
       setIneStats(total ?? null)
     }).catch(console.error)
   }, [])
+
+  useEffect(() => {
+    if (!showSoldTrends) return
+    fetchSoldTrends(soldDateRange.start, soldDateRange.end)
+      .then(d => setSoldTrendsData({ trends: d.trends ?? [], points: d.points ?? [] }))
+      .catch(console.error)
+  }, [showSoldTrends, soldDateRange])
 
   useEffect(() => {
     setLoading(true)
@@ -132,6 +142,11 @@ export default function App() {
           parishFeatures={parishFeatures}
           hiddenParishes={hiddenParishes}
           onToggleParish={toggleParish}
+          showSoldTrends={showSoldTrends}
+          onToggleSoldTrends={() => setShowSoldTrends(p => !p)}
+          soldTrendsData={soldTrendsData}
+          soldDateRange={soldDateRange}
+          onSoldDateRangeChange={setSoldDateRange}
         />
       </div>
     </div>
