@@ -227,7 +227,7 @@ export default function MapLegend({
                 value={soldDateRange.end.slice(0, 7)}
                 onChange={e => {
                   const val = e.target.value
-                  if (val) onSoldDateRangeChange(prev => ({ ...prev, end: val + '-28' }))
+                  if (val) onSoldDateRangeChange(prev => ({ ...prev, end: val + '-31' }))
                 }}
                 className="text-xs border border-gray-200 rounded px-1 py-0.5 w-[110px]"
                 onClick={e => e.stopPropagation()}

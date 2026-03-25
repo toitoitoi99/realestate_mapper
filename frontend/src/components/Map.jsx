@@ -65,8 +65,8 @@ export default function Map({
     .filter(l => isParishVisible(l.neighborhood))
 
   return (
-    <div style={{ flex: 1, position: 'relative' }}>
-      <MapContainer center={CENTRE} zoom={ZOOM} style={{ height: '100%', width: '100%' }}>
+    <div style={{ flex: 1, position: 'relative', isolation: 'isolate' }}>
+      <MapContainer center={CENTRE} zoom={ZOOM} style={{ height: '100%', width: '100%', zIndex: 0 }}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>'
           url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"

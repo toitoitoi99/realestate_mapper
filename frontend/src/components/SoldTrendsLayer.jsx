@@ -158,7 +158,7 @@ export default function SoldTrendsLayer({
     layer.on('mouseout', () => layer.setStyle({ fillOpacity: 0.45 }))
   }
 
-  const key = JSON.stringify(Object.keys(trendMap).sort())
+  const key = JSON.stringify(trends.map(t => [t.parish, t.pct_change]).sort())
 
   return (
     <>
