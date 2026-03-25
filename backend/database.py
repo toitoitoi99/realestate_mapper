@@ -279,6 +279,17 @@ def get_listings(
     listing_type: Optional[str] = None,
     sold_after: Optional[str] = None,
     sold_before: Optional[str] = None,
+    min_price_per_sqm: Optional[float] = None,
+    max_price_per_sqm: Optional[float] = None,
+    bedrooms: Optional[int] = None,
+    bathrooms: Optional[int] = None,
+    floor: Optional[str] = None,
+    property_type: Optional[str] = None,
+    condition: Optional[str] = None,
+    parish: Optional[str] = None,
+    district: Optional[str] = None,
+    city: Optional[str] = None,
+    postal_code: Optional[str] = None,
     limit: int = 500,
     offset: int = 0,
 ) -> List[dict]:
@@ -307,6 +318,28 @@ def get_listings(
         clauses.append("status IN ('sold','reserved') AND scraped_at >= ?"); params.append(sold_after)
     if sold_before:
         clauses.append("status IN ('sold','reserved') AND scraped_at <= ?"); params.append(sold_before + "T23:59:59")
+    if min_price_per_sqm is not None:
+        clauses.append("price_per_sqm>=?"); params.append(min_price_per_sqm)
+    if max_price_per_sqm is not None:
+        clauses.append("price_per_sqm<=?"); params.append(max_price_per_sqm)
+    if bedrooms is not None:
+        clauses.append("bedrooms>=?" if bedrooms >= 5 else "bedrooms=?"); params.append(bedrooms)
+    if bathrooms is not None:
+        clauses.append("bathrooms>=?" if bathrooms >= 4 else "bathrooms=?"); params.append(bathrooms)
+    if floor:
+        clauses.append("floor=?"); params.append(floor)
+    if property_type:
+        clauses.append("property_type=?"); params.append(property_type)
+    if condition:
+        clauses.append("condition=?"); params.append(condition)
+    if parish:
+        clauses.append("parish=?"); params.append(parish)
+    if district:
+        clauses.append("district=?"); params.append(district)
+    if city:
+        clauses.append("city=?"); params.append(city)
+    if postal_code:
+        clauses.append("postal_code=?"); params.append(postal_code)
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     params += [limit, offset]

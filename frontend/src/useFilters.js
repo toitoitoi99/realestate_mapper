@@ -13,6 +13,17 @@ const DEFAULT_FILTERS = {
   sold_before: '',
   sort_by: 'default',
   limit: 500,
+  min_price_per_sqm: '',
+  max_price_per_sqm: '',
+  bedrooms: '',
+  bathrooms: '',
+  floor: '',
+  property_type: '',
+  condition: '',
+  parish: '',
+  district: '',
+  city: '',
+  postal_code: '',
 }
 
 export function useFilters() {
