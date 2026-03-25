@@ -317,6 +317,172 @@ def _parse_json_ld(ld: dict) -> dict:
     }
 
 
+# ── DOM-based extraction (server-rendered HTML) ──────────────────────────────
+
+def extract_from_dom(page: Page) -> dict:
+    """Extract listing data directly from DOM elements and inline JS.
+
+    Idealista moved from Next.js (__NEXT_DATA__) to server-rendered HTML.
+    Data is in CSS-classed elements and inline JavaScript variables.
+    """
+    result = {}  # type: dict
+
+    try:
+        data = page.evaluate(r"""
+            () => {
+                const out = {};
+
+                // Price: <strong class="price">650.000 €</strong>
+                const priceEl = document.querySelector('strong.price, .info-data-price .txt-bold');
+                if (priceEl) out.priceText = priceEl.textContent.trim();
+
+                // Info features: "127 m² área bruta", "T2", "9º andar com elevador"
+                const featureSpans = document.querySelectorAll('.info-features > span');
+                out.features = Array.from(featureSpans).map(s => s.textContent.trim());
+
+                // Title
+                const titleEl = document.querySelector('.main-info__title-main, h1 .main-info__title-main');
+                if (titleEl) out.title = titleEl.textContent.trim();
+
+                // Subtitle (neighborhood, city): "Olivais, Lisboa"
+                const subtitleEl = document.querySelector('.main-info__title-minor');
+                if (subtitleEl) out.subtitle = subtitleEl.textContent.trim();
+
+                // Location from header-map-list items
+                const mapItems = document.querySelectorAll('.header-map-list');
+                out.locationParts = Array.from(mapItems).map(li => li.textContent.trim());
+
+                // Description
+                const descEl = document.querySelector('.comment p, .adCommentsLanguage p, [class*="comment"] p');
+                if (descEl) out.description = descEl.textContent.trim().slice(0, 1000);
+
+                // Price per sqm
+                const ppsEl = document.querySelector('.flex-feature-details, .squaredmeterprice .flex-feature-details');
+                if (ppsEl) out.pricePerSqm = ppsEl.textContent.trim();
+
+                // Condition from detail features
+                const details = document.querySelectorAll('.details-property-feature-one li, .details-property li');
+                out.detailFeatures = Array.from(details).map(li => li.textContent.trim());
+
+                // Try to get coordinates from Google Maps static URL
+                const staticMap = document.querySelector('.static-map a, img[src*="maps.googleapis"]');
+                if (staticMap) {
+                    const src = staticMap.getAttribute('href') || staticMap.getAttribute('src') || '';
+                    out.staticMapUrl = src;
+                }
+
+                // Get inline JS data: multimediaCarrousel, idForm, etc.
+                const scripts = document.querySelectorAll('script:not([src])');
+                for (const s of scripts) {
+                    const t = s.textContent || '';
+
+                    // buyingPrice
+                    const priceMatch = t.match(/buyingPrice\s*:\s*([\d.]+)/);
+                    if (priceMatch) out.buyingPrice = priceMatch[1];
+
+                    // coordinates from Google Maps URL in multimediaCarrousel
+                    const coordMatch = t.match(/center=([\d.-]+)%2C([\d.-]+)/);
+                    if (coordMatch) {
+                        out.lat = coordMatch[1];
+                        out.lon = coordMatch[2];
+                    }
+
+                    // multimediaCarrousel images
+                    if (t.includes('multimediaCarrousel')) {
+                        const mcMatch = t.match(/multimediaCarrousel\s*:\s*(\{.+?\})\s*,\s*\n?\s*dynamicMapKey/s);
+                        if (mcMatch) out.multimediaJSON = mcMatch[1];
+                    }
+                }
+
+                return out;
+            }
+        """)
+    except Exception as e:
+        log.warning(f"  DOM extraction JS failed: {e}")
+        return result
+
+    # Parse price
+    if data.get("buyingPrice"):
+        result["price"] = _num(data["buyingPrice"])
+    elif data.get("priceText"):
+        result["price"] = _num(data["priceText"])
+
+    # Parse features: size, typology, floor
+    for feat in (data.get("features") or []):
+        if "m²" in feat or "m2" in feat.lower():
+            m = re.search(r"([\d.,]+)\s*m", feat)
+            if m:
+                result["size"] = _num(m.group(1))
+        elif re.match(r"T\d", feat.strip()):
+            rooms = _int(feat)
+            result["rooms"] = rooms
+            result["bedrooms"] = rooms
+        elif "andar" in feat.lower() or "res" in feat.lower().replace("é", "e"):
+            m = re.search(r"(\d+)", feat)
+            if m:
+                result["floor"] = m.group(1)
+            elif "rés" in feat.lower() or "r/c" in feat.lower():
+                result["floor"] = "0"
+
+    result["title"] = data.get("title")
+    result["description"] = data.get("description")
+
+    # Location
+    loc_parts = data.get("locationParts") or []
+    if len(loc_parts) >= 1:
+        result["address"] = loc_parts[0]
+    if len(loc_parts) >= 2:
+        result["neighborhood"] = loc_parts[1]
+    if len(loc_parts) >= 3:
+        city_parts = loc_parts[2].split(",")
+        result["city"] = city_parts[0].strip()
+        if len(city_parts) > 1:
+            result["district"] = city_parts[-1].strip()
+
+    # Subtitle fallback for neighborhood
+    if not result.get("neighborhood") and data.get("subtitle"):
+        parts = data["subtitle"].split(",")
+        if parts:
+            result["neighborhood"] = parts[0].strip()
+
+    # Coordinates
+    if data.get("lat"):
+        result["lat"] = _coord(data["lat"])
+    if data.get("lon"):
+        result["lon"] = _coord(data["lon"])
+
+    # Images from multimediaCarrousel
+    if data.get("multimediaJSON"):
+        try:
+            mc = json.loads(data["multimediaJSON"])
+            images = []
+            for media_group in mc.get("multimedias") or []:
+                if media_group.get("type") == "PICTURE":
+                    for img in media_group.get("content") or []:
+                        src = img.get("src") or img.get("srcWebp")
+                        if src and src.startswith("http"):
+                            images.append(src)
+            result["images"] = images[:MAX_IMAGES]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Condition from detail features
+    for feat in (data.get("detailFeatures") or []):
+        fl = feat.lower()
+        if any(w in fl for w in ["renovado", "remodelado", "novo", "bom estado", "usado", "para recuperar", "em construção"]):
+            result["condition"] = _normalize_condition(feat)
+            break
+
+    # Property type from title
+    title = (result.get("title") or "").lower()
+    for pt in ["apartamento", "moradia", "vivenda", "loja", "terreno", "escritório", "garagem", "armazém", "prédio"]:
+        if pt in title:
+            result["property_type"] = _normalize_property_type(pt)
+            break
+
+    return result
+
+
 # ── Detail page scraper ───────────────────────────────────────────────────────
 
 def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Optional[Listing]:
@@ -347,17 +513,20 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
     # JSON-LD fallback for any missing fields
     ld = extract_json_ld_listing(page) if not nd.get("price") else {}
 
-    price    = nd.get("price")    or ld.get("price")
-    size     = nd.get("size")     or ld.get("size")
-    lat      = nd.get("lat")      or ld.get("lat")
-    lon      = nd.get("lon")      or ld.get("lon")
-    address  = nd.get("address")  or ld.get("address")
+    # DOM fallback — Idealista moved from Next.js to server-rendered HTML
+    dom = extract_from_dom(page) if not (nd.get("price") or ld.get("price")) else {}
+
+    price    = nd.get("price")    or ld.get("price")    or dom.get("price")
+    size     = nd.get("size")     or ld.get("size")     or dom.get("size")
+    lat      = nd.get("lat")      or ld.get("lat")      or dom.get("lat")
+    lon      = nd.get("lon")      or ld.get("lon")      or dom.get("lon")
+    address  = nd.get("address")  or ld.get("address")  or dom.get("address")
     postal   = nd.get("postal_code") or ld.get("postal_code")
-    city     = nd.get("city")     or ld.get("city") or "Lisboa"
-    district = nd.get("district") or ld.get("district") or "Lisboa"
-    bedrooms = nd.get("bedrooms") or ld.get("bedrooms")
-    floor    = nd.get("floor")    or ld.get("floor")
-    images   = nd.get("images") or ld.get("images") or []
+    city     = nd.get("city")     or ld.get("city")     or dom.get("city") or "Lisboa"
+    district = nd.get("district") or ld.get("district") or dom.get("district") or "Lisboa"
+    bedrooms = nd.get("bedrooms") or ld.get("bedrooms") or dom.get("bedrooms")
+    floor    = nd.get("floor")    or ld.get("floor")    or dom.get("floor")
+    images   = nd.get("images") or ld.get("images") or dom.get("images") or []
 
     price_per_sqm = round(price / size, 2) if price and size and size > 0 else None
 
@@ -406,15 +575,15 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
         price_amount=price,
         price_per_sqm=price_per_sqm,
         size_sqm=size,
-        rooms=nd.get("rooms"),
+        rooms=nd.get("rooms") or dom.get("rooms"),
         bedrooms=bedrooms,
         floor=floor,
-        property_type=nd.get("property_type") or ld.get("property_type"),
-        condition=nd.get("condition"),
-        title=nd.get("title"),
+        property_type=nd.get("property_type") or ld.get("property_type") or dom.get("property_type"),
+        condition=nd.get("condition") or dom.get("condition"),
+        title=nd.get("title") or dom.get("title"),
         address=address,
         postal_code=postal,
-        neighborhood=nd.get("neighborhood"),
+        neighborhood=nd.get("neighborhood") or dom.get("neighborhood"),
         parish=nd.get("parish"),
         district=district,
         city=city,
@@ -422,7 +591,7 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
         lon=lon,
         images=json.dumps(images) if images else None,
         hash_dedupe=_hash(address, city, price, size),
-        description=nd.get("description"),
+        description=nd.get("description") or dom.get("description"),
         scraped_at=datetime.utcnow(),
     )
 
@@ -650,6 +819,40 @@ def run_scraper(
                     )
                 except PWTimeout:
                     pass
+
+                # DEBUG: dump data sources and save HTML for first failing listing
+                if error_count == 0 and total_pushed == 0:
+                    _nd = extract_next_data(page)
+                    _ld_scripts = page.evaluate("""
+                        () => Array.from(
+                            document.querySelectorAll('script[type="application/ld+json"]')
+                        ).map(s => s.textContent)
+                    """)
+                    log.info(f"  DEBUG __NEXT_DATA__ keys: {list(_nd.keys()) if _nd else 'EMPTY'}")
+                    _pp = find_deep(_nd, ["props", "pageProps"], ["pageProps"]) or {}
+                    _ad = find_deep(_pp, ["adDetail"], ["ad"], ["listing"], ["estate"]) or {}
+                    log.info(f"  DEBUG pageProps keys: {list(_pp.keys())[:20]}")
+                    log.info(f"  DEBUG ad keys: {list(_ad.keys())[:20]}")
+                    log.info(f"  DEBUG ad.price={_ad.get('price')}, ad.priceInfo={_ad.get('priceInfo')}")
+                    log.info(f"  DEBUG JSON-LD count: {len(_ld_scripts)}")
+                    for _i, _s in enumerate(_ld_scripts[:3]):
+                        log.info(f"  DEBUG JSON-LD[{_i}]: {_s[:500]}")
+
+                    # Save full HTML + screenshot for inspection
+                    _diag_dir = Path(__file__).parent.parent / "data" / "debug"
+                    _diag_dir.mkdir(exist_ok=True)
+                    _html = page.content()
+                    _html_path = _diag_dir / "first_detail_page.html"
+                    _html_path.write_text(_html, encoding="utf-8")
+                    log.info(f"  DEBUG saved HTML ({len(_html)} chars) → {_html_path}")
+                    try:
+                        _shot_path = _diag_dir / "first_detail_page.png"
+                        page.screenshot(path=str(_shot_path), full_page=True)
+                        log.info(f"  DEBUG saved screenshot → {_shot_path}")
+                    except Exception as _e:
+                        log.warning(f"  DEBUG screenshot failed: {_e}")
+                    log.info(f"  DEBUG page URL: {page.url}")
+                    log.info(f"  DEBUG page title: {page.title()}")
 
                 listing = scrape_detail_page(page, detail_url, listing_type=listing_type)
 
