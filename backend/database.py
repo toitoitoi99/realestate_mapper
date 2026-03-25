@@ -192,6 +192,7 @@ def init_db():
         "ALTER TABLE neighborhoods ADD COLUMN count_sold INTEGER DEFAULT 0",
         "ALTER TABLE listings ADD COLUMN rarity_score REAL",
         "ALTER TABLE listings ADD COLUMN rarity_factors TEXT",
+        "ALTER TABLE listings ADD COLUMN building_geojson TEXT",
     ]:
         try:
             conn.execute(col); conn.commit()

@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, CircleMarker, GeoJSON, Popup, useMap } from 'react-leaflet'
 import { useLanguage } from '../LanguageContext'
 import 'leaflet/dist/leaflet.css'
 import ProjectLayer from './ProjectLayer'
@@ -83,7 +83,7 @@ export default function Map({
           neighborhoods={neighborhoods}
         />
 
-        {/* Listing markers */}
+        {/* Listing markers — building outlines when available, dots as fallback */}
         {withCoords.map(l => {
           const isRent = l.listing_type === 'rent'
           const isSold = l.status === 'sold'
@@ -98,6 +98,42 @@ export default function Map({
             markerColor = { color: '#1d4ed8', fillColor: '#3b82f6' }   // blue = sale
           }
 
+          const popupContent = (
+            <Popup>
+              <div className="text-sm">
+                {(isSold || isReserved) && (
+                  <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+                    {isSold ? `${t.sold} · ` : `${t.reserved} · `}
+                  </span>
+                )}
+                <b>€{fmt(l.price_amount)}{isRent ? '/mo' : ''}</b>
+                {l.size_sqm && <> · {fmt(l.size_sqm)} m²</>}
+                {l.rooms != null && <> · T{l.rooms}</>}<br />
+                {l.neighborhood && <span className="text-gray-500">{l.neighborhood}</span>}
+                <br />
+                <RarityBadge score={l.rarity_score} factors={l.rarity_factors} compact />
+                {l.rarity_score != null && ' '}
+                <a href={l.url} target="_blank" rel="noopener noreferrer" className="text-blue-600">
+                  {t.viewListing}
+                </a>
+              </div>
+            </Popup>
+          )
+
+          if (l.building_geojson) {
+            const geojson = typeof l.building_geojson === 'string'
+              ? JSON.parse(l.building_geojson) : l.building_geojson
+            return (
+              <GeoJSON
+                key={`bldg-${l.id}`}
+                data={{ type: 'Feature', geometry: geojson, properties: {} }}
+                style={() => ({ ...markerColor, fillOpacity: 0.35, weight: 2 })}
+              >
+                {popupContent}
+              </GeoJSON>
+            )
+          }
+
           return (
             <CircleMarker
               key={l.id}
@@ -105,25 +141,7 @@ export default function Map({
               radius={3}
               pathOptions={{ ...markerColor, fillOpacity: 0.6, weight: 0.5 }}
             >
-              <Popup>
-                <div className="text-sm">
-                  {(isSold || isReserved) && (
-                    <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
-                      {isSold ? `${t.sold} · ` : `${t.reserved} · `}
-                    </span>
-                  )}
-                  <b>€{fmt(l.price_amount)}{isRent ? '/mo' : ''}</b>
-                  {l.size_sqm && <> · {fmt(l.size_sqm)} m²</>}
-                  {l.rooms != null && <> · T{l.rooms}</>}<br />
-                  {l.neighborhood && <span className="text-gray-500">{l.neighborhood}</span>}
-                  <br />
-                  <RarityBadge score={l.rarity_score} factors={l.rarity_factors} compact />
-                  {l.rarity_score != null && ' '}
-                  <a href={l.url} target="_blank" rel="noopener noreferrer" className="text-blue-600">
-                    {t.viewListing}
-                  </a>
-                </div>
-              </Popup>
+              {popupContent}
             </CircleMarker>
           )
         })}
