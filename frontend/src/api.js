@@ -55,6 +55,14 @@ export async function fetchParishes() {
   return res.json()
 }
 
+export async function fetchSoldTrends(start, end) {
+  const params = new URLSearchParams()
+  if (start) params.set('start', start)
+  if (end) params.set('end', end)
+  const res = await fetch(`${BASE}/sold-trends?${params}`)
+  return res.json()
+}
+
 export async function sendChatMessage(message, history = []) {
   const res = await fetch(`${BASE}/chat`, {
     method: 'POST',

@@ -8,6 +8,7 @@ import NeighborhoodLayer from './NeighborhoodLayer'
 import MapLegend from './MapLegend'
 import AddressSearch from './AddressSearch'
 import ChatPanel from './ChatPanel'
+import SoldTrendsLayer from './SoldTrendsLayer'
 import { PARISH_TO_GROUP } from '../neighborhoodGroups'
 import RarityBadge from './RarityBadge'
 
@@ -47,6 +48,7 @@ export default function Map({
   securityPois, showSecurity, onToggleSecurity,
   showNeighborhoods, onToggleNeighborhoods, visibleGroups, onToggleGroup,
   parishFeatures, hiddenParishes, onToggleParish,
+  showSoldTrends, onToggleSoldTrends, soldTrendsData, soldDateRange, onSoldDateRangeChange,
 }) {
   const { t } = useLanguage()
   const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
@@ -148,6 +150,15 @@ export default function Map({
           />
         )}
 
+        {/* Sold price trends overlay */}
+        {showSoldTrends && (
+          <SoldTrendsLayer
+            parishFeatures={parishFeatures}
+            trends={soldTrendsData.trends}
+            points={soldTrendsData.points}
+          />
+        )}
+
         <AddressSearch />
       </MapContainer>
 
@@ -168,6 +179,11 @@ export default function Map({
         onToggleGroup={onToggleGroup}
         hiddenParishes={hiddenParishes}
         onToggleParish={onToggleParish}
+        showSoldTrends={showSoldTrends}
+        onToggleSoldTrends={onToggleSoldTrends}
+        soldDateRange={soldDateRange}
+        onSoldDateRangeChange={onSoldDateRangeChange}
+        soldTrendsData={soldTrendsData}
       />
     </div>
   )

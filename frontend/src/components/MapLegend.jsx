@@ -9,6 +9,7 @@ export default function MapLegend({
   showSecurity, onToggleSecurity, securityPois,
   showNeighborhoods, onToggleNeighborhoods, visibleGroups, onToggleGroup,
   hiddenParishes, onToggleParish,
+  showSoldTrends, onToggleSoldTrends, soldDateRange, onSoldDateRangeChange, soldTrendsData,
 }) {
   const { t } = useLanguage()
   const [expandedGroups, setExpandedGroups] = useState({})
@@ -192,6 +193,69 @@ export default function MapLegend({
               </span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Sold price trends */}
+      <div
+        className="flex items-center gap-2 cursor-pointer select-none border-t border-gray-100 pt-2 mt-1 mb-1"
+        onClick={onToggleSoldTrends}
+      >
+        <input type="checkbox" readOnly checked={showSoldTrends} className="cursor-pointer" />
+        <span className="text-gray-700 font-medium">{t.soldTrends ?? 'Price trends (sold)'}</span>
+      </div>
+
+      {showSoldTrends && (
+        <div className="pl-1 mt-1 space-y-2 border-t border-gray-100 pt-2 mb-2">
+          {/* Date range selectors */}
+          <div className="space-y-1">
+            <div className="text-gray-400">{t.dateRange ?? 'Date range'}</div>
+            <div className="flex gap-1 items-center">
+              <input
+                type="month"
+                value={soldDateRange.start.slice(0, 7)}
+                onChange={e => {
+                  const val = e.target.value
+                  if (val) onSoldDateRangeChange(prev => ({ ...prev, start: val + '-01' }))
+                }}
+                className="text-xs border border-gray-200 rounded px-1 py-0.5 w-[110px]"
+                onClick={e => e.stopPropagation()}
+              />
+              <span className="text-gray-300">→</span>
+              <input
+                type="month"
+                value={soldDateRange.end.slice(0, 7)}
+                onChange={e => {
+                  const val = e.target.value
+                  if (val) onSoldDateRangeChange(prev => ({ ...prev, end: val + '-28' }))
+                }}
+                className="text-xs border border-gray-200 rounded px-1 py-0.5 w-[110px]"
+                onClick={e => e.stopPropagation()}
+              />
+            </div>
+          </div>
+
+          {/* Gradient legend */}
+          <div>
+            <div
+              className="h-2 rounded-full"
+              style={{
+                background: 'linear-gradient(to right, #3b82f6, #93c5fd, #ffffff, #fca5a5, #dc2626)',
+              }}
+            />
+            <div className="flex justify-between text-gray-300 mt-0.5" style={{ fontSize: '9px' }}>
+              <span>{t.priceDecrease ?? '−15%'}</span>
+              <span>{t.priceFlat ?? '0%'}</span>
+              <span>{t.priceIncrease ?? '+15%'}</span>
+            </div>
+          </div>
+
+          {/* Summary stats */}
+          {soldTrendsData?.trends?.length > 0 && (
+            <div className="text-gray-400" style={{ fontSize: '10px' }}>
+              {soldTrendsData.trends.length} {t.parishesWithData ?? 'parishes with data'}
+            </div>
+          )}
         </div>
       )}
 

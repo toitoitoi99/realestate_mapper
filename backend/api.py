@@ -228,6 +228,22 @@ class IneStatsHandler(BaseHandler):
         self.write_json({"count": len(stats), "stats": stats})
 
 
+class SoldTrendsHandler(BaseHandler):
+    """GET /api/sold-trends — per-parish price change for sold transactions"""
+
+    def get(self):
+        start_date = self.get_argument("start", "2024-01-01")
+        end_date = self.get_argument("end", "2026-03-01")
+        trends = db.get_sold_trends(start_date=start_date, end_date=end_date)
+        points = db.get_sold_points(start_date=start_date, end_date=end_date)
+        self.write_json({
+            "trends": trends,
+            "points": points,
+            "start": start_date,
+            "end": end_date,
+        })
+
+
 class ParishesHandler(BaseHandler):
     """GET /api/parishes — official Lisboa parish boundaries (GeoJSON FeatureCollection)"""
 
@@ -356,6 +372,7 @@ def make_app() -> tornado.web.Application:
             (r"/api/security",               SecurityHandler),
             (r"/api/ine-stats",             IneStatsHandler),
             (r"/api/stats",                 StatsHandler),
+            (r"/api/sold-trends",           SoldTrendsHandler),
             (r"/api/parishes",              ParishesHandler),
             (r"/api/chat",                  ChatHandler),
         ],

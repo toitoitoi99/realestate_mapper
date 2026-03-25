@@ -106,6 +106,18 @@ export const translations = {
     askingAvg:       'Asking avg',
     soldAvg:         'Sold avg',
 
+    // Sold trends
+    soldTrends:      'Price trends (sold)',
+    dateRange:       'Date range',
+    priceDecrease:   '−15%',
+    priceFlat:       '0%',
+    priceIncrease:   '+15%',
+    parishesWithData: 'parishes with data',
+    earlyPeriod:     'Early period',
+    latePeriod:      'Late period',
+    sales:           'sales',
+    totalSales:      'total sales',
+
     // ProjectLayer popup
     submitted:       'Submitted:',
     permit:          'Permit:',
@@ -183,6 +195,18 @@ export const translations = {
     outer:           'Periferia',
     askingAvg:       'Pedido médio',
     soldAvg:         'Vendido médio',
+
+    // Sold trends
+    soldTrends:      'Tendências de preço (vendido)',
+    dateRange:       'Período',
+    priceDecrease:   '−15%',
+    priceFlat:       '0%',
+    priceIncrease:   '+15%',
+    parishesWithData: 'freguesias com dados',
+    earlyPeriod:     'Período inicial',
+    latePeriod:      'Período final',
+    sales:           'vendas',
+    totalSales:      'vendas total',
 
     // ProjectLayer popup
     submitted:       'Entrada:',

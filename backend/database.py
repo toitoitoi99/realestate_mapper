@@ -926,5 +926,110 @@ def get_ine_stats(geocod: Optional[str] = "1A01106", latest_only: bool = True) -
         conn.close()
 
 
+# ── Sold Transactions ────────────────────────────────────────────────────────
+
+def get_sold_trends(
+    start_date: str,
+    end_date: str,
+) -> List[dict]:
+    """
+    Compute per-parish price trends for sold transactions within a date range.
+    Splits the range in half: compares avg price/sqm in the first half vs second half.
+    Returns a list of dicts with parish, pct_change, avg_early, avg_late, count, etc.
+    """
+    conn = get_connection()
+    try:
+        # Ensure the table exists
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sold_transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                parish TEXT NOT NULL,
+                lat REAL NOT NULL, lon REAL NOT NULL,
+                price_amount REAL NOT NULL,
+                price_per_sqm REAL NOT NULL,
+                size_sqm REAL NOT NULL,
+                rooms INTEGER, property_type TEXT,
+                sold_date TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+
+        # Get midpoint of the date range
+        from datetime import datetime as dt
+        d_start = dt.strptime(start_date, "%Y-%m-%d")
+        d_end = dt.strptime(end_date, "%Y-%m-%d")
+        d_mid = d_start + (d_end - d_start) / 2
+        mid_date = d_mid.strftime("%Y-%m-%d")
+
+        # Get per-parish stats for early and late halves
+        rows = conn.execute("""
+            SELECT
+                parish,
+                AVG(CASE WHEN sold_date < ? THEN price_per_sqm END) AS avg_early,
+                COUNT(CASE WHEN sold_date < ? THEN 1 END) AS count_early,
+                AVG(CASE WHEN sold_date >= ? THEN price_per_sqm END) AS avg_late,
+                COUNT(CASE WHEN sold_date >= ? THEN 1 END) AS count_late,
+                COUNT(*) AS total_count,
+                AVG(price_per_sqm) AS avg_price_per_sqm
+            FROM sold_transactions
+            WHERE sold_date >= ? AND sold_date <= ?
+            GROUP BY parish
+            HAVING count_early > 0 AND count_late > 0
+        """, (mid_date, mid_date, mid_date, mid_date, start_date, end_date)).fetchall()
+
+        results = []
+        for r in rows:
+            avg_early = r["avg_early"]
+            avg_late = r["avg_late"]
+            pct_change = ((avg_late - avg_early) / avg_early) * 100 if avg_early else 0
+            results.append({
+                "parish": r["parish"],
+                "avg_early": round(avg_early, 2) if avg_early else None,
+                "avg_late": round(avg_late, 2) if avg_late else None,
+                "pct_change": round(pct_change, 1),
+                "count": r["total_count"],
+                "count_early": r["count_early"],
+                "count_late": r["count_late"],
+                "avg_price_per_sqm": round(r["avg_price_per_sqm"], 2),
+            })
+
+        return results
+    finally:
+        conn.close()
+
+
+def get_sold_points(
+    start_date: str,
+    end_date: str,
+) -> List[dict]:
+    """Return individual sold transaction points within a date range."""
+    conn = get_connection()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sold_transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                parish TEXT NOT NULL,
+                lat REAL NOT NULL, lon REAL NOT NULL,
+                price_amount REAL NOT NULL,
+                price_per_sqm REAL NOT NULL,
+                size_sqm REAL NOT NULL,
+                rooms INTEGER, property_type TEXT,
+                sold_date TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+
+        rows = conn.execute("""
+            SELECT parish, lat, lon, price_amount, price_per_sqm,
+                   size_sqm, rooms, property_type, sold_date
+            FROM sold_transactions
+            WHERE sold_date >= ? AND sold_date <= ?
+            ORDER BY sold_date
+        """, (start_date, end_date)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     init_db()
