@@ -14,6 +14,7 @@ export default function MapLegend({
 }) {
   const { t } = useLanguage()
   const [collapsed, setCollapsed] = useState(false)
+  const [baseMapExpanded, setBaseMapExpanded] = useState(false)
   const [expandedGroups, setExpandedGroups] = useState({})
 
   const SECURITY_LAYERS = [
@@ -63,30 +64,40 @@ export default function MapLegend({
   return (
     <div className="absolute bottom-6 right-3 z-[1000] bg-white rounded-lg shadow-md p-3 text-xs min-w-[220px] max-h-[80vh] overflow-y-auto">
       <div
-        className="font-semibold text-gray-700 flex items-center justify-between cursor-pointer select-none"
+        className="font-semibold text-white flex items-center justify-between cursor-pointer select-none bg-gray-600 -m-3 mb-0 px-3 py-2 rounded-t-lg"
         onClick={() => setCollapsed(c => !c)}
       >
         <span>{t.mapLayers}</span>
-        <span className="text-gray-400 text-[10px] ml-2">{collapsed ? '▼' : '▲'}</span>
+        <span className="text-gray-300 text-[10px] ml-2">{collapsed ? '▼' : '▲'}</span>
       </div>
 
       {collapsed ? null : <>
 
       {/* Base map selector */}
       <div className="mt-2 mb-2 pb-2 border-b border-gray-100">
-        <div className="text-gray-600 font-medium mb-1">{t.baseMap}</div>
-        {Object.entries(BASE_MAPS).map(([key, map]) => (
-          <label key={key} className="flex items-center gap-2 cursor-pointer select-none py-0.5">
-            <input
-              type="radio"
-              name="baseMap"
-              checked={baseMap === key}
-              onChange={() => onChangeBaseMap(key)}
-              className="cursor-pointer"
-            />
-            <span className="text-gray-500">{map.name}</span>
-          </label>
-        ))}
+        <div
+          className="flex items-center justify-between cursor-pointer select-none"
+          onClick={() => setBaseMapExpanded(v => !v)}
+        >
+          <span className="text-gray-700 font-medium">{t.baseMap}</span>
+          <span className="text-gray-400 text-[10px] ml-2">{baseMapExpanded ? '▲' : '▼'}</span>
+        </div>
+        {baseMapExpanded && (
+          <div className="mt-1">
+            {Object.entries(BASE_MAPS).map(([key, map]) => (
+              <label key={key} className="flex items-center gap-2 cursor-pointer select-none py-0.5">
+                <input
+                  type="radio"
+                  name="baseMap"
+                  checked={baseMap === key}
+                  onChange={() => onChangeBaseMap(key)}
+                  className="cursor-pointer"
+                />
+                <span className="text-gray-500">{map.name}</span>
+              </label>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Listings key */}
