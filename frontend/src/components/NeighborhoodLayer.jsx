@@ -1,5 +1,4 @@
 import { GeoJSON } from 'react-leaflet'
-import { GROUPS, PARISH_TO_GROUP } from '../neighborhoodGroups'
 
 export default function NeighborhoodLayer({
   showNeighborhoods,
@@ -7,6 +6,8 @@ export default function NeighborhoodLayer({
   visibleGroups,
   hiddenParishes,   // Set<string> of individually hidden parish names
   neighborhoods,    // neighborhood stats rows (for price info)
+  groups,           // dynamic municipality-based groups
+  parishToGroup,    // parish name → group key lookup
 }) {
   if (!showNeighborhoods || !parishFeatures?.length) return null
 
@@ -14,7 +15,7 @@ export default function NeighborhoodLayer({
 
   const visibleFeatures = parishFeatures.filter(f => {
     const name = f.properties.name
-    const group = PARISH_TO_GROUP[name]
+    const group = parishToGroup?.[name]
     if (!group || !visibleGroups[group]) return false
     if (hiddenParishes?.has(name)) return false
     return true
@@ -25,8 +26,8 @@ export default function NeighborhoodLayer({
   const geojson = { type: 'FeatureCollection', features: visibleFeatures }
 
   const style = (feature) => {
-    const group = PARISH_TO_GROUP[feature.properties.name]
-    const g = GROUPS[group] ?? {}
+    const group = parishToGroup?.[feature.properties.name]
+    const g = groups?.[group] ?? {}
     return {
       color: g.color ?? '#6b7280',
       fillColor: g.fillColor ?? g.color ?? '#6b7280',
@@ -37,9 +38,7 @@ export default function NeighborhoodLayer({
   }
 
   const onEachFeature = (feature, layer) => {
-    const { name } = feature.properties
-    const groupKey = PARISH_TO_GROUP[name]
-    const groupLabel = GROUPS[groupKey]?.label ?? ''
+    const { name, municipality } = feature.properties
     const s = statsMap[name]
     const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
 
@@ -62,7 +61,7 @@ export default function NeighborhoodLayer({
 
     layer.bindPopup(`
       <div style="font-size:13px;font-weight:600">${name}</div>
-      <div style="font-size:11px;color:#6b7280">${groupLabel}</div>
+      <div style="font-size:11px;color:#6b7280">${municipality ?? ''}</div>
       ${priceHtml}
     `, { maxWidth: 240 })
 

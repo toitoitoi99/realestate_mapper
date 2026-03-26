@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { useLanguage } from '../LanguageContext'
 import { CATEGORIES, getCategory } from '../projectCategories'
 import { SECURITY_LAYER_CONFIG } from './SecurityLayer'
-import { GROUPS } from '../neighborhoodGroups'
 import { BASE_MAPS } from '../baseMaps'
 
 export default function MapLegend({
@@ -10,7 +9,7 @@ export default function MapLegend({
   showProjects, onToggleProjects, visibleCategories, onToggleCategory, projects,
   showSecurity, onToggleSecurity, securityPois,
   showNeighborhoods, onToggleNeighborhoods, visibleGroups, onToggleGroup,
-  hiddenParishes, onToggleParish,
+  neighborhoodGroups, hiddenParishes, onToggleParish,
   showSoldTrends, onToggleSoldTrends, soldDateRange, onSoldDateRangeChange, soldTrendsData,
 }) {
   const { t } = useLanguage()
@@ -44,7 +43,7 @@ export default function MapLegend({
 
   // Determine group checkbox state: all checked, none checked, or indeterminate
   const groupCheckState = (key) => {
-    const parishes = GROUPS[key].neighborhoods
+    const parishes = neighborhoodGroups[key].neighborhoods
     const hidden = parishes.filter(n => hiddenParishes?.has(n))
     if (hidden.length === 0) return 'all'
     if (hidden.length === parishes.length) return 'none'
@@ -54,7 +53,7 @@ export default function MapLegend({
   // Toggle all parishes in a group
   const toggleGroupParishes = (key) => {
     const state = groupCheckState(key)
-    const parishes = GROUPS[key].neighborhoods
+    const parishes = neighborhoodGroups[key].neighborhoods
     parishes.forEach(name => {
       const isHidden = hiddenParishes?.has(name)
       if (state === 'all' && !isHidden) onToggleParish(name)       // hide all
@@ -122,7 +121,7 @@ export default function MapLegend({
 
       {showNeighborhoods && (
         <div className="pl-1 mt-1 space-y-1 border-t border-gray-100 pt-2 mb-2">
-          {Object.entries(GROUPS).map(([key, group]) => {
+          {Object.entries(neighborhoodGroups ?? {}).map(([key, group]) => {
             const checkState = groupCheckState(key)
             const isExpanded = expandedGroups[key]
             return (

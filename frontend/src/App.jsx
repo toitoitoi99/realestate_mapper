@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { fetchAreas, fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes, fetchSoldTrends } from './api'
 import { useFilters } from './useFilters'
 import { CATEGORIES } from './projectCategories'
 import { DEFAULT_BASE_MAP } from './baseMaps'
+import { buildGroups } from './neighborhoodGroups'
 import StatsBar from './components/StatsBar'
 import Sidebar from './components/Sidebar'
 import Map from './components/Map'
@@ -23,9 +24,7 @@ export default function App() {
     Object.fromEntries(Object.entries(CATEGORIES).map(([k, v]) => [k, v.defaultVisible]))
   )
   const [showNeighborhoods, setShowNeighborhoods] = useState(false)
-  const [visibleGroups, setVisibleGroups] = useState({
-    historic: true, riverside: true, uptown: true, residential: true, outer: true,
-  })
+  const [visibleGroups, setVisibleGroups] = useState({})
   const [parishFeatures, setParishFeatures] = useState([])
   const [hiddenParishes, setHiddenParishes] = useState(new Set())
   const [showSoldTrends, setShowSoldTrends] = useState(false)
@@ -55,8 +54,19 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    fetchParishes(currentArea).then(d => setParishFeatures(d.features ?? [])).catch(console.error)
+    fetchParishes(currentArea).then(d => {
+      const features = d.features ?? []
+      setParishFeatures(features)
+      // Reset visibility: all groups visible, no hidden parishes
+      const { groups } = buildGroups(features)
+      setVisibleGroups(Object.fromEntries(Object.keys(groups).map(k => [k, true])))
+      setHiddenParishes(new Set())
+    }).catch(console.error)
   }, [currentArea])
+
+  const { groups: neighborhoodGroups, parishToGroup } = useMemo(
+    () => buildGroups(parishFeatures), [parishFeatures]
+  )
 
   useEffect(() => {
     if (!showSoldTrends) return
@@ -149,6 +159,8 @@ export default function App() {
           onToggleNeighborhoods={() => setShowNeighborhoods(p => !p)}
           visibleGroups={visibleGroups}
           onToggleGroup={toggleGroup}
+          neighborhoodGroups={neighborhoodGroups}
+          parishToGroup={parishToGroup}
           parishFeatures={parishFeatures}
           hiddenParishes={hiddenParishes}
           onToggleParish={toggleParish}
