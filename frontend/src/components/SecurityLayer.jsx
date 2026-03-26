@@ -1,6 +1,5 @@
 import { CircleMarker, Popup } from 'react-leaflet'
 import { useLanguage } from '../LanguageContext'
-import { PARISH_TO_GROUP } from '../neighborhoodGroups'
 
 const LAYER_CONFIG = {
   police_psp: {
@@ -22,7 +21,7 @@ const LAYER_CONFIG = {
 
 export const SECURITY_LAYER_CONFIG = LAYER_CONFIG
 
-export default function SecurityLayer({ pois, visibleLayers, showNeighborhoods, visibleGroups, hiddenParishes }) {
+export default function SecurityLayer({ pois, visibleLayers, showNeighborhoods, visibleGroups, hiddenParishes, parishToGroup }) {
   const { t } = useLanguage()
 
   const LAYER_LABELS = {
@@ -36,7 +35,7 @@ export default function SecurityLayer({ pois, visibleLayers, showNeighborhoods, 
     if (!visibleLayers[poi.layer]) return null
 
     if (showNeighborhoods && poi.parish) {
-      const group = PARISH_TO_GROUP[poi.parish]
+      const group = parishToGroup?.[poi.parish]
       if (!group || !visibleGroups[group]) return null
       if (hiddenParishes?.has(poi.parish)) return null
     }

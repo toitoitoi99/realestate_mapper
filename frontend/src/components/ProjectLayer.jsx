@@ -4,7 +4,6 @@ import L from 'leaflet'
 import 'leaflet.heat'
 import { useLanguage } from '../LanguageContext'
 import { CATEGORIES, getCategory } from '../projectCategories'
-import { PARISH_TO_GROUP } from '../neighborhoodGroups'
 
 const HEATMAP_ZOOM_THRESHOLD = 15
 
@@ -75,7 +74,7 @@ function ZoomTracker({ onZoomChange }) {
 
 export default function ProjectLayer({
   projects, visibleCategories,
-  showNeighborhoods, visibleGroups, hiddenParishes,
+  showNeighborhoods, visibleGroups, hiddenParishes, parishToGroup,
 }) {
   const { t, translateTerm } = useLanguage()
   const [zoom, setZoom] = useState(10)
@@ -89,7 +88,7 @@ export default function ProjectLayer({
       const catKey = getCategory(p.operation)
       if (!visibleCategories[catKey]) return false
       if (showNeighborhoods && p.parish) {
-        const group = PARISH_TO_GROUP[p.parish]
+        const group = parishToGroup?.[p.parish]
         if (!group || !visibleGroups[group]) return false
         if (hiddenParishes?.has(p.parish)) return false
       }

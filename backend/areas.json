@@ -20,7 +20,7 @@
       "sale": "https://www.idealista.pt/comprar-casas/area-metropolitana-de-lisboa/",
       "rent": "https://www.idealista.pt/arrendar-casas/area-metropolitana-de-lisboa/"
     },
-    "parishes_geojson": "lisbon_parishes.geojson",
+    "parishes_geojson": "aml_parishes.geojson",
     "ine_geocod": "1A01106",
     "has_projects": true,
     "has_security": true
@@ -33,7 +33,7 @@
       "sale": "https://www.idealista.pt/comprar-casas/porto/",
       "rent": "https://www.idealista.pt/arrendar-casas/porto/"
     },
-    "parishes_geojson": null,
+    "parishes_geojson": "porto_parishes.geojson",
     "ine_geocod": null,
     "has_projects": false,
     "has_security": false
@@ -46,7 +46,7 @@
       "sale": "https://www.idealista.pt/comprar-casas/faro-distrito/",
       "rent": "https://www.idealista.pt/arrendar-casas/faro-distrito/"
     },
-    "parishes_geojson": null,
+    "parishes_geojson": "algarve_parishes.geojson",
     "ine_geocod": null,
     "has_projects": false,
     "has_security": false

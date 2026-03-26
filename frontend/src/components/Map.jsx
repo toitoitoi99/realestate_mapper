@@ -9,7 +9,6 @@ import MapLegend from './MapLegend'
 import AddressSearch from './AddressSearch'
 import ChatPanel from './ChatPanel'
 import SoldTrendsLayer from './SoldTrendsLayer'
-import { PARISH_TO_GROUP } from '../neighborhoodGroups'
 import { BASE_MAPS } from '../baseMaps'
 import RarityBadge from './RarityBadge'
 
@@ -65,6 +64,7 @@ export default function Map({
   visibleCategories, onToggleCategory,
   securityPois, showSecurity, onToggleSecurity,
   showNeighborhoods, onToggleNeighborhoods, visibleGroups, onToggleGroup,
+  neighborhoodGroups, parishToGroup,
   parishFeatures, hiddenParishes, onToggleParish,
   showSoldTrends, onToggleSoldTrends, soldTrendsData, soldDateRange, onSoldDateRangeChange,
 }) {
@@ -73,7 +73,7 @@ export default function Map({
 
   const isParishVisible = (name) => {
     if (!showNeighborhoods || !name) return true
-    const group = PARISH_TO_GROUP[name]
+    const group = parishToGroup?.[name]
     if (!group || !visibleGroups[group]) return false
     if (hiddenParishes?.has(name)) return false
     return true
@@ -102,6 +102,8 @@ export default function Map({
           visibleGroups={visibleGroups}
           hiddenParishes={hiddenParishes}
           neighborhoods={neighborhoods}
+          groups={neighborhoodGroups}
+          parishToGroup={parishToGroup}
         />
 
         {/* Listing markers — building outlines when available, dots as fallback */}
@@ -175,6 +177,7 @@ export default function Map({
             showNeighborhoods={showNeighborhoods}
             visibleGroups={visibleGroups}
             hiddenParishes={hiddenParishes}
+            parishToGroup={parishToGroup}
           />
         )}
 
@@ -186,6 +189,7 @@ export default function Map({
             showNeighborhoods={showNeighborhoods}
             visibleGroups={visibleGroups}
             hiddenParishes={hiddenParishes}
+            parishToGroup={parishToGroup}
           />
         )}
 
@@ -218,6 +222,7 @@ export default function Map({
         onToggleNeighborhoods={onToggleNeighborhoods}
         visibleGroups={visibleGroups}
         onToggleGroup={onToggleGroup}
+        neighborhoodGroups={neighborhoodGroups}
         hiddenParishes={hiddenParishes}
         onToggleParish={onToggleParish}
         showSoldTrends={showSoldTrends}
