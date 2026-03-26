@@ -10,7 +10,7 @@ import math
 import sqlite3
 import logging
 import statistics
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List
 
@@ -240,6 +240,18 @@ def init_db():
             UNIQUE(period_label, geocod, category)
         );
         CREATE INDEX IF NOT EXISTS idx_ine_stats_geocod ON ine_stats(geocod, category);
+
+        CREATE TABLE IF NOT EXISTS amenity_ratings (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            lat_key         REAL NOT NULL,
+            lon_key         REAL NOT NULL,
+            overall_score   REAL NOT NULL,
+            classification  TEXT NOT NULL,
+            categories_json TEXT NOT NULL,
+            fetched_at      TEXT NOT NULL,
+            UNIQUE(lat_key, lon_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_amenity_ratings_latlon ON amenity_ratings(lat_key, lon_key);
     """)
 
     conn.close()
@@ -1132,6 +1144,58 @@ def get_sold_points(
             ORDER BY sold_date
         """, (start_date, end_date)).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+# ── Amenity ratings cache ────────────────────────────────────────────────────
+
+def get_cached_amenity_rating(lat_key: float, lon_key: float) -> Optional[dict]:
+    """Return cached rating or None if not found / expired (>30 days)."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT overall_score, classification, categories_json, fetched_at "
+            "FROM amenity_ratings WHERE lat_key=? AND lon_key=?",
+            (lat_key, lon_key),
+        ).fetchone()
+        if not row:
+            return None
+        fetched = datetime.fromisoformat(row["fetched_at"])
+        if datetime.utcnow() - fetched > timedelta(days=30):
+            conn.execute(
+                "DELETE FROM amenity_ratings WHERE lat_key=? AND lon_key=?",
+                (lat_key, lon_key),
+            )
+            conn.commit()
+            return None
+        return {
+            "overall_score": row["overall_score"],
+            "classification": row["classification"],
+            "categories": json.loads(row["categories_json"]),
+        }
+    finally:
+        conn.close()
+
+
+def cache_amenity_rating(lat_key: float, lon_key: float, rating: dict) -> None:
+    """Insert or replace cached rating."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO amenity_ratings "
+            "(lat_key, lon_key, overall_score, classification, categories_json, fetched_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                lat_key,
+                lon_key,
+                rating["overall_score"],
+                rating["classification"],
+                json.dumps(rating["categories"]),
+                datetime.utcnow().isoformat(),
+            ),
+        )
+        conn.commit()
     finally:
         conn.close()
 

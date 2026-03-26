@@ -69,6 +69,12 @@ export async function fetchSoldTrends(start, end) {
   return res.json()
 }
 
+export async function fetchAmenityRating(lat, lon) {
+  const params = new URLSearchParams({ lat, lon })
+  const res = await fetch(`${BASE}/amenity-rating?${params}`)
+  return res.json()
+}
+
 export async function sendChatMessage(message, history = []) {
   const res = await fetch(`${BASE}/chat`, {
     method: 'POST',
