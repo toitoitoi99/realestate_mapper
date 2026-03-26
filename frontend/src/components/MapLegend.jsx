@@ -63,7 +63,8 @@ export default function MapLegend({
   }
 
   return (
-    <div className="absolute bottom-6 right-3 z-[1000] bg-white rounded-lg shadow-md p-3 text-xs min-w-[220px] max-h-[80vh] overflow-y-auto">
+    <div className="absolute bottom-6 right-3 z-[1000] bg-white rounded-lg shadow-md p-3 text-xs min-w-[220px] max-h-[60vh] overflow-y-auto"
+         onWheel={e => e.stopPropagation()}>
       <div
         className="font-semibold text-white flex items-center justify-between cursor-pointer select-none bg-gray-600 -m-3 mb-0 px-3 py-2 rounded-t-lg"
         onClick={() => setCollapsed(c => !c)}

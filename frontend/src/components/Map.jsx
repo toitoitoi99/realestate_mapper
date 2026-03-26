@@ -84,7 +84,7 @@ export default function Map({
 
   return (
     <div style={{ flex: 1, position: 'relative', isolation: 'isolate' }}>
-      <MapContainer center={areaConfig?.center || DEFAULT_CENTRE} zoom={areaConfig?.zoom || DEFAULT_ZOOM} style={{ height: '100%', width: '100%', zIndex: 0 }}>
+      <MapContainer center={areaConfig?.center || DEFAULT_CENTRE} zoom={areaConfig?.zoom || DEFAULT_ZOOM} scrollWheelZoom={true} style={{ height: '100%', width: '100%', zIndex: 0 }}>
         <TileLayer
           key={baseMap}
           attribution={BASE_MAPS[baseMap].attribution}
