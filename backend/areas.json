@@ -1,0 +1,54 @@
+{
+  "lisbon": {
+    "name": "Lisboa",
+    "center": [38.72, -9.14],
+    "zoom": 12,
+    "idealista_urls": {
+      "sale": "https://www.idealista.pt/comprar-casas/lisboa/",
+      "rent": "https://www.idealista.pt/arrendar-casas/lisboa/"
+    },
+    "parishes_geojson": "lisbon_parishes.geojson",
+    "ine_geocod": "1A01106",
+    "has_projects": true,
+    "has_security": true
+  },
+  "aml": {
+    "name": "Área Metropolitana de Lisboa",
+    "center": [38.68, -9.10],
+    "zoom": 10,
+    "idealista_urls": {
+      "sale": "https://www.idealista.pt/comprar-casas/area-metropolitana-de-lisboa/",
+      "rent": "https://www.idealista.pt/arrendar-casas/area-metropolitana-de-lisboa/"
+    },
+    "parishes_geojson": "lisbon_parishes.geojson",
+    "ine_geocod": "1A01106",
+    "has_projects": true,
+    "has_security": true
+  },
+  "porto": {
+    "name": "Porto",
+    "center": [41.15, -8.61],
+    "zoom": 12,
+    "idealista_urls": {
+      "sale": "https://www.idealista.pt/comprar-casas/porto/",
+      "rent": "https://www.idealista.pt/arrendar-casas/porto/"
+    },
+    "parishes_geojson": null,
+    "ine_geocod": null,
+    "has_projects": false,
+    "has_security": false
+  },
+  "algarve": {
+    "name": "Algarve",
+    "center": [37.08, -7.93],
+    "zoom": 10,
+    "idealista_urls": {
+      "sale": "https://www.idealista.pt/comprar-casas/faro-distrito/",
+      "rent": "https://www.idealista.pt/arrendar-casas/faro-distrito/"
+    },
+    "parishes_geojson": null,
+    "ine_geocod": null,
+    "has_projects": false,
+    "has_security": false
+  }
+}

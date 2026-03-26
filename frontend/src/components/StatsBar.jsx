@@ -1,6 +1,6 @@
 import { useLanguage } from '../LanguageContext'
 
-export default function StatsBar({ stats, ineStats, onScrape, scraping }) {
+export default function StatsBar({ stats, ineStats, onScrape, scraping, areas, currentArea, onChangeArea }) {
   const { lang, toggle, t } = useLanguage()
   if (!stats) return null
 
@@ -9,6 +9,17 @@ export default function StatsBar({ stats, ineStats, onScrape, scraping }) {
   return (
     <div className="flex items-center gap-6 px-4 py-2 bg-white border-b border-gray-200 text-sm shrink-0">
       <span className="font-semibold text-gray-800">🏠 {t.appTitle}</span>
+      {areas && Object.keys(areas).length > 0 && (
+        <select
+          value={currentArea}
+          onChange={e => onChangeArea(e.target.value)}
+          className="px-2 py-1 text-xs border border-gray-300 rounded bg-white text-gray-700 cursor-pointer"
+        >
+          {Object.entries(areas).map(([key, cfg]) => (
+            <option key={key} value={key}>{cfg.name}</option>
+          ))}
+        </select>
+      )}
       <div className="flex gap-4 text-gray-600">
         <span><b className="text-gray-900">{fmt(stats.total_listings)}</b> {t.listings}</span>
         <span><b className="text-gray-900">€{fmt(stats.avg_price_eur)}</b> {t.avgAsk}</span>

@@ -1,5 +1,10 @@
 const BASE = '/api'
 
+export async function fetchAreas() {
+  const res = await fetch(`${BASE}/areas`)
+  return res.json()
+}
+
 export async function fetchStats() {
   const res = await fetch(`${BASE}/stats`)
   return res.json()
@@ -50,8 +55,9 @@ export async function fetchSecurity() {
   return res.json()
 }
 
-export async function fetchParishes() {
-  const res = await fetch(`${BASE}/parishes`)
+export async function fetchParishes(area = null) {
+  const params = area ? `?area=${encodeURIComponent(area)}` : ''
+  const res = await fetch(`${BASE}/parishes${params}`)
   return res.json()
 }
 
