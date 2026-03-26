@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useLanguage } from '../LanguageContext'
 import RarityBadge from './RarityBadge'
+import AmenityRating from './AmenityRating'
 
 export default function ListingDetail({ listing, onBack }) {
   const { t } = useLanguage()
@@ -128,6 +129,9 @@ export default function ListingDetail({ listing, onBack }) {
               ))}
             </div>
           )}
+
+          {/* Amenity Rating */}
+          <AmenityRating lat={listing.lat} lon={listing.lon} />
 
           {/* Description */}
           {listing.description && (

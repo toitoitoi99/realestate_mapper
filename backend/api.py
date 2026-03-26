@@ -19,6 +19,7 @@ import json
 import logging
 import threading
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import tornado.ioloop
@@ -36,6 +37,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 PORT = 8000
+_executor = ThreadPoolExecutor(max_workers=4)
 
 # ── Area config ──────────────────────────────────────────────────────────────
 
@@ -272,6 +274,23 @@ class SoldTrendsHandler(BaseHandler):
         })
 
 
+class AmenityRatingHandler(BaseHandler):
+    """GET /api/amenity-rating?lat=X&lon=Y — neighborhood amenity score"""
+
+    async def get(self):
+        lat = self.get_float_arg("lat")
+        lon = self.get_float_arg("lon")
+        if lat is None or lon is None:
+            self.write_error_json("lat and lon are required", 400)
+            return
+
+        from amenity_rating import get_amenity_rating
+        rating = await tornado.ioloop.IOLoop.current().run_in_executor(
+            _executor, get_amenity_rating, lat, lon
+        )
+        self.write_json(rating)
+
+
 class AreasHandler(BaseHandler):
     """GET /api/areas — available geographic areas"""
 
@@ -426,6 +445,7 @@ def make_app() -> tornado.web.Application:
             (r"/api/ine-stats",             IneStatsHandler),
             (r"/api/stats",                 StatsHandler),
             (r"/api/sold-trends",           SoldTrendsHandler),
+            (r"/api/amenity-rating",        AmenityRatingHandler),
             (r"/api/areas",                 AreasHandler),
             (r"/api/parishes",              ParishesHandler),
             (r"/api/chat",                  ChatHandler),

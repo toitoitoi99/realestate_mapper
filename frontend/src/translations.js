@@ -149,6 +149,18 @@ export const translations = {
     scrapedAt:       'Scraped',
     viewDetails:     'Details →',
     noImages:        'No images',
+
+    // AmenityRating
+    amenityRating:     'Neighborhood Rating',
+    classA:            'Class A',
+    classB:            'Class B',
+    classC:            'Class C',
+    green_spaces:      'Green Spaces',
+    convenience:       'Convenience',
+    education:         'Education',
+    transportation:    'Transit',
+    healthcare:        'Healthcare',
+    amenityUnavailable: 'Amenity data unavailable',
   },
 
   pt: {
@@ -261,5 +273,17 @@ export const translations = {
     scrapedAt:       'Recolhido',
     viewDetails:     'Detalhes →',
     noImages:        'Sem imagens',
+
+    // AmenityRating
+    amenityRating:     'Classificação do Bairro',
+    classA:            'Classe A',
+    classB:            'Classe B',
+    classC:            'Classe C',
+    green_spaces:      'Espaços Verdes',
+    convenience:       'Conveniência',
+    education:         'Educação',
+    transportation:    'Transportes',
+    healthcare:        'Saúde',
+    amenityUnavailable: 'Dados de amenidades indisponíveis',
   },
 }
