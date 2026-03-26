@@ -16,7 +16,7 @@ export default function Sidebar({
   const toggleBtn = (
     <button
       onClick={() => setCollapsed(c => !c)}
-      className="absolute top-3 -right-3 z-10 w-6 h-6 rounded-full bg-white border border-gray-300 shadow flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-50 cursor-pointer text-xs"
+      className="absolute top-1/2 -translate-y-1/2 -right-4 z-10 w-8 h-12 rounded-r-lg bg-white border border-l-0 border-gray-300 shadow-md flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 cursor-pointer text-sm transition-colors"
       title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
     >
       {collapsed ? '\u25B6' : '\u25C0'}
@@ -25,7 +25,7 @@ export default function Sidebar({
 
   if (collapsed) {
     return (
-      <div className="relative shrink-0 w-10 bg-white border-r border-gray-200 flex flex-col items-center pt-10">
+      <div className="relative shrink-0 w-10 bg-white border-r border-gray-200 flex flex-col items-center">
         {toggleBtn}
       </div>
     )
