@@ -173,7 +173,7 @@ def fetch_buildings_for_listings(limit: Optional[int] = None):
 
     # Get listings that need building footprints
     query = """
-        SELECT id, lat, lon FROM listings
+        SELECT id, lat, lon FROM sales
         WHERE lat IS NOT NULL AND lon IS NOT NULL
           AND (building_geojson IS NULL OR building_geojson = '')
         ORDER BY id
@@ -226,7 +226,7 @@ out body;
             geojson = _find_building_for_point(l["lat"], l["lon"], polygons)
             if geojson:
                 conn.execute(
-                    "UPDATE listings SET building_geojson=? WHERE id=?",
+                    "UPDATE sales SET building_geojson=? WHERE id=?",
                     (json.dumps(geojson), l["id"])
                 )
                 matched += 1

@@ -1,6 +1,8 @@
 """
-SQLite database layer for the Lisbon Real Estate app.
+SQLite database layer for the Lisboa Real Estate app.
 Handles schema creation and all CRUD operations.
+
+Listings are stored in two separate tables: `sales` and `rentals`.
 """
 
 import json
@@ -16,7 +18,7 @@ from models import Listing, Neighborhood, ScrapeRun
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).parent / "data" / "lisbon_realestate.db"
+DB_PATH = Path(__file__).parent / "data" / "lisboa_realestate.db"
 
 
 def get_connection() -> sqlite3.Connection:
@@ -28,119 +30,188 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+_LISTING_COLS = """
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    source          TEXT NOT NULL,
+    source_id       TEXT NOT NULL,
+    url             TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'active',
+    price_amount    REAL,
+    price_per_sqm   REAL,
+    size_sqm        REAL,
+    rooms           INTEGER,
+    bedrooms        INTEGER,
+    bathrooms       INTEGER,
+    floor           TEXT,
+    property_type   TEXT,
+    condition       TEXT,
+    title           TEXT,
+    address         TEXT,
+    postal_code     TEXT,
+    neighborhood    TEXT,
+    parish          TEXT,
+    district        TEXT,
+    city            TEXT,
+    lat             REAL,
+    lon             REAL,
+    images          TEXT,
+    hash_dedupe     TEXT,
+    description     TEXT,
+    scraped_at      TEXT NOT NULL,
+"""
+
+
+def _table_for(listing_type):
+    """Return the table name for a listing type."""
+    return "rentals" if listing_type == "rent" else "sales"
+
+
 def init_db():
-    """Create tables if they don't exist."""
+    """Create tables if they don't exist. Migrate old `listings` table if present."""
     conn = get_connection()
-    with conn:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS listings (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                source          TEXT NOT NULL,
-                source_id       TEXT NOT NULL,
-                url             TEXT NOT NULL,
-                price_amount    REAL,
-                price_per_sqm   REAL,
-                size_sqm        REAL,
-                rooms           INTEGER,
-                bedrooms        INTEGER,
-                bathrooms       INTEGER,
-                floor           TEXT,
-                property_type   TEXT,
-                condition       TEXT,
-                title           TEXT,
-                address         TEXT,
-                postal_code     TEXT,
-                neighborhood    TEXT,
-                parish          TEXT,
-                district        TEXT,
-                city            TEXT,
-                lat             REAL,
-                lon             REAL,
-                images          TEXT,
-                hash_dedupe     TEXT,
-                description     TEXT,
-                scraped_at      TEXT NOT NULL,
-                UNIQUE(source, source_id)
-            );
 
-            CREATE INDEX IF NOT EXISTS idx_listings_neighborhood
-                ON listings(neighborhood);
-            CREATE INDEX IF NOT EXISTS idx_listings_source
-                ON listings(source);
-            CREATE INDEX IF NOT EXISTS idx_listings_price_sqm
-                ON listings(price_per_sqm);
-            CREATE INDEX IF NOT EXISTS idx_listings_hash
-                ON listings(hash_dedupe);
-            CREATE INDEX IF NOT EXISTS idx_listings_latlon
-                ON listings(lat, lon);
+    # -- Sales table (includes rarity columns) --------------------------------
+    conn.executescript(f"""
+        CREATE TABLE IF NOT EXISTS sales (
+            {_LISTING_COLS}
+            rarity_score    REAL,
+            rarity_factors  TEXT,
+            building_geojson TEXT,
+            UNIQUE(source, source_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_sales_neighborhood ON sales(neighborhood);
+        CREATE INDEX IF NOT EXISTS idx_sales_source       ON sales(source);
+        CREATE INDEX IF NOT EXISTS idx_sales_price_sqm    ON sales(price_per_sqm);
+        CREATE INDEX IF NOT EXISTS idx_sales_hash         ON sales(hash_dedupe);
+        CREATE INDEX IF NOT EXISTS idx_sales_latlon       ON sales(lat, lon);
+        CREATE INDEX IF NOT EXISTS idx_sales_status       ON sales(status);
+    """)
 
-            CREATE TABLE IF NOT EXISTS neighborhoods (
-                id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-                name                    TEXT NOT NULL,
-                district                TEXT NOT NULL,
-                listing_count           INTEGER DEFAULT 0,
-                avg_price               REAL,
-                median_price            REAL,
-                avg_price_per_sqm       REAL,
-                median_price_per_sqm    REAL,
-                min_price_per_sqm       REAL,
-                max_price_per_sqm       REAL,
-                geometry                TEXT,
-                updated_at              TEXT NOT NULL,
-                UNIQUE(name, district)
-            );
+    # -- Rentals table (no rarity columns) ------------------------------------
+    conn.executescript(f"""
+        CREATE TABLE IF NOT EXISTS rentals (
+            {_LISTING_COLS}
+            UNIQUE(source, source_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_rentals_neighborhood ON rentals(neighborhood);
+        CREATE INDEX IF NOT EXISTS idx_rentals_source       ON rentals(source);
+        CREATE INDEX IF NOT EXISTS idx_rentals_price_sqm    ON rentals(price_per_sqm);
+        CREATE INDEX IF NOT EXISTS idx_rentals_hash         ON rentals(hash_dedupe);
+        CREATE INDEX IF NOT EXISTS idx_rentals_latlon       ON rentals(lat, lon);
+        CREATE INDEX IF NOT EXISTS idx_rentals_status       ON rentals(status);
+    """)
 
-            CREATE TABLE IF NOT EXISTS scrape_runs (
-                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                source              TEXT NOT NULL,
-                started_at          TEXT NOT NULL,
-                finished_at         TEXT,
-                listings_found      INTEGER DEFAULT 0,
-                listings_new        INTEGER DEFAULT 0,
-                listings_updated    INTEGER DEFAULT 0,
-                errors              INTEGER DEFAULT 0,
-                status              TEXT DEFAULT 'running',
-                notes               TEXT
-            );
+    # -- Migrate old `listings` table if it exists ----------------------------
+    has_old = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='listings'"
+    ).fetchone()
+    if has_old:
+        logger.info("[DB] Migrating old `listings` table → `sales` + `rentals`…")
+        # Check which columns exist in old table (some may be from additive migrations)
+        old_cols = {row[1] for row in conn.execute("PRAGMA table_info(listings)").fetchall()}
 
-            CREATE TABLE IF NOT EXISTS construction_projects (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                source_id       TEXT NOT NULL,          -- N_PROCESSO
-                layer           TEXT NOT NULL,          -- 'permit' | 'application'
-                address         TEXT,                   -- MORADA
-                parish          TEXT,                   -- FREGUESIA
-                operation       TEXT,                   -- OP_URBANISTICA
-                subject         TEXT,                   -- ASSUNTO
-                procedure       TEXT,                   -- PROCEDIMENTO
-                typology        TEXT,                   -- TIPOLOGIA
-                date_submitted  TEXT,                   -- DATA_ENTRADA (epoch ms → ISO)
-                permit_number   TEXT,                   -- N_ALVARA (permits only)
-                date_permit     TEXT,                   -- DATA_ALVARA (permits only)
-                permit_type     TEXT,                   -- TIPO_ALVARA (permits only)
-                geometry        TEXT,                   -- GeoJSON geometry string
-                centroid_lat    REAL,
-                centroid_lon    REAL,
-                fetched_at      TEXT NOT NULL,
-                UNIQUE(source_id, layer)
-            );
+        # Common columns present in both new tables
+        shared = [
+            "source", "source_id", "url", "status", "price_amount", "price_per_sqm",
+            "size_sqm", "rooms", "bedrooms", "bathrooms", "floor", "property_type",
+            "condition", "title", "address", "postal_code", "neighborhood", "parish",
+            "district", "city", "lat", "lon", "images", "hash_dedupe", "description",
+            "scraped_at",
+        ]
+        sale_extra = ["rarity_score", "rarity_factors", "building_geojson"]
 
-            CREATE INDEX IF NOT EXISTS idx_projects_layer
-                ON construction_projects(layer);
-            CREATE INDEX IF NOT EXISTS idx_projects_parish
-                ON construction_projects(parish);
-            CREATE INDEX IF NOT EXISTS idx_projects_latlon
-                ON construction_projects(centroid_lat, centroid_lon);
+        # Only copy columns that exist in the old table
+        shared_present = [c for c in shared if c in old_cols]
+        sale_extra_present = [c for c in sale_extra if c in old_cols]
 
-            CREATE INDEX IF NOT EXISTS idx_neighborhoods_district
-                ON neighborhoods(district);
-            CREATE INDEX IF NOT EXISTS idx_scrape_runs_status
-                ON scrape_runs(status);
-            CREATE INDEX IF NOT EXISTS idx_scrape_runs_source
-                ON scrape_runs(source);
+        cols_for_sale = ", ".join(shared_present + sale_extra_present)
+        cols_for_rent = ", ".join(shared_present)
+
+        lt_col = "listing_type" if "listing_type" in old_cols else None
+        if lt_col:
+            sale_where = "COALESCE(listing_type, 'sale') != 'rent'"
+            rent_where = "listing_type = 'rent'"
+        else:
+            sale_where = "1=1"
+            rent_where = "1=0"  # no rentals if column never existed
+
+        conn.execute(f"""
+            INSERT OR IGNORE INTO sales ({cols_for_sale})
+            SELECT {cols_for_sale} FROM listings WHERE {sale_where}
         """)
+        conn.execute(f"""
+            INSERT OR IGNORE INTO rentals ({cols_for_rent})
+            SELECT {cols_for_rent} FROM listings WHERE {rent_where}
+        """)
+        conn.execute("ALTER TABLE listings RENAME TO listings_backup")
+        conn.commit()
 
-    # security_pois table
-    conn.execute("""
+        sale_count = conn.execute("SELECT COUNT(*) as c FROM sales").fetchone()["c"]
+        rent_count = conn.execute("SELECT COUNT(*) as c FROM rentals").fetchone()["c"]
+        logger.info(f"[DB] Migration complete: {sale_count} sales, {rent_count} rentals")
+
+    # -- Other tables ---------------------------------------------------------
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS neighborhoods (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            name                    TEXT NOT NULL,
+            district                TEXT NOT NULL,
+            listing_count           INTEGER DEFAULT 0,
+            avg_price               REAL,
+            median_price            REAL,
+            avg_price_per_sqm       REAL,
+            median_price_per_sqm    REAL,
+            min_price_per_sqm       REAL,
+            max_price_per_sqm       REAL,
+            avg_rent_per_sqm        REAL,
+            median_rent_per_sqm     REAL,
+            avg_sold_price_per_sqm  REAL,
+            count_sold              INTEGER DEFAULT 0,
+            geometry                TEXT,
+            updated_at              TEXT NOT NULL,
+            UNIQUE(name, district)
+        );
+        CREATE INDEX IF NOT EXISTS idx_neighborhoods_district ON neighborhoods(district);
+
+        CREATE TABLE IF NOT EXISTS scrape_runs (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            source              TEXT NOT NULL,
+            started_at          TEXT NOT NULL,
+            finished_at         TEXT,
+            listings_found      INTEGER DEFAULT 0,
+            listings_new        INTEGER DEFAULT 0,
+            listings_updated    INTEGER DEFAULT 0,
+            errors              INTEGER DEFAULT 0,
+            status              TEXT DEFAULT 'running',
+            notes               TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_scrape_runs_status ON scrape_runs(status);
+        CREATE INDEX IF NOT EXISTS idx_scrape_runs_source ON scrape_runs(source);
+
+        CREATE TABLE IF NOT EXISTS construction_projects (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id       TEXT NOT NULL,
+            layer           TEXT NOT NULL,
+            address         TEXT,
+            parish          TEXT,
+            operation       TEXT,
+            subject         TEXT,
+            procedure       TEXT,
+            typology        TEXT,
+            date_submitted  TEXT,
+            permit_number   TEXT,
+            date_permit     TEXT,
+            permit_type     TEXT,
+            geometry        TEXT,
+            centroid_lat    REAL,
+            centroid_lon    REAL,
+            fetched_at      TEXT NOT NULL,
+            UNIQUE(source_id, layer)
+        );
+        CREATE INDEX IF NOT EXISTS idx_projects_layer  ON construction_projects(layer);
+        CREATE INDEX IF NOT EXISTS idx_projects_parish ON construction_projects(parish);
+        CREATE INDEX IF NOT EXISTS idx_projects_latlon ON construction_projects(centroid_lat, centroid_lon);
+
         CREATE TABLE IF NOT EXISTS security_pois (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             source_id   TEXT NOT NULL,
@@ -153,16 +224,9 @@ def init_db():
             lon         REAL NOT NULL,
             fetched_at  TEXT NOT NULL,
             UNIQUE(source_id, layer)
-        )
-    """)
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_security_pois_layer
-            ON security_pois(layer)
-    """)
-    conn.commit()
+        );
+        CREATE INDEX IF NOT EXISTS idx_security_pois_layer ON security_pois(layer);
 
-    # ine_stats table (not in original executescript to keep migrations additive)
-    conn.execute("""
         CREATE TABLE IF NOT EXISTS ine_stats (
             id                   INTEGER PRIMARY KEY AUTOINCREMENT,
             period_label         TEXT NOT NULL,
@@ -174,30 +238,9 @@ def init_db():
             fetched_at           TEXT NOT NULL,
             is_latest            INTEGER DEFAULT 0,
             UNIQUE(period_label, geocod, category)
-        )
+        );
+        CREATE INDEX IF NOT EXISTS idx_ine_stats_geocod ON ine_stats(geocod, category);
     """)
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_ine_stats_geocod
-            ON ine_stats(geocod, category)
-    """)
-    conn.commit()
-
-    # Additive column migrations for existing databases
-    for col in [
-        "ALTER TABLE listings ADD COLUMN listing_type TEXT NOT NULL DEFAULT 'sale'",
-        "ALTER TABLE listings ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
-        "ALTER TABLE neighborhoods ADD COLUMN avg_rent_per_sqm REAL",
-        "ALTER TABLE neighborhoods ADD COLUMN median_rent_per_sqm REAL",
-        "ALTER TABLE neighborhoods ADD COLUMN avg_sold_price_per_sqm REAL",
-        "ALTER TABLE neighborhoods ADD COLUMN count_sold INTEGER DEFAULT 0",
-        "ALTER TABLE listings ADD COLUMN rarity_score REAL",
-        "ALTER TABLE listings ADD COLUMN rarity_factors TEXT",
-        "ALTER TABLE listings ADD COLUMN building_geojson TEXT",
-    ]:
-        try:
-            conn.execute(col); conn.commit()
-        except sqlite3.OperationalError:
-            pass  # column already exists
 
     conn.close()
     logger.info(f"[DB] Initialised at {DB_PATH}")
@@ -205,15 +248,17 @@ def init_db():
 
 # ── Listings ─────────────────────────────────────────────────────────────────
 
-def upsert_listing(listing: Listing) -> tuple[int, bool]:
+def upsert_listing(listing: Listing) -> tuple:
     """
     Insert or update a listing. Returns (id, is_new).
     Natural key: (source, source_id).
+    Routes to the correct table based on listing_type.
     """
+    table = _table_for(getattr(listing, "listing_type", None) or "sale")
     conn = get_connection()
     try:
         row = conn.execute(
-            "SELECT id FROM listings WHERE source=? AND source_id=?",
+            f"SELECT id FROM {table} WHERE source=? AND source_id=?",
             (listing.source, listing.source_id)
         ).fetchone()
 
@@ -221,16 +266,16 @@ def upsert_listing(listing: Listing) -> tuple[int, bool]:
 
         if row:
             with conn:
-                conn.execute("""
-                    UPDATE listings SET
-                        url=?, listing_type=?, status=?, price_amount=?, price_per_sqm=?,
+                conn.execute(f"""
+                    UPDATE {table} SET
+                        url=?, status=?, price_amount=?, price_per_sqm=?,
                         size_sqm=?, rooms=?, bedrooms=?, bathrooms=?, floor=?,
                         property_type=?, condition=?, title=?, address=?, postal_code=?,
                         neighborhood=?, parish=?, district=?, city=?, lat=?, lon=?,
                         images=?, hash_dedupe=?, description=?, scraped_at=?
                     WHERE source=? AND source_id=?
                 """, (
-                    listing.url, listing.listing_type, listing.status,
+                    listing.url, listing.status,
                     listing.price_amount, listing.price_per_sqm,
                     listing.size_sqm, listing.rooms, listing.bedrooms,
                     listing.bathrooms, listing.floor, listing.property_type,
@@ -243,17 +288,17 @@ def upsert_listing(listing: Listing) -> tuple[int, bool]:
             return row["id"], False
         else:
             with conn:
-                cur = conn.execute("""
-                    INSERT INTO listings (
-                        source, source_id, url, listing_type, status,
+                cur = conn.execute(f"""
+                    INSERT INTO {table} (
+                        source, source_id, url, status,
                         price_amount, price_per_sqm, size_sqm, rooms, bedrooms,
                         bathrooms, floor, property_type, condition, title,
                         address, postal_code, neighborhood, parish, district,
                         city, lat, lon, images, hash_dedupe, description, scraped_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     listing.source, listing.source_id, listing.url,
-                    listing.listing_type, listing.status,
+                    listing.status,
                     listing.price_amount, listing.price_per_sqm,
                     listing.size_sqm, listing.rooms, listing.bedrooms,
                     listing.bathrooms, listing.floor, listing.property_type,
@@ -293,6 +338,7 @@ def get_listings(
     limit: int = 500,
     offset: int = 0,
 ) -> List[dict]:
+    table = _table_for(listing_type) if listing_type else None
     conn = get_connection()
     clauses, params = [], []
 
@@ -312,8 +358,6 @@ def get_listings(
         clauses.append("rooms=?"); params.append(rooms)
     if has_coords:
         clauses.append("lat IS NOT NULL AND lon IS NOT NULL")
-    if listing_type is not None:
-        clauses.append("COALESCE(listing_type, 'sale')=?"); params.append(listing_type)
     if sold_after:
         clauses.append("status IN ('sold','reserved') AND scraped_at >= ?"); params.append(sold_after)
     if sold_before:
@@ -342,18 +386,36 @@ def get_listings(
         clauses.append("postal_code=?"); params.append(postal_code)
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-    params += [limit, offset]
 
-    rows = conn.execute(
-        f"SELECT * FROM listings {where} ORDER BY scraped_at DESC LIMIT ? OFFSET ?",
-        params
-    ).fetchall()
+    # Shared columns for union queries (excludes sales-only rarity columns)
+    _shared_cols = (
+        "id, source, source_id, url, status, price_amount, price_per_sqm, "
+        "size_sqm, rooms, bedrooms, bathrooms, floor, property_type, condition, "
+        "title, address, postal_code, neighborhood, parish, district, city, "
+        "lat, lon, images, hash_dedupe, description, scraped_at"
+    )
+
+    if table:
+        # Query a single table — add listing_type to results
+        lt = "rent" if table == "rentals" else "sale"
+        rows = conn.execute(
+            f"SELECT *, '{lt}' as listing_type FROM {table} {where} ORDER BY scraped_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset]
+        ).fetchall()
+    else:
+        # Union both tables using shared columns
+        rows = conn.execute(
+            f"SELECT {_shared_cols}, rarity_score, rarity_factors, building_geojson, 'sale' as listing_type FROM sales {where} "
+            f"UNION ALL "
+            f"SELECT {_shared_cols}, NULL as rarity_score, NULL as rarity_factors, NULL as building_geojson, 'rent' as listing_type FROM rentals {where} "
+            f"ORDER BY scraped_at DESC LIMIT ? OFFSET ?",
+            params + params + [limit, offset]
+        ).fetchall()
+
     conn.close()
     result = []
     for r in rows:
         row = dict(r)
-        if not row.get("listing_type"):
-            row["listing_type"] = "sale"
         if not row.get("status"):
             row["status"] = "active"
         result.append(row)
@@ -363,14 +425,14 @@ def get_listings(
 # ── Neighborhoods ─────────────────────────────────────────────────────────────
 
 def rebuild_neighborhoods():
-    """Recompute neighborhood stats from current listings."""
+    """Recompute neighborhood stats from sales + rentals tables."""
     conn = get_connection()
 
+    # Gather distinct neighborhoods from both tables
     neighborhoods = conn.execute("""
-        SELECT neighborhood, district
-        FROM listings
-        WHERE neighborhood IS NOT NULL
-        GROUP BY neighborhood, district
+        SELECT neighborhood, district FROM sales WHERE neighborhood IS NOT NULL
+        UNION
+        SELECT neighborhood, district FROM rentals WHERE neighborhood IS NOT NULL
     """).fetchall()
 
     updated = 0
@@ -378,35 +440,44 @@ def rebuild_neighborhoods():
         name = n["neighborhood"]
         district = n["district"] or "Lisboa"
 
+        # Sale prices from the sales table
         prices = [
             r["price_amount"] for r in conn.execute(
-                "SELECT price_amount FROM listings WHERE neighborhood=? AND price_amount IS NOT NULL AND COALESCE(listing_type,'sale')='sale'",
+                "SELECT price_amount FROM sales WHERE neighborhood=? AND price_amount IS NOT NULL",
                 (name,)
             ).fetchall()
         ]
         psqm = [
             r["price_per_sqm"] for r in conn.execute(
-                "SELECT price_per_sqm FROM listings WHERE neighborhood=? AND price_per_sqm IS NOT NULL AND COALESCE(listing_type,'sale')='sale'",
+                "SELECT price_per_sqm FROM sales WHERE neighborhood=? AND price_per_sqm IS NOT NULL",
                 (name,)
             ).fetchall()
         ]
+        # Rental prices from the rentals table
         rent_psqm = [
             r["price_per_sqm"] for r in conn.execute(
-                "SELECT price_per_sqm FROM listings WHERE neighborhood=? AND price_per_sqm IS NOT NULL AND listing_type='rent'",
+                "SELECT price_per_sqm FROM rentals WHERE neighborhood=? AND price_per_sqm IS NOT NULL",
                 (name,)
             ).fetchall()
         ]
+        # Sold listings from the sales table
         sold_psqm = [
             r["price_per_sqm"] for r in conn.execute(
-                "SELECT price_per_sqm FROM listings WHERE neighborhood=? AND status='sold' AND COALESCE(listing_type,'sale')='sale' AND price_per_sqm IS NOT NULL",
+                "SELECT price_per_sqm FROM sales WHERE neighborhood=? AND status='sold' AND price_per_sqm IS NOT NULL",
                 (name,)
             ).fetchall()
         ]
         count_sold = len(sold_psqm)
         avg_sold_psqm = (sum(sold_psqm) / count_sold) if count_sold else None
-        count = conn.execute(
-            "SELECT COUNT(*) as c FROM listings WHERE neighborhood=?", (name,)
+
+        # Total count across both tables
+        sale_count = conn.execute(
+            "SELECT COUNT(*) as c FROM sales WHERE neighborhood=?", (name,)
         ).fetchone()["c"]
+        rent_count = conn.execute(
+            "SELECT COUNT(*) as c FROM rentals WHERE neighborhood=?", (name,)
+        ).fetchone()["c"]
+        count = sale_count + rent_count
 
         now = datetime.utcnow().isoformat()
 
@@ -467,34 +538,34 @@ def compute_rarity_scores():
       scarcity       (0.10) – few listings in neighborhood → each is rarer
       prop_type      (0.05) – 1 minus frequency of property_type in neighborhood
       vs_sold        (0.10) – listing priced below neighborhood avg sold price → value rarity
-      new_build_prox (0.05) – new-construction CML permit within ~400m of listing
+      new_build_prox (0.05) – new-construction permit within ~400m of listing
     """
     conn = get_connection()
 
-    # ── Per-neighborhood stats ──────────────────────────────────────────────────
+    # ── Per-neighborhood stats (sales table only) ────────────────────────────────
     nbhd_rows = conn.execute(
-        "SELECT neighborhood FROM listings WHERE neighborhood IS NOT NULL GROUP BY neighborhood"
+        "SELECT neighborhood FROM sales WHERE neighborhood IS NOT NULL GROUP BY neighborhood"
     ).fetchall()
 
     stats = {}
     for row in nbhd_rows:
         name = row["neighborhood"]
 
-        # Price/sqm distribution (sale only, active)
+        # Price/sqm distribution (active sales)
         psqm_vals = [r["price_per_sqm"] for r in conn.execute(
-            "SELECT price_per_sqm FROM listings WHERE neighborhood=? AND price_per_sqm IS NOT NULL AND COALESCE(listing_type,'sale')='sale' AND status='active'",
+            "SELECT price_per_sqm FROM sales WHERE neighborhood=? AND price_per_sqm IS NOT NULL AND status='active'",
             (name,)
         ).fetchall()]
 
         # Size distribution
         size_vals = [r["size_sqm"] for r in conn.execute(
-            "SELECT size_sqm FROM listings WHERE neighborhood=? AND size_sqm IS NOT NULL AND status='active'",
+            "SELECT size_sqm FROM sales WHERE neighborhood=? AND size_sqm IS NOT NULL AND status='active'",
             (name,)
         ).fetchall()]
 
         # Room count distribution
         rooms_rows = conn.execute(
-            "SELECT rooms, COUNT(*) as c FROM listings WHERE neighborhood=? AND rooms IS NOT NULL AND status='active' GROUP BY rooms",
+            "SELECT rooms, COUNT(*) as c FROM sales WHERE neighborhood=? AND rooms IS NOT NULL AND status='active' GROUP BY rooms",
             (name,)
         ).fetchall()
         rooms_dist = {r["rooms"]: r["c"] for r in rooms_rows}
@@ -502,7 +573,7 @@ def compute_rarity_scores():
 
         # Condition distribution
         cond_rows = conn.execute(
-            "SELECT condition, COUNT(*) as c FROM listings WHERE neighborhood=? AND condition IS NOT NULL AND status='active' GROUP BY condition",
+            "SELECT condition, COUNT(*) as c FROM sales WHERE neighborhood=? AND condition IS NOT NULL AND status='active' GROUP BY condition",
             (name,)
         ).fetchall()
         cond_dist = {r["condition"]: r["c"] for r in cond_rows}
@@ -510,7 +581,7 @@ def compute_rarity_scores():
 
         # Property type distribution
         ptype_rows = conn.execute(
-            "SELECT property_type, COUNT(*) as c FROM listings WHERE neighborhood=? AND property_type IS NOT NULL AND status='active' GROUP BY property_type",
+            "SELECT property_type, COUNT(*) as c FROM sales WHERE neighborhood=? AND property_type IS NOT NULL AND status='active' GROUP BY property_type",
             (name,)
         ).fetchall()
         ptype_dist = {r["property_type"]: r["c"] for r in ptype_rows}
@@ -518,7 +589,7 @@ def compute_rarity_scores():
 
         # Active listing count
         active_count = conn.execute(
-            "SELECT COUNT(*) as c FROM listings WHERE neighborhood=? AND status='active'",
+            "SELECT COUNT(*) as c FROM sales WHERE neighborhood=? AND status='active'",
             (name,)
         ).fetchone()["c"]
 
@@ -652,13 +723,13 @@ def compute_rarity_scores():
         "new_build_prox": 0.05,
     }
 
-    # ── Compute and store ────────────────────────────────────────────────────────
-    listings = conn.execute(
-        "SELECT id, neighborhood, price_per_sqm, size_sqm, rooms, condition, property_type, lat, lon, listing_type FROM listings"
+    # ── Compute and store (sales table only) ─────────────────────────────────────
+    sale_rows = conn.execute(
+        "SELECT id, neighborhood, price_per_sqm, size_sqm, rooms, condition, property_type, lat, lon FROM sales"
     ).fetchall()
 
     updated = 0
-    for l in listings:
+    for l in sale_rows:
         nbhd = l["neighborhood"]
         s = stats.get(nbhd)
         if not s:
@@ -671,21 +742,21 @@ def compute_rarity_scores():
             "condition":      round(_condition_score(l["condition"], s["new_frac"]), 3),
             "scarcity":       round(_scarcity_score(s["active_count"]), 3),
             "prop_type":      round(_frequency_rarity(l["property_type"], s["ptype_dist"], s["ptype_total"]), 3),
-            "vs_sold":        round(_vs_sold_score(l["price_per_sqm"], s["avg_sold"], l["listing_type"] or "sale"), 3),
+            "vs_sold":        round(_vs_sold_score(l["price_per_sqm"], s["avg_sold"], "sale"), 3),
             "new_build_prox": round(1.0 if _near_new_build(l["lat"], l["lon"]) else 0.0, 3),
         }
 
         score = round(sum(W[k] * factors[k] for k in W) * 100, 1)
 
         conn.execute(
-            "UPDATE listings SET rarity_score=?, rarity_factors=? WHERE id=?",
+            "UPDATE sales SET rarity_score=?, rarity_factors=? WHERE id=?",
             (score, json.dumps(factors), l["id"])
         )
         updated += 1
 
     conn.commit()
     conn.close()
-    logger.info(f"[DB] Computed rarity scores for {updated} listings")
+    logger.info(f"[DB] Computed rarity scores for {updated} sales listings")
 
 
 def get_neighborhoods(district: Optional[str] = None) -> List[dict]:

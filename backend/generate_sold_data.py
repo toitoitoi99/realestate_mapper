@@ -13,7 +13,7 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).parent / "data" / "lisbon_realestate.db"
+DB_PATH = Path(__file__).parent / "data" / "lisboa_realestate.db"
 
 # Parish center coordinates and base price/sqm (roughly realistic)
 PARISHES = {
