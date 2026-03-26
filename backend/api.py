@@ -1,5 +1,5 @@
 """
-REST API server for the Lisbon Real Estate app.
+REST API server for the Lisboa Real Estate app.
 Built with Tornado (stdlib-compatible, no extra install needed beyond pip).
 
 Endpoints
@@ -114,18 +114,30 @@ class ListingsHandler(BaseHandler):
 
 
 class ListingDetailHandler(BaseHandler):
-    """GET /api/listings/:id"""
+    """GET /api/listings/:id?listing_type=sale|rent"""
 
     def get(self, listing_id: str):
+        listing_type = self.get_argument("listing_type", "sale")
+        table = db._table_for(listing_type)
         conn = db.get_connection()
         row = conn.execute(
-            "SELECT * FROM listings WHERE id=?", (listing_id,)
+            f"SELECT * FROM {table} WHERE id=?", (listing_id,)
         ).fetchone()
+        if not row:
+            # Try the other table as fallback
+            other = "rentals" if table == "sales" else "sales"
+            row = conn.execute(
+                f"SELECT * FROM {other} WHERE id=?", (listing_id,)
+            ).fetchone()
+            if row:
+                listing_type = "rent" if other == "rentals" else "sale"
         conn.close()
         if not row:
             self.write_error_json("Listing not found", 404)
             return
-        self.write_json(dict(row))
+        result = dict(row)
+        result["listing_type"] = listing_type
+        self.write_json(result)
 
 
 class NeighborhoodsHandler(BaseHandler):
@@ -276,15 +288,24 @@ class StatsHandler(BaseHandler):
     def get(self):
         conn = db.get_connection()
 
-        total = conn.execute("SELECT COUNT(*) as c FROM listings").fetchone()["c"]
-        by_source = conn.execute(
-            "SELECT source, COUNT(*) as count FROM listings GROUP BY source"
-        ).fetchall()
+        sales_count = conn.execute("SELECT COUNT(*) as c FROM sales").fetchone()["c"]
+        rentals_count = conn.execute("SELECT COUNT(*) as c FROM rentals").fetchone()["c"]
+        total = sales_count + rentals_count
+
+        # Source breakdown across both tables
+        by_source = {}
+        for table in ("sales", "rentals"):
+            for r in conn.execute(f"SELECT source, COUNT(*) as count FROM {table} GROUP BY source").fetchall():
+                by_source[r["source"]] = by_source.get(r["source"], 0) + r["count"]
+
         avg_price = conn.execute(
-            "SELECT AVG(price_amount) as avg FROM listings WHERE price_amount IS NOT NULL"
+            "SELECT AVG(price_amount) as avg FROM sales WHERE price_amount IS NOT NULL"
         ).fetchone()["avg"]
         avg_psqm = conn.execute(
-            "SELECT AVG(price_per_sqm) as avg FROM listings WHERE price_per_sqm IS NOT NULL"
+            "SELECT AVG(price_per_sqm) as avg FROM sales WHERE price_per_sqm IS NOT NULL"
+        ).fetchone()["avg"]
+        avg_rent = conn.execute(
+            "SELECT AVG(price_amount) as avg FROM rentals WHERE price_amount IS NOT NULL"
         ).fetchone()["avg"]
         neighborhoods = conn.execute(
             "SELECT COUNT(*) as c FROM neighborhoods"
@@ -296,9 +317,12 @@ class StatsHandler(BaseHandler):
 
         self.write_json({
             "total_listings": total,
-            "by_source": {r["source"]: r["count"] for r in by_source},
+            "sales_count": sales_count,
+            "rentals_count": rentals_count,
+            "by_source": by_source,
             "avg_price_eur": round(avg_price, 2) if avg_price else None,
             "avg_price_per_sqm": round(avg_psqm, 2) if avg_psqm else None,
+            "avg_rent_eur": round(avg_rent, 2) if avg_rent else None,
             "neighborhood_count": neighborhoods,
             "last_scrape": last_scrape,
         })

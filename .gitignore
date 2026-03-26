@@ -11,6 +11,9 @@ __pycache__/
 backend/data/lisbon_realestate.db
 backend/data/lisbon_realestate.db-shm
 backend/data/lisbon_realestate.db-wal
+backend/data/lisboa_realestate.db
+backend/data/lisboa_realestate.db-shm
+backend/data/lisboa_realestate.db-wal
 backend/data/browser_profile/
 
 # Keep the parish GeoJSON (downloaded once, checked in)
