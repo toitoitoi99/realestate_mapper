@@ -40,6 +40,19 @@ function FlyTo({ neighborhood, listings }) {
   return null
 }
 
+function InvalidateOnResize() {
+  const map = useMap()
+  useEffect(() => {
+    const container = map.getContainer()
+    const observer = new ResizeObserver(() => {
+      map.invalidateSize()
+    })
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [map])
+  return null
+}
+
 function FlyToArea({ areaConfig }) {
   const map = useMap()
   const initialRef = useRef(true)
@@ -92,6 +105,7 @@ export default function Map({
           maxZoom={BASE_MAPS[baseMap].maxZoom}
         />
 
+        <InvalidateOnResize />
         <FlyToArea areaConfig={areaConfig} />
         <FlyTo neighborhood={selectedNeighborhood} listings={withCoords} />
 
