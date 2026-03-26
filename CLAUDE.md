@@ -37,7 +37,7 @@ npm run build                          # Production build
 ## Architecture
 
 ### Backend (`backend/`)
-- `api.py` — Tornado app; routes: `/api/stats`, `/api/neighborhoods`, `/api/listings`, `/api/projects`, `/api/scrape`
+- `api.py` — Tornado app; routes: `/api/stats`, `/api/neighborhoods`, `/api/listings`, `/api/projects`, `/api/scrape`, `/api/areas`, `/api/parishes`
 - `database.py` — SQLite wrapper; all DB access goes through `Database` class; WAL mode; `upsert_listing()`, `upsert_project()`
 - `models.py` — `Listing` dataclass
 - `scrapers/idealista_playwright.py` — Playwright scraper for idealista.pt; uses real Chrome (`channel="chrome"`) + persistent profile at `data/browser_profile/` to bypass DataDome
@@ -57,7 +57,7 @@ npm run build                          # Production build
 - **Construction projects**: `dados.cm-lisboa.pt` ArcGIS FeatureServer — two layers: `0` (issued permits), `1` (pending applications); paginated GeoJSON API
 - **Security POIs**: `POISeguranca` FeatureServer (same ArcGIS org) — layers: `0` Municipal Police (1), `1` PSP stations (100), `2` CCTV cameras Bairro Alto (25)
 - **INE sold prices**: INE JSON API (`pindica.jsp`), indicator `0012234`; covers all 18 AML municipalities (9 Grande Lisboa + 9 Península de Setúbal); quarterly median €/m²
-- **Geographic scope**: Área Metropolitana de Lisboa — Idealista scraper uses `area-metropolitana-de-lisboa` URL; map centred at [38.68, -9.10] zoom 10
+- **Geographic scope**: Multi-area — configurable via `backend/areas.json` (Lisbon, AML, Porto, Algarve); area switcher in the UI; default area is AML centred at [38.68, -9.10] zoom 10
 
 ## Key constraints
 

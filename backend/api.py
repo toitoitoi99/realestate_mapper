@@ -37,6 +37,11 @@ logger = logging.getLogger(__name__)
 
 PORT = 8000
 
+# ── Area config ──────────────────────────────────────────────────────────────
+
+AREAS_PATH = Path(__file__).parent / "areas.json"
+AREAS = json.loads(AREAS_PATH.read_text(encoding="utf-8"))
+
 
 # ── Base handler ─────────────────────────────────────────────────────────────
 
@@ -255,19 +260,32 @@ class SoldTrendsHandler(BaseHandler):
         })
 
 
-class ParishesHandler(BaseHandler):
-    """GET /api/parishes — official Lisboa parish boundaries (GeoJSON FeatureCollection)"""
-
-    _cache = None
+class AreasHandler(BaseHandler):
+    """GET /api/areas — available geographic areas"""
 
     def get(self):
-        if ParishesHandler._cache is None:
-            geojson_path = Path(__file__).parent / "data" / "lisbon_parishes.geojson"
+        self.write_json(AREAS)
+
+
+class ParishesHandler(BaseHandler):
+    """GET /api/parishes — parish boundaries (GeoJSON FeatureCollection)"""
+
+    _cache = {}
+
+    def get(self):
+        area = self.get_argument("area", "lisbon")
+        area_cfg = AREAS.get(area, AREAS.get("lisbon", {}))
+        geojson_file = area_cfg.get("parishes_geojson")
+        if not geojson_file:
+            self.write_json({"type": "FeatureCollection", "features": []})
+            return
+        if geojson_file not in ParishesHandler._cache:
+            geojson_path = Path(__file__).parent / "data" / geojson_file
             if not geojson_path.exists():
-                self.write_error_json("Parish boundaries file not found. Run scrapers/cml_parishes.py first.", 404)
+                self.write_json({"type": "FeatureCollection", "features": []})
                 return
-            ParishesHandler._cache = json.loads(geojson_path.read_text(encoding="utf-8"))
-        self.write_json(ParishesHandler._cache)
+            ParishesHandler._cache[geojson_file] = json.loads(geojson_path.read_text(encoding="utf-8"))
+        self.write_json(ParishesHandler._cache[geojson_file])
 
 
 class StatsHandler(BaseHandler):
@@ -384,6 +402,7 @@ def make_app() -> tornado.web.Application:
             (r"/api/ine-stats",             IneStatsHandler),
             (r"/api/stats",                 StatsHandler),
             (r"/api/sold-trends",           SoldTrendsHandler),
+            (r"/api/areas",                 AreasHandler),
             (r"/api/parishes",              ParishesHandler),
             (r"/api/chat",                  ChatHandler),
         ],

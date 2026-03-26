@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { MapContainer, TileLayer, CircleMarker, GeoJSON, Popup, useMap } from 'react-leaflet'
 import { useLanguage } from '../LanguageContext'
 import 'leaflet/dist/leaflet.css'
@@ -13,8 +13,8 @@ import { PARISH_TO_GROUP } from '../neighborhoodGroups'
 import { BASE_MAPS } from '../baseMaps'
 import RarityBadge from './RarityBadge'
 
-const CENTRE = [38.68, -9.10]
-const ZOOM = 10
+const DEFAULT_CENTRE = [38.68, -9.10]
+const DEFAULT_ZOOM = 10
 
 function priceColor(gradient) {
   if (gradient == null) return '#94a3b8'
@@ -41,7 +41,22 @@ function FlyTo({ neighborhood, listings }) {
   return null
 }
 
+function FlyToArea({ areaConfig }) {
+  const map = useMap()
+  const initialRef = useRef(true)
+  useEffect(() => {
+    if (!areaConfig?.center) return
+    if (initialRef.current) {
+      initialRef.current = false
+      return
+    }
+    map.flyTo(areaConfig.center, areaConfig.zoom || DEFAULT_ZOOM, { duration: 1.5 })
+  }, [areaConfig?.center?.[0], areaConfig?.center?.[1], areaConfig?.zoom, map])
+  return null
+}
+
 export default function Map({
+  areaConfig,
   baseMap, onChangeBaseMap,
   listings, neighborhoods,
   onSelectNeighborhood, selectedNeighborhood,
@@ -69,7 +84,7 @@ export default function Map({
 
   return (
     <div style={{ flex: 1, position: 'relative', isolation: 'isolate' }}>
-      <MapContainer center={CENTRE} zoom={ZOOM} style={{ height: '100%', width: '100%', zIndex: 0 }}>
+      <MapContainer center={areaConfig?.center || DEFAULT_CENTRE} zoom={areaConfig?.zoom || DEFAULT_ZOOM} style={{ height: '100%', width: '100%', zIndex: 0 }}>
         <TileLayer
           key={baseMap}
           attribution={BASE_MAPS[baseMap].attribution}
@@ -77,6 +92,7 @@ export default function Map({
           maxZoom={BASE_MAPS[baseMap].maxZoom}
         />
 
+        <FlyToArea areaConfig={areaConfig} />
         <FlyTo neighborhood={selectedNeighborhood} listings={withCoords} />
 
         {/* Neighborhood polygon overlays */}

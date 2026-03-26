@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes, fetchSoldTrends } from './api'
+import { fetchAreas, fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes, fetchSoldTrends } from './api'
 import { useFilters } from './useFilters'
 import { CATEGORIES } from './projectCategories'
 import { DEFAULT_BASE_MAP } from './baseMaps'
@@ -9,6 +9,8 @@ import Map from './components/Map'
 import './index.css'
 
 export default function App() {
+  const [areas, setAreas] = useState({})
+  const [currentArea, setCurrentArea] = useState('aml')
   const [stats, setStats] = useState(null)
   const [ineStats, setIneStats] = useState(null)
   const [neighborhoods, setNeighborhoods] = useState([])
@@ -38,16 +40,23 @@ export default function App() {
   const { filters, setFilter, reset } = useFilters()
 
   useEffect(() => {
+    fetchAreas().then(setAreas).catch(console.error)
+  }, [])
+
+  useEffect(() => {
     fetchStats().then(setStats).catch(console.error)
     fetchNeighborhoods().then(d => setNeighborhoods(d.neighborhoods ?? [])).catch(console.error)
     fetchProjects().then(d => setProjects(d.projects ?? [])).catch(console.error)
     fetchSecurity().then(d => setSecurityPois(d.pois ?? [])).catch(console.error)
-    fetchParishes().then(d => setParishFeatures(d.features ?? [])).catch(console.error)
     fetchIneStats().then(d => {
       const total = (d.stats ?? []).find(s => s.category === 'H1')
       setIneStats(total ?? null)
     }).catch(console.error)
   }, [])
+
+  useEffect(() => {
+    fetchParishes(currentArea).then(d => setParishFeatures(d.features ?? [])).catch(console.error)
+  }, [currentArea])
 
   useEffect(() => {
     if (!showSoldTrends) return
@@ -106,7 +115,7 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <StatsBar stats={stats} ineStats={ineStats} onScrape={handleScrape} scraping={scraping} />
+      <StatsBar stats={stats} ineStats={ineStats} onScrape={handleScrape} scraping={scraping} areas={areas} currentArea={currentArea} onChangeArea={setCurrentArea} />
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <Sidebar
           filters={filters}
@@ -120,6 +129,7 @@ export default function App() {
           onSelectListing={setSelectedListing}
         />
         <Map
+          areaConfig={areas[currentArea]}
           baseMap={baseMap}
           onChangeBaseMap={setBaseMap}
           listings={listings}
