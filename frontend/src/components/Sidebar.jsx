@@ -43,6 +43,7 @@ export default function Sidebar({
   return (
     <div className="relative w-80 shrink-0 flex flex-col bg-white border-r border-gray-200 min-h-0 overflow-hidden">
       {toggleBtn}
+      <div className="flex-1 overflow-y-auto">
       <FilterPanel
         filters={filters}
         setFilter={setFilter}
@@ -60,7 +61,7 @@ export default function Sidebar({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+      <div className="p-3 flex flex-col gap-2">
         {loading && (
           <div className="text-center text-gray-400 text-sm py-8">{t.loading}</div>
         )}
@@ -70,6 +71,7 @@ export default function Sidebar({
         {!loading && listings?.map(l => (
           <ListingCard key={l.id} listing={l} onSelect={onSelectListing} />
         ))}
+      </div>
       </div>
     </div>
   )
