@@ -23,7 +23,8 @@ class Listing:
     price_per_sqm: Optional[float] = None   # EUR / m² (computed)
 
     # Property details
-    size_sqm: Optional[float] = None        # Living area in m²
+    size_sqm: Optional[float] = None        # Living area in m² (área útil)
+    gross_area_sqm: Optional[float] = None  # Total surface area in m² (área bruta)
     rooms: Optional[int] = None             # Typology number (T0=0, T1=1, etc.)
     bedrooms: Optional[int] = None          # Bedrooms (may differ from rooms in PT)
     bathrooms: Optional[int] = None
@@ -66,6 +67,7 @@ class Listing:
             "price_amount": self.price_amount,
             "price_per_sqm": self.price_per_sqm,
             "size_sqm": self.size_sqm,
+            "gross_area_sqm": self.gross_area_sqm,
             "rooms": self.rooms,
             "bedrooms": self.bedrooms,
             "bathrooms": self.bathrooms,

@@ -50,6 +50,9 @@ def record_to_listing(rec: dict) -> Listing | None:
     )
     size_sqm = _num(area_raw)
 
+    gross_area_raw = rec.get("gross_area_sqm") or rec.get("gross_area")
+    gross_area_sqm = _num(gross_area_raw)
+
     rooms    = _int(rec.get("rooms") or rec.get("typology"))
     bedrooms = _int(rec.get("bedrooms") or rec.get("noOfBedRooms"))
     if bedrooms is None:
@@ -90,6 +93,7 @@ def record_to_listing(rec: dict) -> Listing | None:
         price_amount=price_amount,
         price_per_sqm=price_per_sqm,
         size_sqm=size_sqm,
+        gross_area_sqm=gross_area_sqm,
         rooms=rooms,
         bedrooms=bedrooms,
         bathrooms=_int(rec.get("bathrooms")),

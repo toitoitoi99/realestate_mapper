@@ -39,6 +39,7 @@ _LISTING_COLS = """
     price_amount    REAL,
     price_per_sqm   REAL,
     size_sqm        REAL,
+    gross_area_sqm  REAL,
     rooms           INTEGER,
     bedrooms        INTEGER,
     bathrooms       INTEGER,
@@ -113,7 +114,7 @@ def init_db():
         # Common columns present in both new tables
         shared = [
             "source", "source_id", "url", "status", "price_amount", "price_per_sqm",
-            "size_sqm", "rooms", "bedrooms", "bathrooms", "floor", "property_type",
+            "size_sqm", "gross_area_sqm", "rooms", "bedrooms", "bathrooms", "floor", "property_type",
             "condition", "title", "address", "postal_code", "neighborhood", "parish",
             "district", "city", "lat", "lon", "images", "hash_dedupe", "description",
             "scraped_at",
@@ -254,6 +255,14 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_amenity_ratings_latlon ON amenity_ratings(lat_key, lon_key);
     """)
 
+    # -- Additive column migrations ---------------------------------------------
+    for tbl in ("sales", "rentals"):
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({tbl})").fetchall()}
+        if "gross_area_sqm" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN gross_area_sqm REAL")
+            logger.info(f"[DB] Added gross_area_sqm column to {tbl}")
+    conn.commit()
+
     conn.close()
     logger.info(f"[DB] Initialised at {DB_PATH}")
 
@@ -281,7 +290,7 @@ def upsert_listing(listing: Listing) -> tuple:
                 conn.execute(f"""
                     UPDATE {table} SET
                         url=?, status=?, price_amount=?, price_per_sqm=?,
-                        size_sqm=?, rooms=?, bedrooms=?, bathrooms=?, floor=?,
+                        size_sqm=?, gross_area_sqm=?, rooms=?, bedrooms=?, bathrooms=?, floor=?,
                         property_type=?, condition=?, title=?, address=?, postal_code=?,
                         neighborhood=?, parish=?, district=?, city=?, lat=?, lon=?,
                         images=?, hash_dedupe=?, description=?, scraped_at=?
@@ -289,7 +298,7 @@ def upsert_listing(listing: Listing) -> tuple:
                 """, (
                     listing.url, listing.status,
                     listing.price_amount, listing.price_per_sqm,
-                    listing.size_sqm, listing.rooms, listing.bedrooms,
+                    listing.size_sqm, listing.gross_area_sqm, listing.rooms, listing.bedrooms,
                     listing.bathrooms, listing.floor, listing.property_type,
                     listing.condition, listing.title, listing.address,
                     listing.postal_code, listing.neighborhood, listing.parish,
@@ -303,16 +312,16 @@ def upsert_listing(listing: Listing) -> tuple:
                 cur = conn.execute(f"""
                     INSERT INTO {table} (
                         source, source_id, url, status,
-                        price_amount, price_per_sqm, size_sqm, rooms, bedrooms,
+                        price_amount, price_per_sqm, size_sqm, gross_area_sqm, rooms, bedrooms,
                         bathrooms, floor, property_type, condition, title,
                         address, postal_code, neighborhood, parish, district,
                         city, lat, lon, images, hash_dedupe, description, scraped_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     listing.source, listing.source_id, listing.url,
                     listing.status,
                     listing.price_amount, listing.price_per_sqm,
-                    listing.size_sqm, listing.rooms, listing.bedrooms,
+                    listing.size_sqm, listing.gross_area_sqm, listing.rooms, listing.bedrooms,
                     listing.bathrooms, listing.floor, listing.property_type,
                     listing.condition, listing.title, listing.address,
                     listing.postal_code, listing.neighborhood, listing.parish,
@@ -402,7 +411,7 @@ def get_listings(
     # Shared columns for union queries (excludes sales-only rarity columns)
     _shared_cols = (
         "id, source, source_id, url, status, price_amount, price_per_sqm, "
-        "size_sqm, rooms, bedrooms, bathrooms, floor, property_type, condition, "
+        "size_sqm, gross_area_sqm, rooms, bedrooms, bathrooms, floor, property_type, condition, "
         "title, address, postal_code, neighborhood, parish, district, city, "
         "lat, lon, images, hash_dedupe, description, scraped_at"
     )

@@ -73,6 +73,12 @@ export const translations = {
     sortRarity:      'Rarity (unique first)',
     sortPriceAsc:    'Price (low → high)',
     sortPriceDesc:   'Price (high → low)',
+    sortPsmGrossAsc:  '€/m² gross (low → high)',
+    sortPsmGrossDesc: '€/m² gross (high → low)',
+    sortPsmLivingAsc: '€/m² living (low → high)',
+    sortPsmLivingDesc:'€/m² living (high → low)',
+    sortBiggest:     'Biggest',
+    sortSmallest:    'Smallest',
     listingsCount:   (n) => `${n} listings`,
 
     // Sidebar
@@ -197,6 +203,12 @@ export const translations = {
     sortRarity:      'Raridade (único primeiro)',
     sortPriceAsc:    'Preço (menor → maior)',
     sortPriceDesc:   'Preço (maior → menor)',
+    sortPsmGrossAsc:  '€/m² bruto (menor → maior)',
+    sortPsmGrossDesc: '€/m² bruto (maior → menor)',
+    sortPsmLivingAsc: '€/m² útil (menor → maior)',
+    sortPsmLivingDesc:'€/m² útil (maior → menor)',
+    sortBiggest:     'Maior',
+    sortSmallest:    'Menor',
     listingsCount:   (n) => `${n} anúncios`,
 
     // Sidebar

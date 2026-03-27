@@ -87,6 +87,32 @@ export default function App() {
         if (sort_by === 'rarity') all = [...all].sort((a, b) => (b.rarity_score ?? 0) - (a.rarity_score ?? 0))
         else if (sort_by === 'price_asc') all = [...all].sort((a, b) => (a.price_amount ?? 0) - (b.price_amount ?? 0))
         else if (sort_by === 'price_desc') all = [...all].sort((a, b) => (b.price_amount ?? 0) - (a.price_amount ?? 0))
+        else if (sort_by === 'psm_gross_asc') all = [...all].sort((a, b) => {
+          const aP = a.price_amount, aA = a.gross_area_sqm || a.size_sqm
+          const bP = b.price_amount, bA = b.gross_area_sqm || b.size_sqm
+          const aV = (aP && aA) ? aP / aA : Infinity
+          const bV = (bP && bA) ? bP / bA : Infinity
+          return aV - bV
+        })
+        else if (sort_by === 'psm_gross_desc') all = [...all].sort((a, b) => {
+          const aP = a.price_amount, aA = a.gross_area_sqm || a.size_sqm
+          const bP = b.price_amount, bA = b.gross_area_sqm || b.size_sqm
+          const aV = (aP && aA) ? aP / aA : -Infinity
+          const bV = (bP && bA) ? bP / bA : -Infinity
+          return bV - aV
+        })
+        else if (sort_by === 'psm_living_asc') all = [...all].sort((a, b) => {
+          const aV = (a.price_amount && a.size_sqm) ? a.price_amount / a.size_sqm : Infinity
+          const bV = (b.price_amount && b.size_sqm) ? b.price_amount / b.size_sqm : Infinity
+          return aV - bV
+        })
+        else if (sort_by === 'psm_living_desc') all = [...all].sort((a, b) => {
+          const aV = (a.price_amount && a.size_sqm) ? a.price_amount / a.size_sqm : -Infinity
+          const bV = (b.price_amount && b.size_sqm) ? b.price_amount / b.size_sqm : -Infinity
+          return bV - aV
+        })
+        else if (sort_by === 'biggest') all = [...all].sort((a, b) => (b.gross_area_sqm || b.size_sqm || 0) - (a.gross_area_sqm || a.size_sqm || 0))
+        else if (sort_by === 'smallest') all = [...all].sort((a, b) => (a.gross_area_sqm || a.size_sqm || 0) - (b.gross_area_sqm || b.size_sqm || 0))
         setListings(all)
       })
       .catch(console.error)
