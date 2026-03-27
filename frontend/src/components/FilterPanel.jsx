@@ -201,6 +201,12 @@ export default function FilterPanel({ filters, setFilter, reset, listingCount })
           <option value="rarity">{t.sortRarity}</option>
           <option value="price_asc">{t.sortPriceAsc}</option>
           <option value="price_desc">{t.sortPriceDesc}</option>
+          <option value="psm_gross_asc">{t.sortPsmGrossAsc}</option>
+          <option value="psm_gross_desc">{t.sortPsmGrossDesc}</option>
+          <option value="psm_living_asc">{t.sortPsmLivingAsc}</option>
+          <option value="psm_living_desc">{t.sortPsmLivingDesc}</option>
+          <option value="biggest">{t.sortBiggest}</option>
+          <option value="smallest">{t.sortSmallest}</option>
         </select>
       </div>
 

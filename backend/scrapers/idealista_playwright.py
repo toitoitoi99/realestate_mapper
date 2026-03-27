@@ -180,10 +180,14 @@ def extract_listing_from_next_data(ad: dict) -> dict:
         or ad.get("askingPrice")
     )
 
-    # Size
+    # Size — usable (living) area vs gross (total) area
     size = _num(
-        ad.get("size") or ad.get("floorSize") or ad.get("usableArea") or ad.get("area")
+        ad.get("usableArea") or ad.get("floorSize") or ad.get("size") or ad.get("area")
     )
+    gross_area = _num(ad.get("size") or ad.get("area"))
+    # If gross_area equals living area, don't duplicate it
+    if gross_area and size and gross_area == size:
+        gross_area = None
 
     # Rooms (Portuguese typology: T2 → 2)
     rooms_raw = ad.get("rooms") or ad.get("typology") or ad.get("roomNumber")
@@ -236,6 +240,7 @@ def extract_listing_from_next_data(ad: dict) -> dict:
     return {
         "price": price,
         "size": size,
+        "gross_area": gross_area,
         "rooms": rooms,
         "bedrooms": bedrooms,
         "floor": floor,
@@ -412,7 +417,20 @@ def extract_from_dom(page: Page) -> dict:
         if "m²" in feat or "m2" in feat.lower():
             m = re.search(r"([\d.,]+)\s*m", feat)
             if m:
-                result["size"] = _num(m.group(1))
+                val = _num(m.group(1))
+                fl = feat.lower()
+                if "brut" in fl:
+                    result["gross_area"] = val
+                    if not result.get("size"):
+                        result["size"] = val
+                elif "útil" in fl or "util" in fl:
+                    result["size"] = val
+                else:
+                    # Generic m² — treat as gross if we don't have one yet
+                    if not result.get("gross_area"):
+                        result["gross_area"] = val
+                    if not result.get("size"):
+                        result["size"] = val
         elif re.match(r"T\d", feat.strip()):
             rooms = _int(feat)
             result["rooms"] = rooms
@@ -516,9 +534,10 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
     # DOM fallback — Idealista moved from Next.js to server-rendered HTML
     dom = extract_from_dom(page) if not (nd.get("price") or ld.get("price")) else {}
 
-    price    = nd.get("price")    or ld.get("price")    or dom.get("price")
-    size     = nd.get("size")     or ld.get("size")     or dom.get("size")
-    lat      = nd.get("lat")      or ld.get("lat")      or dom.get("lat")
+    price      = nd.get("price")      or ld.get("price")      or dom.get("price")
+    size       = nd.get("size")       or ld.get("size")       or dom.get("size")
+    gross_area = nd.get("gross_area") or dom.get("gross_area")
+    lat        = nd.get("lat")        or ld.get("lat")        or dom.get("lat")
     lon      = nd.get("lon")      or ld.get("lon")      or dom.get("lon")
     address  = nd.get("address")  or ld.get("address")  or dom.get("address")
     postal   = nd.get("postal_code") or ld.get("postal_code")
@@ -575,6 +594,7 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
         price_amount=price,
         price_per_sqm=price_per_sqm,
         size_sqm=size,
+        gross_area_sqm=gross_area,
         rooms=nd.get("rooms") or dom.get("rooms"),
         bedrooms=bedrooms,
         floor=floor,
