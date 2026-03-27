@@ -64,10 +64,26 @@ RENTAL_SEARCH   = "https://www.idealista.pt/arrendar-casas/lisboa/"
 DEFAULT_MAX_PAGES  = 60
 DEFAULT_MAX_ITEMS  = 1500
 MAX_IMAGES         = 15
+DATADOME_MAX_HTML  = 5000   # pages below this size are DataDome captcha pages
+DATADOME_RETRIES   = 3      # retries per URL when DataDome is detected
+DATADOME_WAIT      = 8      # seconds to wait before retrying after DataDome
 
 # Delay between page visits (seconds) — be polite
 MIN_DELAY = 2.5
 MAX_DELAY = 5.5
+
+# ── Lisbon neighborhood slugs for per-neighborhood scraping ──────────────────
+# Idealista uses these as URL segments: /comprar-casas/lisboa/{slug}/
+# This avoids pagination (each neighborhood fits on page 1).
+LISBON_NEIGHBORHOODS = [
+    "ajuda", "alcantara", "alfama", "alvalade", "areeiro",
+    "arroios", "avenidas-novas", "belem", "benfica", "beato",
+    "campolide", "campo-de-ourique", "carnide", "estrela",
+    "lumiar", "marvila", "misericordia", "olivais",
+    "parque-das-nacoes", "penha-de-franca", "santa-clara",
+    "santa-maria-maior", "santo-antonio", "sao-domingos-de-benfica",
+    "sao-vicente",
+]
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 
@@ -115,6 +131,60 @@ def _hash(address, city, price, size, source="idealista") -> str:
 
 def _polite_delay():
     time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
+
+
+def _is_datadome(page: "Page") -> bool:
+    """Check if the current page is a DataDome captcha page."""
+    try:
+        return len(page.content()) < DATADOME_MAX_HTML
+    except Exception:
+        return False
+
+
+def _goto_with_retry(page: "Page", url: str, retries: int = DATADOME_RETRIES) -> bool:
+    """Navigate to URL, retrying if DataDome captcha is detected.
+    Returns True if page loaded successfully (not a captcha)."""
+    for attempt in range(1, retries + 1):
+        try:
+            page.goto(url, timeout=30000, wait_until="domcontentloaded")
+            page.wait_for_timeout(1500)
+        except PWTimeout:
+            log.warning(f"  Timeout loading {url} (attempt {attempt}/{retries})")
+            if attempt < retries:
+                time.sleep(DATADOME_WAIT)
+                continue
+            return False
+
+        if not _is_datadome(page):
+            return True
+
+        if attempt < retries:
+            log.info(f"  DataDome detected (attempt {attempt}/{retries}), waiting {DATADOME_WAIT}s…")
+            time.sleep(DATADOME_WAIT)
+            # Try reloading instead of fresh goto — sometimes cookies settle
+            try:
+                page.reload(timeout=30000, wait_until="domcontentloaded")
+                page.wait_for_timeout(1500)
+                if not _is_datadome(page):
+                    return True
+            except PWTimeout:
+                pass
+        else:
+            log.warning(f"  DataDome blocked after {retries} attempts: {url}")
+    return False
+
+
+def _load_known_source_ids(listing_type: str = 'sale') -> set:
+    """Load all source_ids already in the DB for idealista, to skip re-fetching."""
+    table = "rental_listings" if listing_type == "rent" else "sales_listings"
+    try:
+        conn = db.get_connection()
+        rows = conn.execute(
+            f"SELECT source_id FROM {table} WHERE source='idealista'"
+        ).fetchall()
+        return {r[0] for r in rows}
+    except Exception:
+        return set()
 
 
 # ── Cookie banner ─────────────────────────────────────────────────────────────
@@ -706,6 +776,27 @@ def load_cookies(path: str) -> list:
 PROFILE_DIR = Path(__file__).parent.parent / "data" / "browser_profile"
 
 
+def _build_search_urls(search_url: str, listing_type: str) -> list:
+    """Build list of search URLs.
+
+    If search_url targets Lisboa city (the default), split into
+    per-neighborhood URLs so each result set fits on page 1 and we
+    never need pagination (avoids DataDome blocking page 2+).
+    """
+    buy_or_rent = "arrendar-casas" if listing_type == "rent" else "comprar-casas"
+
+    # Check if this is a top-level Lisboa search that should be split
+    if re.search(r"/(?:comprar|arrendar)-casas/lisboa/?$", search_url.rstrip("/")):
+        urls = []
+        for slug in LISBON_NEIGHBORHOODS:
+            urls.append(f"{BASE_URL}/{buy_or_rent}/lisboa/{slug}/")
+        log.info(f"Split Lisboa search into {len(urls)} neighborhood URLs")
+        return urls
+
+    # For other searches (specific neighborhood, AML, Porto, etc.) use as-is
+    return [search_url]
+
+
 def run_scraper(
     search_url: str = DEFAULT_SEARCH,
     max_pages: int = DEFAULT_MAX_PAGES,
@@ -722,9 +813,17 @@ def run_scraper(
     run_id = db.start_scrape_run("idealista")
 
     new_count = updated_count = error_count = 0
+    skipped_known = 0
     total_pushed = 0
 
+    # Load already-scraped source_ids so we can skip them
+    known_ids = _load_known_source_ids(listing_type)
+    log.info(f"Loaded {len(known_ids)} known source_ids — will skip these")
+
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Build search URL list (may split into neighborhoods)
+    search_urls = _build_search_urls(search_url, listing_type)
 
     with sync_playwright() as pw:
         # Persistent context saves cookies/session across runs so the
@@ -770,47 +869,63 @@ def run_scraper(
         accept_cookies(page)
         _polite_delay()
 
-        # ── Paginate through search results ───────────────────────────────────
+        # ── Collect detail URLs from all search pages ─────────────────────────
         all_detail_urls: list[str] = []
+        datadome_blocked = 0
 
-        for page_num in range(1, max_pages + 1):
-            page_url = build_page_url(search_url, page_num)
-            log.info(f"Search page {page_num}: {page_url}")
+        for search_idx, s_url in enumerate(search_urls):
+            for page_num in range(1, max_pages + 1):
+                page_url = build_page_url(s_url, page_num)
+                log.info(f"Search [{search_idx+1}/{len(search_urls)}] page {page_num}: {page_url}")
 
-            try:
-                page.goto(page_url, timeout=30000, wait_until="domcontentloaded")
-                page.wait_for_timeout(1500)
-            except PWTimeout:
-                log.warning(f"Timeout loading search page {page_num}. Stopping pagination.")
-                break
+                if not _goto_with_retry(page, page_url):
+                    datadome_blocked += 1
+                    if datadome_blocked >= 3:
+                        log.warning("DataDome blocked 3 search pages — session may be expired. Run --setup.")
+                    break
 
-            detail_urls = extract_detail_urls(page)
-            log.info(f"  Found {len(detail_urls)} listings on page {page_num}")
+                detail_urls = extract_detail_urls(page)
+                log.info(f"  Found {len(detail_urls)} listings on page {page_num}")
 
-            if not detail_urls:
-                log.info("No listings found — end of results.")
-                break
+                if not detail_urls:
+                    break  # end of results for this search URL
 
-            all_detail_urls.extend(u for u in detail_urls if u not in all_detail_urls)
+                all_detail_urls.extend(u for u in detail_urls if u not in all_detail_urls)
 
-            if len(all_detail_urls) >= max_items * 2:
-                log.info(f"Collected enough URLs ({len(all_detail_urls)}). Moving to detail scraping.")
-                break
+                if len(all_detail_urls) >= max_items * 2:
+                    log.info(f"Collected enough URLs ({len(all_detail_urls)}). Moving to detail scraping.")
+                    break
 
-            _polite_delay()
+                _polite_delay()
 
         log.info(f"Total detail URLs collected: {len(all_detail_urls)}")
 
+        # ── Filter out already-known listings ─────────────────────────────────
+        new_urls = []
+        for url in all_detail_urls:
+            id_match = re.search(r"/imovel/(\d+)", url)
+            source_id = id_match.group(1) if id_match else None
+            if source_id and source_id in known_ids:
+                skipped_known += 1
+            else:
+                new_urls.append(url)
+
+        log.info(f"Skipping {skipped_known} already-known listings, {len(new_urls)} new to scrape")
+
         # ── Visit each detail page ────────────────────────────────────────────
-        for i, detail_url in enumerate(all_detail_urls):
+        for i, detail_url in enumerate(new_urls):
             if total_pushed >= max_items:
                 log.info(f"Reached max_items={max_items}. Stopping.")
                 break
 
-            log.info(f"[{i+1}/{len(all_detail_urls)}] {detail_url}")
+            log.info(f"[{i+1}/{len(new_urls)}] {detail_url}")
 
             try:
-                page.goto(detail_url, timeout=30000, wait_until="domcontentloaded")
+                if not _goto_with_retry(page, detail_url):
+                    log.warning(f"  DataDome blocked detail page — skipping")
+                    error_count += 1
+                    continue
+
                 # Wait for __NEXT_DATA__ or JSON-LD to be available
                 try:
                     page.wait_for_selector(
@@ -819,40 +934,6 @@ def run_scraper(
                     )
                 except PWTimeout:
                     pass
-
-                # DEBUG: dump data sources and save HTML for first failing listing
-                if error_count == 0 and total_pushed == 0:
-                    _nd = extract_next_data(page)
-                    _ld_scripts = page.evaluate("""
-                        () => Array.from(
-                            document.querySelectorAll('script[type="application/ld+json"]')
-                        ).map(s => s.textContent)
-                    """)
-                    log.info(f"  DEBUG __NEXT_DATA__ keys: {list(_nd.keys()) if _nd else 'EMPTY'}")
-                    _pp = find_deep(_nd, ["props", "pageProps"], ["pageProps"]) or {}
-                    _ad = find_deep(_pp, ["adDetail"], ["ad"], ["listing"], ["estate"]) or {}
-                    log.info(f"  DEBUG pageProps keys: {list(_pp.keys())[:20]}")
-                    log.info(f"  DEBUG ad keys: {list(_ad.keys())[:20]}")
-                    log.info(f"  DEBUG ad.price={_ad.get('price')}, ad.priceInfo={_ad.get('priceInfo')}")
-                    log.info(f"  DEBUG JSON-LD count: {len(_ld_scripts)}")
-                    for _i, _s in enumerate(_ld_scripts[:3]):
-                        log.info(f"  DEBUG JSON-LD[{_i}]: {_s[:500]}")
-
-                    # Save full HTML + screenshot for inspection
-                    _diag_dir = Path(__file__).parent.parent / "data" / "debug"
-                    _diag_dir.mkdir(exist_ok=True)
-                    _html = page.content()
-                    _html_path = _diag_dir / "first_detail_page.html"
-                    _html_path.write_text(_html, encoding="utf-8")
-                    log.info(f"  DEBUG saved HTML ({len(_html)} chars) → {_html_path}")
-                    try:
-                        _shot_path = _diag_dir / "first_detail_page.png"
-                        page.screenshot(path=str(_shot_path), full_page=True)
-                        log.info(f"  DEBUG saved screenshot → {_shot_path}")
-                    except Exception as _e:
-                        log.warning(f"  DEBUG screenshot failed: {_e}")
-                    log.info(f"  DEBUG page URL: {page.url}")
-                    log.info(f"  DEBUG page title: {page.title()}")
 
                 listing = scrape_detail_page(page, detail_url, listing_type=listing_type)
 
@@ -901,6 +982,7 @@ def run_scraper(
     print(f"  Listings scraped : {total_pushed}")
     print(f"  New              : {new_count}")
     print(f"  Updated          : {updated_count}")
+    print(f"  Skipped (known)  : {skipped_known}")
     print(f"  Errors           : {error_count}")
 
 
