@@ -1,5 +1,7 @@
-import { useEffect, useRef } from 'react'
-import { MapContainer, TileLayer, CircleMarker, GeoJSON, Popup, useMap } from 'react-leaflet'
+import { useEffect, useRef, useState } from 'react'
+import { TileLayer, CircleMarker, GeoJSON, Popup, useMap } from 'react-leaflet'
+import { LeafletContext, createLeafletContext } from '@react-leaflet/core'
+import L from 'leaflet'
 import { useLanguage } from '../LanguageContext'
 import 'leaflet/dist/leaflet.css'
 import ProjectLayer from './ProjectLayer'
@@ -67,6 +69,27 @@ function FlyToArea({ areaConfig }) {
   return null
 }
 
+// Swap tile layer when baseMap changes by removing old and adding new
+function DynamicTileLayer({ baseMap }) {
+  const map = useMap()
+  const layerRef = useRef(null)
+
+  useEffect(() => {
+    if (layerRef.current) {
+      map.removeLayer(layerRef.current)
+    }
+    const config = BASE_MAPS[baseMap]
+    const opts = { attribution: config.attribution }
+    if (config.maxZoom != null) opts.maxZoom = config.maxZoom
+    layerRef.current = L.tileLayer(config.url, opts).addTo(map)
+    return () => {
+      if (layerRef.current) map.removeLayer(layerRef.current)
+    }
+  }, [baseMap, map])
+
+  return null
+}
+
 export default function Map({
   areaConfig,
   baseMap, onChangeBaseMap,
@@ -95,129 +118,134 @@ export default function Map({
   const withCoords = (listings?.filter(l => l.lat && l.lon) ?? [])
     .filter(l => isParishVisible(l.neighborhood))
 
+  const ref = useRef(null)
+  const [ctx, setCtx] = useState(null)
+
+  useEffect(() => {
+    if (!ref.current) return
+    const center = areaConfig?.center || DEFAULT_CENTRE
+    const zoom = areaConfig?.zoom || DEFAULT_ZOOM
+    const map = L.map(ref.current).setView(center, zoom)
+    setCtx(createLeafletContext(map))
+    return () => map.remove()
+  }, [])
+
   return (
     <div style={{ flex: 1, position: 'relative', isolation: 'isolate' }}>
-      <MapContainer center={areaConfig?.center || DEFAULT_CENTRE} zoom={areaConfig?.zoom || DEFAULT_ZOOM} scrollWheelZoom={true} style={{ height: '100%', width: '100%', zIndex: 0 }}>
-        <TileLayer
-          key={baseMap}
-          attribution={BASE_MAPS[baseMap].attribution}
-          url={BASE_MAPS[baseMap].url}
-          maxZoom={BASE_MAPS[baseMap].maxZoom}
-        />
+      <div ref={ref} style={{ height: '100%', width: '100%' }} />
 
-        <InvalidateOnResize />
-        <FlyToArea areaConfig={areaConfig} />
-        <FlyTo neighborhood={selectedNeighborhood} listings={withCoords} />
+      {ctx && (
+        <LeafletContext.Provider value={ctx}>
+          <DynamicTileLayer baseMap={baseMap} />
+          <InvalidateOnResize />
+          <FlyToArea areaConfig={areaConfig} />
+          <FlyTo neighborhood={selectedNeighborhood} listings={withCoords} />
 
-        {/* Neighborhood polygon overlays */}
-        <NeighborhoodLayer
-          showNeighborhoods={showNeighborhoods}
-          parishFeatures={parishFeatures}
-          visibleGroups={visibleGroups}
-          hiddenParishes={hiddenParishes}
-          neighborhoods={neighborhoods}
-          groups={neighborhoodGroups}
-          parishToGroup={parishToGroup}
-        />
+          <NeighborhoodLayer
+            showNeighborhoods={showNeighborhoods}
+            parishFeatures={parishFeatures}
+            visibleGroups={visibleGroups}
+            hiddenParishes={hiddenParishes}
+            neighborhoods={neighborhoods}
+            groups={neighborhoodGroups}
+            parishToGroup={parishToGroup}
+          />
 
-        {/* Listing markers — building outlines when available, dots as fallback */}
-        {withCoords.map(l => {
-          const isRent = l.listing_type === 'rent'
-          const isSold = l.status === 'sold'
-          const isReserved = l.status === 'reserved'
+          {withCoords.map(l => {
+            const isRent = l.listing_type === 'rent'
+            const isSold = l.status === 'sold'
+            const isReserved = l.status === 'reserved'
 
-          let markerColor
-          if (isSold || isReserved) {
-            markerColor = { color: '#92400e', fillColor: '#f59e0b' }   // amber = sold/reserved
-          } else if (isRent) {
-            markerColor = { color: '#065f46', fillColor: '#10b981' }   // green = rent
-          } else {
-            markerColor = { color: '#1d4ed8', fillColor: '#3b82f6' }   // blue = sale
-          }
+            let markerColor
+            if (isSold || isReserved) {
+              markerColor = { color: '#92400e', fillColor: '#f59e0b' }
+            } else if (isRent) {
+              markerColor = { color: '#065f46', fillColor: '#10b981' }
+            } else {
+              markerColor = { color: '#1d4ed8', fillColor: '#3b82f6' }
+            }
 
-          const popupContent = (
-            <Popup>
-              <div className="text-sm">
-                {(isSold || isReserved) && (
-                  <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
-                    {isSold ? `${t.sold} · ` : `${t.reserved} · `}
-                  </span>
-                )}
-                <b>€{fmt(l.price_amount)}{isRent ? '/mo' : ''}</b>
-                {l.size_sqm && <> · {fmt(l.size_sqm)} m²</>}
-                {l.rooms != null && <> · T{l.rooms}</>}<br />
-                {l.neighborhood && <span className="text-gray-500">{l.neighborhood}</span>}
-                <br />
-                <RarityBadge score={l.rarity_score} factors={l.rarity_factors} compact />
-                {l.rarity_score != null && ' '}
-                <a href={l.url} target="_blank" rel="noopener noreferrer" className="text-blue-600">
-                  {t.viewListing}
-                </a>
-              </div>
-            </Popup>
-          )
+            const popupContent = (
+              <Popup>
+                <div className="text-sm">
+                  {(isSold || isReserved) && (
+                    <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+                      {isSold ? `${t.sold} · ` : `${t.reserved} · `}
+                    </span>
+                  )}
+                  <b>€{fmt(l.price_amount)}{isRent ? '/mo' : ''}</b>
+                  {l.size_sqm && <> · {fmt(l.size_sqm)} m²</>}
+                  {l.rooms != null && <> · T{l.rooms}</>}<br />
+                  {l.neighborhood && <span className="text-gray-500">{l.neighborhood}</span>}
+                  <br />
+                  <RarityBadge score={l.rarity_score} factors={l.rarity_factors} compact />
+                  {l.rarity_score != null && ' '}
+                  <a href={l.url} target="_blank" rel="noopener noreferrer" className="text-blue-600">
+                    {t.viewListing}
+                  </a>
+                </div>
+              </Popup>
+            )
 
-          if (l.building_geojson) {
-            const geojson = typeof l.building_geojson === 'string'
-              ? JSON.parse(l.building_geojson) : l.building_geojson
+            if (l.building_geojson) {
+              const geojson = typeof l.building_geojson === 'string'
+                ? JSON.parse(l.building_geojson) : l.building_geojson
+              return (
+                <GeoJSON
+                  key={`bldg-${l.id}`}
+                  data={{ type: 'Feature', geometry: geojson, properties: {} }}
+                  style={() => ({ ...markerColor, fillOpacity: 0.35, weight: 2 })}
+                >
+                  {popupContent}
+                </GeoJSON>
+              )
+            }
+
             return (
-              <GeoJSON
-                key={`bldg-${l.id}`}
-                data={{ type: 'Feature', geometry: geojson, properties: {} }}
-                style={() => ({ ...markerColor, fillOpacity: 0.35, weight: 2 })}
+              <CircleMarker
+                key={l.id}
+                center={[l.lat, l.lon]}
+                radius={3}
+                pathOptions={{ ...markerColor, fillOpacity: 0.6, weight: 0.5 }}
               >
                 {popupContent}
-              </GeoJSON>
+              </CircleMarker>
             )
-          }
+          })}
 
-          return (
-            <CircleMarker
-              key={l.id}
-              center={[l.lat, l.lon]}
-              radius={3}
-              pathOptions={{ ...markerColor, fillOpacity: 0.6, weight: 0.5 }}
-            >
-              {popupContent}
-            </CircleMarker>
-          )
-        })}
+          {showProjects && (
+            <ProjectLayer
+              projects={projects ?? []}
+              visibleCategories={visibleCategories}
+              showNeighborhoods={showNeighborhoods}
+              visibleGroups={visibleGroups}
+              hiddenParishes={hiddenParishes}
+              parishToGroup={parishToGroup}
+            />
+          )}
 
-        {/* Construction project markers */}
-        {showProjects && (
-          <ProjectLayer
-            projects={projects ?? []}
-            visibleCategories={visibleCategories}
-            showNeighborhoods={showNeighborhoods}
-            visibleGroups={visibleGroups}
-            hiddenParishes={hiddenParishes}
-            parishToGroup={parishToGroup}
-          />
-        )}
+          {showSecurity && (
+            <SecurityLayer
+              pois={securityPois ?? []}
+              visibleLayers={{ police_psp: true, police_municipal: true, cctv: true }}
+              showNeighborhoods={showNeighborhoods}
+              visibleGroups={visibleGroups}
+              hiddenParishes={hiddenParishes}
+              parishToGroup={parishToGroup}
+            />
+          )}
 
-        {/* Security POI markers */}
-        {showSecurity && (
-          <SecurityLayer
-            pois={securityPois ?? []}
-            visibleLayers={{ police_psp: true, police_municipal: true, cctv: true }}
-            showNeighborhoods={showNeighborhoods}
-            visibleGroups={visibleGroups}
-            hiddenParishes={hiddenParishes}
-            parishToGroup={parishToGroup}
-          />
-        )}
+          {showSoldTrends && (
+            <SoldTrendsLayer
+              parishFeatures={parishFeatures}
+              trends={soldTrendsData.trends}
+              points={soldTrendsData.points}
+            />
+          )}
 
-        {/* Sold price trends overlay */}
-        {showSoldTrends && (
-          <SoldTrendsLayer
-            parishFeatures={parishFeatures}
-            trends={soldTrendsData.trends}
-            points={soldTrendsData.points}
-          />
-        )}
-
-        <AddressSearch />
-      </MapContainer>
+          <AddressSearch />
+        </LeafletContext.Provider>
+      )}
 
       <ChatPanel />
 

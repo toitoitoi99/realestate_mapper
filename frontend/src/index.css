@@ -7,6 +7,12 @@ html, body, #root {
   font-family: system-ui, -apple-system, sans-serif;
 }
 
+/* Fix Tailwind v4 preflight breaking Leaflet tiles */
+.leaflet-container img {
+  max-width: none !important;
+  max-height: none !important;
+}
+
 /* Leaflet */
 .leaflet-container {
   height: 100%;
