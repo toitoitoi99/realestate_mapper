@@ -152,7 +152,7 @@ export default function App() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <StatsBar stats={stats} ineStats={ineStats} onScrape={handleScrape} scraping={scraping} areas={areas} currentArea={currentArea} onChangeArea={setCurrentArea} />
-      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'clip' }}>
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <Sidebar
           filters={filters}
           setFilter={setFilter}
