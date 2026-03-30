@@ -261,6 +261,9 @@ def init_db():
         if "gross_area_sqm" not in existing:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN gross_area_sqm REAL")
             logger.info(f"[DB] Added gross_area_sqm column to {tbl}")
+        if "description_en" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN description_en TEXT")
+            logger.info(f"[DB] Added description_en column to {tbl}")
     conn.commit()
 
     conn.close()

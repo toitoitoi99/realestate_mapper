@@ -1,10 +1,29 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useLanguage } from '../LanguageContext'
+import { translateDescription } from '../api'
 import RarityBadge from './RarityBadge'
 import AmenityRating from './AmenityRating'
 
 export default function ListingDetail({ listing, onBack }) {
-  const { t } = useLanguage()
+  const { lang, t } = useLanguage()
+  const [descriptionEn, setDescriptionEn] = useState(null)
+  const [translating, setTranslating] = useState(false)
+
+  useEffect(() => {
+    if (lang !== 'en' || !listing.description) {
+      setDescriptionEn(null)
+      return
+    }
+    let cancelled = false
+    setTranslating(true)
+    translateDescription(listing.id, listing.listing_type || 'sale')
+      .then(data => {
+        if (!cancelled) setDescriptionEn(data.description_en)
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setTranslating(false) })
+    return () => { cancelled = true }
+  }, [listing.id, listing.listing_type, listing.description, lang])
   const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
 
   const images = (() => {
@@ -137,9 +156,13 @@ export default function ListingDetail({ listing, onBack }) {
           {listing.description && (
             <div className="text-sm">
               <h3 className="font-semibold text-gray-700 mb-1">{t.description}</h3>
-              <p className="text-gray-600 whitespace-pre-line text-xs leading-relaxed">
-                {listing.description}
-              </p>
+              {translating ? (
+                <p className="text-gray-400 text-xs italic">Translating…</p>
+              ) : (
+                <p className="text-gray-600 whitespace-pre-line text-xs leading-relaxed">
+                  {lang === 'en' && descriptionEn ? descriptionEn : listing.description}
+                </p>
+              )}
             </div>
           )}
 

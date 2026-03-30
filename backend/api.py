@@ -19,6 +19,8 @@ import json
 import logging
 import threading
 import sys
+import urllib.request
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -365,6 +367,97 @@ class StatsHandler(BaseHandler):
         })
 
 
+# ── Translation helper ────────────────────────────────────────────────────────
+
+def _translate_pt_to_en(text):
+    """Translate Portuguese text to English using Google Translate (free endpoint)."""
+    # Split into chunks of ~4000 chars to stay within limits
+    chunks = []
+    while text:
+        if len(text) <= 4000:
+            chunks.append(text)
+            break
+        # Find a good split point (sentence boundary)
+        split_at = text.rfind('. ', 0, 4000)
+        if split_at == -1:
+            split_at = text.rfind(' ', 0, 4000)
+        if split_at == -1:
+            split_at = 4000
+        else:
+            split_at += 1
+        chunks.append(text[:split_at])
+        text = text[split_at:].lstrip()
+
+    translated_parts = []
+    for chunk in chunks:
+        encoded = urllib.parse.quote(chunk)
+        url = (
+            "https://translate.googleapis.com/translate_a/single"
+            f"?client=gtx&sl=pt&tl=en&dt=t&q={encoded}"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        resp = urllib.request.urlopen(req, timeout=10)
+        data = json.loads(resp.read().decode("utf-8"))
+        # Response is nested array: [[["translated", "original", ...], ...], ...]
+        translated_parts.append("".join(seg[0] for seg in data[0] if seg[0]))
+
+    return " ".join(translated_parts)
+
+
+class TranslateHandler(BaseHandler):
+    """POST /api/translate — translate a listing description to English"""
+
+    async def post(self):
+        body = json.loads(self.request.body or "{}")
+        listing_id = body.get("id")
+        listing_type = body.get("listing_type", "sale")
+
+        if not listing_id:
+            self.write_error_json("id is required", 400)
+            return
+
+        table = db._table_for(listing_type)
+        conn = db.get_connection()
+        row = conn.execute(
+            f"SELECT description, description_en FROM {table} WHERE id=?",
+            (listing_id,)
+        ).fetchone()
+
+        if not row:
+            conn.close()
+            self.write_error_json("Listing not found", 404)
+            return
+
+        if not row["description"]:
+            conn.close()
+            self.write_json({"description_en": None})
+            return
+
+        # Return cached translation if available
+        if row["description_en"]:
+            conn.close()
+            self.write_json({"description_en": row["description_en"]})
+            return
+
+        # Translate in thread pool to avoid blocking
+        try:
+            translated = await tornado.ioloop.IOLoop.current().run_in_executor(
+                _executor, _translate_pt_to_en, row["description"]
+            )
+            # Cache in DB
+            conn.execute(
+                f"UPDATE {table} SET description_en=? WHERE id=?",
+                (translated, listing_id)
+            )
+            conn.commit()
+            conn.close()
+            self.write_json({"description_en": translated})
+        except Exception as e:
+            conn.close()
+            logger.error(f"Translation failed: {e}")
+            self.write_error_json(f"Translation failed: {e}", 500)
+
+
 # ── Background scrape logic ───────────────────────────────────────────────────
 
 def _run_scrape(source: str, run_id: int, max_pages: int):
@@ -448,6 +541,7 @@ def make_app() -> tornado.web.Application:
             (r"/api/amenity-rating",        AmenityRatingHandler),
             (r"/api/areas",                 AreasHandler),
             (r"/api/parishes",              ParishesHandler),
+            (r"/api/translate",              TranslateHandler),
             (r"/api/chat",                  ChatHandler),
         ],
         debug=False,
