@@ -1,9 +1,39 @@
 import { useState } from 'react'
 import { useLanguage } from '../LanguageContext'
 
-export default function FilterPanel({ filters, setFilter, reset, listingCount }) {
+// Active filter chip labels
+function getActiveChips(filters, t) {
+  const chips = []
+  if (filters.min_price) chips.push({ key: 'min_price', label: `≥ €${Number(filters.min_price).toLocaleString('pt-PT')}` })
+  if (filters.max_price) chips.push({ key: 'max_price', label: `≤ €${Number(filters.max_price).toLocaleString('pt-PT')}` })
+  if (filters.min_sqm) chips.push({ key: 'min_sqm', label: `≥ ${filters.min_sqm} m²` })
+  if (filters.max_sqm) chips.push({ key: 'max_sqm', label: `≤ ${filters.max_sqm} m²` })
+  if (filters.rooms) chips.push({ key: 'rooms', label: `T${filters.rooms}${filters.rooms === '5' ? '+' : ''}` })
+  if (filters.show_sold) chips.push({ key: 'show_sold', label: t.showSold, value: false })
+  if (filters.min_price_per_sqm) chips.push({ key: 'min_price_per_sqm', label: `≥ €${Number(filters.min_price_per_sqm).toLocaleString('pt-PT')}/m²` })
+  if (filters.max_price_per_sqm) chips.push({ key: 'max_price_per_sqm', label: `≤ €${Number(filters.max_price_per_sqm).toLocaleString('pt-PT')}/m²` })
+  if (filters.bedrooms) chips.push({ key: 'bedrooms', label: `${filters.bedrooms} ${t.bedrooms}` })
+  if (filters.bathrooms) chips.push({ key: 'bathrooms', label: `${filters.bathrooms} ${t.bathrooms}` })
+  if (filters.floor) chips.push({ key: 'floor', label: `${t.floor}: ${filters.floor}` })
+  if (filters.property_type) chips.push({ key: 'property_type', label: filters.property_type })
+  if (filters.condition) chips.push({ key: 'condition', label: filters.condition })
+  if (filters.parish) chips.push({ key: 'parish', label: filters.parish })
+  if (filters.district) chips.push({ key: 'district', label: filters.district })
+  if (filters.city) chips.push({ key: 'city', label: filters.city })
+  if (filters.postal_code) chips.push({ key: 'postal_code', label: filters.postal_code })
+  return chips
+}
+
+export default function FilterPanel({ filters, setFilter, reset }) {
   const { t } = useLanguage()
   const [advancedOpen, setAdvancedOpen] = useState(false)
+
+  const chips = getActiveChips(filters, t)
+
+  const removeChip = (chip) => {
+    const val = chip.value !== undefined ? chip.value : ''
+    setFilter(chip.key, val)
+  }
 
   const input = (key, placeholder) => (
     <input
@@ -42,12 +72,32 @@ export default function FilterPanel({ filters, setFilter, reset, listingCount })
   )
 
   return (
-    <div className="flex flex-col gap-4 p-4 border-b border-gray-200">
+    <div className="flex flex-col gap-3 p-4">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <span className="text-sm font-semibold text-gray-700">{t.filters}</span>
         <button onClick={reset} className="text-xs text-blue-500 hover:underline cursor-pointer">{t.reset}</button>
       </div>
 
+      {/* Active filter chips */}
+      {chips.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {chips.map(chip => (
+            <span
+              key={chip.key}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs border border-blue-200"
+            >
+              {chip.label}
+              <button
+                onClick={() => removeChip(chip)}
+                className="text-blue-400 hover:text-blue-600 cursor-pointer leading-none"
+              >&times;</button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Section: Search type */}
       <div>
         <label className="text-xs text-gray-500 mb-1 block">{t.listingType}</label>
         <div className="flex rounded overflow-hidden border border-gray-200 text-sm">
@@ -61,24 +111,28 @@ export default function FilterPanel({ filters, setFilter, reset, listingCount })
         </div>
       </div>
 
-      <div>
-        <label className="text-xs text-gray-500 mb-1 block">
-          {filters.listing_type === 'rent' ? t.monthlyRent : t.price}
-        </label>
-        <div className="flex gap-2">
-          {input('min_price', 'Min')}
-          {input('max_price', 'Max')}
+      {/* Section: Price & Size */}
+      <div className="flex flex-col gap-3 bg-gray-50 rounded-lg p-3 -mx-1">
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">
+            {filters.listing_type === 'rent' ? t.monthlyRent : t.price}
+          </label>
+          <div className="flex gap-2">
+            {input('min_price', 'Min')}
+            {input('max_price', 'Max')}
+          </div>
+        </div>
+
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">{t.size}</label>
+          <div className="flex gap-2">
+            {input('min_sqm', 'Min')}
+            {input('max_sqm', 'Max')}
+          </div>
         </div>
       </div>
 
-      <div>
-        <label className="text-xs text-gray-500 mb-1 block">{t.size}</label>
-        <div className="flex gap-2">
-          {input('min_sqm', 'Min')}
-          {input('max_sqm', 'Max')}
-        </div>
-      </div>
-
+      {/* Section: Property basics */}
       <div>
         <label className="text-xs text-gray-500 mb-1 block">{t.rooms}</label>
         <select
@@ -93,6 +147,7 @@ export default function FilterPanel({ filters, setFilter, reset, listingCount })
         </select>
       </div>
 
+      {/* Show sold toggle */}
       <label className="flex items-center gap-2 cursor-pointer">
         <input
           type="checkbox"
@@ -134,7 +189,8 @@ export default function FilterPanel({ filters, setFilter, reset, listingCount })
       </div>
 
       {advancedOpen && (
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 bg-gray-50 rounded-lg p-3 -mx-1">
+          {/* Price per sqm */}
           <div>
             <label className="text-xs text-gray-500 mb-1 block">{t.pricePerSqm}</label>
             <div className="flex gap-2">
@@ -143,76 +199,55 @@ export default function FilterPanel({ filters, setFilter, reset, listingCount })
             </div>
           </div>
 
-          {selectInput('bedrooms', t.bedrooms, [
-            ['1', '1'], ['2', '2'], ['3', '3'], ['4', '4'], ['5', '5+'],
-          ])}
+          {/* Property details — 2-column grid */}
+          <div className="grid grid-cols-2 gap-3">
+            {selectInput('bedrooms', t.bedrooms, [
+              ['1', '1'], ['2', '2'], ['3', '3'], ['4', '4'], ['5', '5+'],
+            ])}
 
-          {selectInput('bathrooms', t.bathrooms, [
-            ['1', '1'], ['2', '2'], ['3', '3'], ['4', '4+'],
-          ])}
+            {selectInput('bathrooms', t.bathrooms, [
+              ['1', '1'], ['2', '2'], ['3', '3'], ['4', '4+'],
+            ])}
+
+            {selectInput('property_type', t.propertyType, [
+              ['apartment', 'Apartment'],
+              ['house', 'House'],
+              ['studio', 'Studio'],
+            ])}
+
+            {selectInput('condition', t.condition, [
+              ['new', 'New'],
+              ['used', 'Used'],
+              ['renovated', 'Renovated'],
+            ])}
+          </div>
 
           <div>
             <label className="text-xs text-gray-500 mb-1 block">{t.floor}</label>
             {textInput('floor', 'e.g. 3, RC')}
           </div>
 
-          {selectInput('property_type', t.propertyType, [
-            ['apartment', 'Apartment'],
-            ['house', 'House'],
-            ['studio', 'Studio'],
-          ])}
-
-          {selectInput('condition', t.condition, [
-            ['new', 'New'],
-            ['used', 'Used'],
-            ['renovated', 'Renovated'],
-          ])}
-
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block">{t.parish}</label>
-            {textInput('parish', t.parish)}
-          </div>
-
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block">{t.district}</label>
-            {textInput('district', t.district)}
-          </div>
-
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block">{t.city}</label>
-            {textInput('city', t.city)}
-          </div>
-
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block">{t.postalCode}</label>
-            {textInput('postal_code', t.postalCode)}
+          {/* Location — 2-column grid */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">{t.parish}</label>
+              {textInput('parish', t.parish)}
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">{t.district}</label>
+              {textInput('district', t.district)}
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">{t.city}</label>
+              {textInput('city', t.city)}
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">{t.postalCode}</label>
+              {textInput('postal_code', t.postalCode)}
+            </div>
           </div>
         </div>
       )}
-
-      <div>
-        <label className="text-xs text-gray-500 mb-1 block">{t.sortBy}</label>
-        <select
-          value={filters.sort_by}
-          onChange={e => setFilter('sort_by', e.target.value)}
-          className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-        >
-          <option value="default">{t.sortDefault}</option>
-          <option value="rarity">{t.sortRarity}</option>
-          <option value="price_asc">{t.sortPriceAsc}</option>
-          <option value="price_desc">{t.sortPriceDesc}</option>
-          <option value="psm_gross_asc">{t.sortPsmGrossAsc}</option>
-          <option value="psm_gross_desc">{t.sortPsmGrossDesc}</option>
-          <option value="psm_living_asc">{t.sortPsmLivingAsc}</option>
-          <option value="psm_living_desc">{t.sortPsmLivingDesc}</option>
-          <option value="biggest">{t.sortBiggest}</option>
-          <option value="smallest">{t.sortSmallest}</option>
-        </select>
-      </div>
-
-      <div className="text-xs text-gray-400 pt-1">
-        {listingCount != null ? t.listingsCount(listingCount) : ''}
-      </div>
     </div>
   )
 }
