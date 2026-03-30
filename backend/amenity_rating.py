@@ -113,16 +113,27 @@ def _distance_weight(distance_m: float) -> float:
 # ── Overpass query ───────────────────────────────────────────────────────────
 
 def _build_overpass_query(lat: float, lon: float) -> str:
-    """Build a single combined Overpass QL query for all categories."""
-    lines = ["[out:json][timeout:30];", "("]
-    for cat, tags in CATEGORY_TAGS.items():
+    """Build a single combined Overpass QL query for all categories.
+
+    Groups tags by key and uses regex alternation to minimise the number of
+    union members, which avoids Overpass 504 timeouts.
+    """
+    # Group all (key, value) pairs by key across all categories
+    from collections import defaultdict
+    key_values = defaultdict(set)  # type: ignore[type-arg]
+    for tags in CATEGORY_TAGS.values():
         for key, value in tags:
-            lines.append(
-                f'  node["{key}"="{value}"](around:{RADIUS_M},{lat},{lon});'
-            )
-            lines.append(
-                f'  way["{key}"="{value}"](around:{RADIUS_M},{lat},{lon});'
-            )
+            key_values[key].add(value)
+
+    lines = ["[out:json][timeout:60];", "("]
+    for key, values in key_values.items():
+        regex = "|".join(sorted(values))
+        lines.append(
+            f'  node["{key}"~"^({regex})$"](around:{RADIUS_M},{lat},{lon});'
+        )
+        lines.append(
+            f'  way["{key}"~"^({regex})$"](around:{RADIUS_M},{lat},{lon});'
+        )
     lines.append(");")
     lines.append("out center;")
     return "\n".join(lines)
@@ -138,7 +149,7 @@ def _fetch_overpass(lat: float, lon: float) -> list:
         headers={"User-Agent": "RealEstateMapper/1.0"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             result = json.loads(resp.read().decode("utf-8"))
             return result.get("elements", [])
     except Exception as e:
@@ -236,6 +247,16 @@ def get_amenity_rating(lat: float, lon: float) -> dict:
 
     # Fetch from Overpass
     elements = _fetch_overpass(lat_key, lon_key)
+    if not elements:
+        # Don't cache empty results (likely a transient API error/timeout)
+        return {
+            "overall_score": 0,
+            "classification": "C",
+            "categories": {cat: {"score": 0, "count": 0} for cat in CATEGORY_TAGS},
+            "cached": False,
+            "error": "overpass_empty",
+        }
+
     result = _compute_scores(elements, lat_key, lon_key)
     result["cached"] = False
 
