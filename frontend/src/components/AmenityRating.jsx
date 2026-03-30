@@ -47,7 +47,7 @@ export default function AmenityRating({ lat, lon }) {
     )
   }
 
-  if (error || !rating) {
+  if (error || !rating || rating.error) {
     return (
       <div className="text-sm text-gray-400">{t.amenityUnavailable}</div>
     )
