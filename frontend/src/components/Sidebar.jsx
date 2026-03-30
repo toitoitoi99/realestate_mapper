@@ -34,7 +34,7 @@ export default function Sidebar({
 
   if (collapsed) {
     return (
-      <div className="relative shrink-0 w-0 border-r border-gray-200">
+      <div className="relative shrink-0 w-0">
         {toggleBtn}
       </div>
     )
@@ -42,16 +42,19 @@ export default function Sidebar({
 
   if (selectedListing) {
     return (
-      <div className="relative w-80 shrink-0 flex flex-col bg-white border-r border-gray-200 overflow-hidden">
+      <div className="relative w-80 shrink-0">
         {toggleBtn}
-        <ListingDetail listing={selectedListing} onBack={() => onSelectListing(null)} />
+        <div className="flex flex-col bg-white border-r border-gray-200 overflow-hidden h-full">
+          <ListingDetail listing={selectedListing} onBack={() => onSelectListing(null)} />
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="relative w-80 shrink-0 flex flex-col bg-white border-r border-gray-200 min-h-0 overflow-hidden">
+    <div className="relative w-80 shrink-0 min-h-0">
       {toggleBtn}
+      <div className="flex flex-col bg-white border-r border-gray-200 overflow-hidden h-full">
 
       {/* Collapsible filter section */}
       {!filtersCollapsed && (
@@ -126,6 +129,7 @@ export default function Sidebar({
         {!loading && listings?.map(l => (
           <ListingCard key={l.id} listing={l} onSelect={onSelectListing} />
         ))}
+      </div>
       </div>
     </div>
   )
