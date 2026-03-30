@@ -4,6 +4,14 @@ import FilterPanel from './FilterPanel'
 import ListingCard from './ListingCard'
 import ListingDetail from './ListingDetail'
 
+const CollapseChevron = ({ collapsed }) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    {collapsed
+      ? <polyline points="9 6 15 12 9 18" />
+      : <polyline points="15 6 9 12 15 18" />}
+  </svg>
+)
+
 export default function Sidebar({
   filters, setFilter, reset,
   listings, loading,
@@ -16,16 +24,16 @@ export default function Sidebar({
   const toggleBtn = (
     <button
       onClick={() => setCollapsed(c => !c)}
-      className="absolute top-1/2 -translate-y-1/2 -right-4 z-10 w-8 h-12 rounded-r-lg bg-white border border-l-0 border-gray-300 shadow-md flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 cursor-pointer text-sm transition-colors"
+      className="absolute top-1/2 -translate-y-1/2 left-full z-[1001] w-6 h-14 rounded-r-md bg-white border border-l-0 border-gray-300 shadow-md flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-50 cursor-pointer transition-colors"
       title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
     >
-      {collapsed ? '\u25B6' : '\u25C0'}
+      <CollapseChevron collapsed={collapsed} />
     </button>
   )
 
   if (collapsed) {
     return (
-      <div className="relative shrink-0 w-10 bg-white border-r border-gray-200 flex flex-col items-center">
+      <div className="relative shrink-0 w-0 border-r border-gray-200">
         {toggleBtn}
       </div>
     )
