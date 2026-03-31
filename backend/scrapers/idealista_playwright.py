@@ -129,6 +129,15 @@ def _hash(address, city, price, size, source="idealista") -> str:
     return hashlib.sha1(raw.encode()).hexdigest()
 
 
+def _hash_cross(address, city, price, size) -> str:
+    """Source-agnostic hash for cross-site matching."""
+    addr = (address or "").lower().strip()
+    price_r = str(round(price / 1000) * 1000) if price else ""
+    size_r  = str(round(size)) if size else ""
+    raw = f"{addr}|{(city or '').lower()}|{price_r}|{size_r}"
+    return hashlib.sha1(raw.encode()).hexdigest()
+
+
 def _polite_delay():
     time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
 
@@ -681,6 +690,7 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
         lon=lon,
         images=json.dumps(images) if images else None,
         hash_dedupe=_hash(address, city, price, size),
+        hash_cross=_hash_cross(address, city, price, size),
         description=nd.get("description") or dom.get("description"),
         scraped_at=datetime.utcnow(),
     )

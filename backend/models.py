@@ -49,6 +49,9 @@ class Listing:
     # Deduplication (SHA-1 of address+city+price+size+source)
     hash_dedupe: Optional[str] = None
 
+    # Cross-site matching (SHA-1 of address+city+price+size, no source)
+    hash_cross: Optional[str] = None
+
     # Metadata
     description: Optional[str] = None
     scraped_at: datetime = field(default_factory=datetime.utcnow)
@@ -85,6 +88,7 @@ class Listing:
             "lon": self.lon,
             "images": self.images,
             "hash_dedupe": self.hash_dedupe,
+            "hash_cross": self.hash_cross,
             "description": self.description,
             "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
         }
