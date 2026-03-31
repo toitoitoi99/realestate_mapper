@@ -5,6 +5,7 @@ Handles schema creation and all CRUD operations.
 Listings are stored in two separate tables: `sales` and `rentals`.
 """
 
+import hashlib
 import json
 import math
 import sqlite3
@@ -28,6 +29,15 @@ def get_connection() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
+
+def _compute_hash_cross(address, city, price, size) -> str:
+    """Source-agnostic hash for cross-site matching."""
+    addr = (address or "").lower().strip()
+    price_r = str(round(price / 1000) * 1000) if price else ""
+    size_r = str(round(size)) if size else ""
+    raw = f"{addr}|{(city or '').lower()}|{price_r}|{size_r}"
+    return hashlib.sha1(raw.encode()).hexdigest()
 
 
 _LISTING_COLS = """
@@ -57,6 +67,7 @@ _LISTING_COLS = """
     lon             REAL,
     images          TEXT,
     hash_dedupe     TEXT,
+    hash_cross      TEXT,
     description     TEXT,
     scraped_at      TEXT NOT NULL,
 """
@@ -264,7 +275,23 @@ def init_db():
         if "description_en" not in existing:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN description_en TEXT")
             logger.info(f"[DB] Added description_en column to {tbl}")
+        if "hash_cross" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN hash_cross TEXT")
+            conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{tbl}_hash_cross ON {tbl}(hash_cross)")
+            logger.info(f"[DB] Added hash_cross column to {tbl}")
     conn.commit()
+
+    # -- Backfill hash_cross for existing rows ------------------------------------
+    for tbl in ("sales", "rentals"):
+        rows = conn.execute(
+            f"SELECT id, address, city, price_amount, size_sqm FROM {tbl} WHERE hash_cross IS NULL AND address IS NOT NULL"
+        ).fetchall()
+        if rows:
+            for r in rows:
+                hc = _compute_hash_cross(r["address"], r["city"], r["price_amount"], r["size_sqm"])
+                conn.execute(f"UPDATE {tbl} SET hash_cross=? WHERE id=?", (hc, r["id"]))
+            conn.commit()
+            logger.info(f"[DB] Backfilled hash_cross for {len(rows)} rows in {tbl}")
 
     conn.close()
     logger.info(f"[DB] Initialised at {DB_PATH}")
@@ -296,7 +323,7 @@ def upsert_listing(listing: Listing) -> tuple:
                         size_sqm=?, gross_area_sqm=?, rooms=?, bedrooms=?, bathrooms=?, floor=?,
                         property_type=?, condition=?, title=?, address=?, postal_code=?,
                         neighborhood=?, parish=?, district=?, city=?, lat=?, lon=?,
-                        images=?, hash_dedupe=?, description=?, scraped_at=?
+                        images=?, hash_dedupe=?, hash_cross=?, description=?, scraped_at=?
                     WHERE source=? AND source_id=?
                 """, (
                     listing.url, listing.status,
@@ -306,7 +333,7 @@ def upsert_listing(listing: Listing) -> tuple:
                     listing.condition, listing.title, listing.address,
                     listing.postal_code, listing.neighborhood, listing.parish,
                     listing.district, listing.city, listing.lat, listing.lon,
-                    listing.images, listing.hash_dedupe, listing.description,
+                    listing.images, listing.hash_dedupe, listing.hash_cross, listing.description,
                     ts, listing.source, listing.source_id
                 ))
             return row["id"], False
@@ -318,8 +345,8 @@ def upsert_listing(listing: Listing) -> tuple:
                         price_amount, price_per_sqm, size_sqm, gross_area_sqm, rooms, bedrooms,
                         bathrooms, floor, property_type, condition, title,
                         address, postal_code, neighborhood, parish, district,
-                        city, lat, lon, images, hash_dedupe, description, scraped_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        city, lat, lon, images, hash_dedupe, hash_cross, description, scraped_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     listing.source, listing.source_id, listing.url,
                     listing.status,
@@ -329,7 +356,7 @@ def upsert_listing(listing: Listing) -> tuple:
                     listing.condition, listing.title, listing.address,
                     listing.postal_code, listing.neighborhood, listing.parish,
                     listing.district, listing.city, listing.lat, listing.lon,
-                    listing.images, listing.hash_dedupe, listing.description, ts
+                    listing.images, listing.hash_dedupe, listing.hash_cross, listing.description, ts
                 ))
             return cur.lastrowid, True
     finally:
@@ -416,7 +443,7 @@ def get_listings(
         "id, source, source_id, url, status, price_amount, price_per_sqm, "
         "size_sqm, gross_area_sqm, rooms, bedrooms, bathrooms, floor, property_type, condition, "
         "title, address, postal_code, neighborhood, parish, district, city, "
-        "lat, lon, images, hash_dedupe, description, scraped_at"
+        "lat, lon, images, hash_dedupe, hash_cross, description, scraped_at"
     )
 
     if table:
@@ -444,6 +471,22 @@ def get_listings(
             row["status"] = "active"
         result.append(row)
     return result
+
+
+def get_cross_listings(hash_cross: Optional[str], exclude_id: int, listing_type: str = "sale") -> list:
+    """Find listings from other sources that match the same property via hash_cross."""
+    if not hash_cross:
+        return []
+    table = _table_for(listing_type)
+    conn = get_connection()
+    rows = conn.execute(
+        f"SELECT id, source, source_id, url, price_amount, price_per_sqm, "
+        f"size_sqm, scraped_at, status FROM {table} "
+        f"WHERE hash_cross=? AND id!=? ORDER BY scraped_at DESC",
+        (hash_cross, exclude_id)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 # ── Neighborhoods ─────────────────────────────────────────────────────────────

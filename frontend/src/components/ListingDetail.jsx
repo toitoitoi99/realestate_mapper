@@ -1,13 +1,37 @@
 import { useState, useEffect } from 'react'
 import { useLanguage } from '../LanguageContext'
-import { translateDescription } from '../api'
+import { translateDescription, fetchListingDetail } from '../api'
 import RarityBadge from './RarityBadge'
 import AmenityRating from './AmenityRating'
+
+const SOURCE_STYLES = {
+  idealista: { bg: 'bg-green-100', text: 'text-green-800', label: 'idealista' },
+  imovirtual: { bg: 'bg-purple-100', text: 'text-purple-800', label: 'imovirtual' },
+}
+
+function SourceBadge({ source }) {
+  const s = SOURCE_STYLES[source] || { bg: 'bg-gray-100', text: 'text-gray-700', label: source }
+  return (
+    <span className={`${s.bg} ${s.text} text-xs font-semibold px-2 py-0.5 rounded`}>
+      {s.label}
+    </span>
+  )
+}
+
+function PriceDiff({ current, other }) {
+  if (!current || !other) return null
+  const diff = ((other - current) / current) * 100
+  if (Math.abs(diff) < 0.1) return null
+  const color = diff > 0 ? 'text-red-500' : 'text-green-600'
+  const sign = diff > 0 ? '+' : ''
+  return <span className={`text-xs ml-1 ${color}`}>{sign}{diff.toFixed(1)}%</span>
+}
 
 export default function ListingDetail({ listing, onBack }) {
   const { lang, t } = useLanguage()
   const [descriptionEn, setDescriptionEn] = useState(null)
   const [translating, setTranslating] = useState(false)
+  const [crossListings, setCrossListings] = useState([])
 
   useEffect(() => {
     if (lang !== 'en' || !listing.description) {
@@ -24,6 +48,17 @@ export default function ListingDetail({ listing, onBack }) {
       .finally(() => { if (!cancelled) setTranslating(false) })
     return () => { cancelled = true }
   }, [listing.id, listing.listing_type, listing.description, lang])
+
+  useEffect(() => {
+    let cancelled = false
+    setCrossListings([])
+    fetchListingDetail(listing.id, listing.listing_type || 'sale')
+      .then(data => {
+        if (!cancelled) setCrossListings(data.cross_listings || [])
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [listing.id, listing.listing_type])
   const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
 
   const images = (() => {
@@ -125,6 +160,35 @@ export default function ListingDetail({ listing, onBack }) {
           {/* Rarity */}
           <RarityBadge score={listing.rarity_score} factors={listing.rarity_factors} />
 
+          {/* Price comparison across sites */}
+          {crossListings.length > 0 && (
+            <div className="border border-gray-200 rounded-lg p-3">
+              <h3 className="font-semibold text-gray-700 text-sm mb-2">Price comparison</h3>
+              <div className="flex items-center justify-between py-1.5 border-b border-gray-100">
+                <div className="flex items-center gap-2">
+                  <SourceBadge source={listing.source} />
+                  <span className="text-xs text-gray-400">this listing</span>
+                </div>
+                <span className="font-bold text-blue-700 text-sm">€{fmt(listing.price_amount)}</span>
+              </div>
+              {crossListings.map(cl => (
+                <a
+                  key={cl.id}
+                  href={cl.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between py-1.5 hover:bg-gray-50 rounded -mx-1 px-1"
+                >
+                  <SourceBadge source={cl.source} />
+                  <div className="text-right">
+                    <span className="font-bold text-gray-900 text-sm">€{fmt(cl.price_amount)}</span>
+                    <PriceDiff current={listing.price_amount} other={cl.price_amount} />
+                  </div>
+                </a>
+              ))}
+            </div>
+          )}
+
           {/* Property details */}
           {details.length > 0 && (
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
@@ -173,7 +237,7 @@ export default function ListingDetail({ listing, onBack }) {
             rel="noopener noreferrer"
             className="block text-center bg-blue-600 text-white text-sm font-medium py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors"
           >
-            {t.viewOnSource}
+            {t.viewOnSource} ({listing.source})
           </a>
 
           {/* Scraped date */}

@@ -146,6 +146,9 @@ class ListingDetailHandler(BaseHandler):
             return
         result = dict(row)
         result["listing_type"] = listing_type
+        result["cross_listings"] = db.get_cross_listings(
+            result.get("hash_cross"), result["id"], listing_type
+        )
         self.write_json(result)
 
 

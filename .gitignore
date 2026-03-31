@@ -17,7 +17,9 @@ backend/data/lisboa_realestate.db-wal
 backend/data/realestate.db
 backend/data/realestate.db-shm
 backend/data/realestate.db-wal
+backend/data/lis[*]realestate.db
 backend/data/browser_profile/
+backend/data/browser_profile_imovirtual/
 
 # Keep the parish GeoJSON (downloaded once, checked in)
 !backend/data/lisbon_parishes.geojson

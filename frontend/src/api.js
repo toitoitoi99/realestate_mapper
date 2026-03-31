@@ -75,6 +75,12 @@ export async function fetchAmenityRating(lat, lon) {
   return res.json()
 }
 
+export async function fetchListingDetail(id, listingType = 'sale') {
+  const params = new URLSearchParams({ listing_type: listingType })
+  const res = await fetch(`${BASE}/listings/${id}?${params}`)
+  return res.json()
+}
+
 export async function translateDescription(id, listingType = 'sale') {
   const res = await fetch(`${BASE}/translate`, {
     method: 'POST',
