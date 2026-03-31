@@ -20,11 +20,13 @@ Data captured per listing:
 """
 
 import re
+import time
 import hashlib
 import logging
-from typing import Iterator, Optional
+from typing import Iterator, Optional, Tuple
 from urllib.parse import urljoin
 
+import requests
 from bs4 import BeautifulSoup
 
 from scrapers.base import BaseScraper
@@ -42,6 +44,9 @@ SEARCH_URL = "https://www.idealista.pt/comprar-casas/lisboa/"
 MAX_PAGES = 50
 
 
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+
+
 class IdealistaScraper(BaseScraper):
 
     source_name = "idealista"
@@ -54,6 +59,8 @@ class IdealistaScraper(BaseScraper):
         super().__init__()
         self.search_url = search_url
         self.max_pages = max_pages
+        self._geocode_cache = {}  # type: dict[str, Optional[Tuple[float, float]]]
+        self._last_geocode_ts = 0.0
 
         # Warm up the session with a homepage visit (sets cookies)
         self._warm_up()
@@ -215,6 +222,14 @@ class IdealistaScraper(BaseScraper):
         # ── Property type ────────────────────────────────────────────────────
         property_type = self._infer_property_type(title or "", rooms)
 
+        # ── Geocode ──────────────────────────────────────────────────────────
+        lat = None
+        lon = None
+        if address:
+            coords = self._geocode(address, "Lisboa")
+            if coords:
+                lat, lon = coords
+
         addr = (address or "").lower().strip()
         price_r = str(round(price / 1000) * 1000) if price else ""
         size_r = str(round(area_sqm)) if area_sqm else ""
@@ -234,8 +249,56 @@ class IdealistaScraper(BaseScraper):
             address=address,
             neighborhood=neighborhood,
             district="Lisboa",
+            lat=lat,
+            lon=lon,
             hash_dedupe=hash_dedupe,
         )
+
+    # ── Geocoding ─────────────────────────────────────────────────────────────
+
+    def _geocode(self, address: str, district: str) -> Optional[Tuple[float, float]]:
+        """
+        Geocode an address via Nominatim. Returns (lat, lon) or None.
+        Respects Nominatim's 1 req/s rate limit and caches results.
+        """
+        query = f"{address}, {district}, Portugal"
+        if query in self._geocode_cache:
+            return self._geocode_cache[query]
+
+        # Enforce 1 req/s for Nominatim
+        elapsed = time.time() - self._last_geocode_ts
+        if elapsed < 1.0:
+            time.sleep(1.0 - elapsed)
+
+        try:
+            resp = requests.get(
+                NOMINATIM_URL,
+                params={
+                    "q": query,
+                    "format": "json",
+                    "limit": 1,
+                    "countrycodes": "pt",
+                },
+                headers={"User-Agent": "realestate-mapper/1.0"},
+                timeout=10,
+            )
+            self._last_geocode_ts = time.time()
+
+            if resp.status_code == 200:
+                results = resp.json()
+                if results:
+                    coords = (float(results[0]["lat"]), float(results[0]["lon"]))
+                    self._geocode_cache[query] = coords
+                    return coords
+                # Genuine miss — safe to cache
+                self._geocode_cache[query] = None
+                return None
+
+            logger.debug(f"[idealista] Geocode HTTP {resp.status_code} for: {query}")
+        except Exception as e:
+            logger.debug(f"[idealista] Geocode error for {query}: {e}")
+
+        return None
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
