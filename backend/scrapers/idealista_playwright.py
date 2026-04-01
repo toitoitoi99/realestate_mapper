@@ -176,7 +176,7 @@ def _goto_with_retry(page: "Page", url: str, retries: int = DATADOME_RETRIES) ->
 
 def _load_known_source_ids(listing_type: str = 'sale') -> set:
     """Load all source_ids already in the DB for idealista, to skip re-fetching."""
-    table = "rental_listings" if listing_type == "rent" else "sales_listings"
+    table = "rentals" if listing_type == "rent" else "sales"
     try:
         conn = db.get_connection()
         rows = conn.execute(
@@ -933,6 +933,7 @@ def run_scraper(
         log.info(f"Skipping {skipped_known} already-known listings, {len(new_urls)} new to scrape")
 
         # ── Visit each detail page ────────────────────────────────────────────
+        consecutive_blocks = 0
         for i, detail_url in enumerate(new_urls):
             if total_pushed >= max_items:
                 log.info(f"Reached max_items={max_items}. Stopping.")
@@ -944,7 +945,12 @@ def run_scraper(
                 if not _goto_with_retry(page, detail_url):
                     log.warning(f"  DataDome blocked detail page — skipping")
                     error_count += 1
+                    consecutive_blocks += 1
+                    if consecutive_blocks >= 5:
+                        log.error("DataDome blocked 5 consecutive detail pages — session expired. Run --setup.")
+                        break
                     continue
+                consecutive_blocks = 0
 
                 # Wait for __NEXT_DATA__ or JSON-LD to be available
                 try:
@@ -978,7 +984,7 @@ def run_scraper(
                 log.warning(f"  Timeout on detail page — skipping")
                 error_count += 1
             except Exception as e:
-                log.warning(f"  Error: {e}")
+                log.exception(f"  Error processing {detail_url}: {e}")
                 error_count += 1
 
             _polite_delay()
