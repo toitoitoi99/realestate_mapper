@@ -675,8 +675,8 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
     ld_items = extract_json_ld(page)
     ld = extract_listing_from_json_ld(ld_items)
 
-    # DOM fallback if JSON-LD didn't yield a price
-    dom = extract_from_dom(page) if not ld.get("price") else {}
+    # Always run DOM extraction so merge logic can fill fields JSON-LD doesn't provide
+    dom = extract_from_dom(page)
 
     price      = ld.get("price")      or dom.get("price")
     size       = ld.get("size")       or dom.get("size")

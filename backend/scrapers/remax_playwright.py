@@ -813,8 +813,8 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
 
     nd = extract_listing_from_next_data(page_props)
 
-    # DOM fallback if __NEXT_DATA__ didn't yield a price
-    dom = extract_from_dom(page) if not nd.get("price") else {}
+    # Always run DOM extraction so merge logic can fill fields __NEXT_DATA__ doesn't provide
+    dom = extract_from_dom(page)
 
     price      = nd.get("price")      or dom.get("price")
     size       = nd.get("size")       or dom.get("size")
