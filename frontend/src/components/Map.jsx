@@ -55,6 +55,16 @@ function InvalidateOnResize() {
   return null
 }
 
+function FlyToListing({ listing }) {
+  const map = useMap()
+  useEffect(() => {
+    if (listing?.lat && listing?.lon) {
+      map.flyTo([listing.lat, listing.lon], 16, { duration: 1 })
+    }
+  }, [listing?.id, map])
+  return null
+}
+
 function FlyToArea({ areaConfig }) {
   const map = useMap()
   const initialRef = useRef(true)
@@ -131,6 +141,31 @@ function DynamicTileLayer({ baseMap }) {
   return null
 }
 
+// Simple ray-casting point-in-polygon for client-side filtering
+function pointInPolygon(lat, lon, ring) {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i]
+    const [xj, yj] = ring[j]
+    if ((yi > lat) !== (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) {
+      inside = !inside
+    }
+  }
+  return inside
+}
+
+function isPointInFeature(lat, lon, feature) {
+  const geom = feature?.geometry
+  if (!geom) return false
+  if (geom.type === 'Polygon') {
+    return pointInPolygon(lat, lon, geom.coordinates[0])
+  }
+  if (geom.type === 'MultiPolygon') {
+    return geom.coordinates.some(poly => pointInPolygon(lat, lon, poly[0]))
+  }
+  return false
+}
+
 export default function Map({
   areaConfig,
   baseMap, onChangeBaseMap,
@@ -143,7 +178,9 @@ export default function Map({
   showNeighborhoods, visibleGroups,
   neighborhoodGroups, parishToGroup,
   parishFeatures, hiddenParishes,
+  selectedListing,
   showSoldTrends, soldTrendsData,
+  selectedParishes,
 }) {
   const { t } = useLanguage()
   const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
@@ -156,8 +193,26 @@ export default function Map({
     return true
   }
 
-  const withCoords = (listings?.filter(l => l.lat && l.lon) ?? [])
-    .filter(l => isParishVisible(l.neighborhood))
+  // Build selected parish features for point-in-polygon filtering
+  const selectedParishFeatures = useMemo(() => {
+    if (!selectedParishes?.size || !parishFeatures?.length) return null
+    return parishFeatures.filter(f => {
+      const pname = f.properties?.name || f.properties?.Freguesia
+      return pname && selectedParishes.has(pname)
+    })
+  }, [selectedParishes, parishFeatures])
+
+  const allWithCoords = (listings?.filter(l => l.lat && l.lon) ?? [])
+
+  // When parishes are selected for comparison, use point-in-polygon (bypass isParishVisible)
+  let withCoords
+  if (selectedParishFeatures?.length > 0) {
+    withCoords = allWithCoords.filter(l =>
+      selectedParishFeatures.some(f => isPointInFeature(l.lat, l.lon, f))
+    )
+  } else {
+    withCoords = allWithCoords.filter(l => isParishVisible(l.neighborhood))
+  }
 
   const ref = useRef(null)
   const [ctx, setCtx] = useState(null)
@@ -188,6 +243,7 @@ export default function Map({
             parishToGroup={parishToGroup}
             showNeighborhoods={showNeighborhoods}
           />
+          <FlyToListing listing={selectedListing} />
 
           <NeighborhoodLayer
             showNeighborhoods={showNeighborhoods}

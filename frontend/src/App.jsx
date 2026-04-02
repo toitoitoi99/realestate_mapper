@@ -38,6 +38,7 @@ export default function App() {
   const [sidebarTab, setSidebarTab] = useState('listings')
   const [neighbourhoodTypologies, setNeighbourhoodTypologies] = useState({})
   const [parishStats, setParishStats] = useState({})
+  const [selectedParishes, setSelectedParishes] = useState(new Set())
 
   const { filters, setFilter, reset } = useFilters()
 
@@ -154,6 +155,19 @@ export default function App() {
     setSelectedNeighborhood(prev => prev === name ? null : name)
   }, [])
 
+  const toggleSelectedParish = useCallback((name) => {
+    setSelectedParishes(prev => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }, [])
+
+  const clearSelectedParishes = useCallback(() => {
+    setSelectedParishes(new Set())
+  }, [])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <StatsBar stats={stats} ineStats={ineStats} onScrape={handleScrape} scraping={scraping} areas={areas} currentArea={currentArea} onChangeArea={setCurrentArea} />
@@ -174,6 +188,7 @@ export default function App() {
           neighborhoods={neighborhoods}
           neighbourhoodTypologies={neighbourhoodTypologies}
           parishStats={parishStats}
+          ineStats={ineStats}
           showNeighborhoods={showNeighborhoods}
           onToggleNeighborhoods={() => setShowNeighborhoods(p => !p)}
           visibleGroups={visibleGroups}
@@ -195,6 +210,9 @@ export default function App() {
           showSecurity={showSecurity}
           onToggleSecurity={() => setShowSecurity(p => !p)}
           securityPois={securityPois}
+          selectedParishes={selectedParishes}
+          onToggleSelectedParish={toggleSelectedParish}
+          onClearSelectedParishes={clearSelectedParishes}
         />
         <Map
           areaConfig={areas[currentArea]}
@@ -205,6 +223,7 @@ export default function App() {
           onSelectNeighborhood={handleSelectNeighborhood}
           selectedNeighborhood={selectedNeighborhood}
           onSelectListing={setSelectedListing}
+          selectedListing={selectedListing}
           projects={projects}
           showProjects={showProjects}
           visibleCategories={visibleCategories}
@@ -218,6 +237,7 @@ export default function App() {
           hiddenParishes={hiddenParishes}
           showSoldTrends={showSoldTrends}
           soldTrendsData={soldTrendsData}
+          selectedParishes={selectedParishes}
         />
       </div>
     </div>

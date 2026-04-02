@@ -150,6 +150,20 @@ class ListingDetailHandler(BaseHandler):
         result["cross_listings"] = db.get_cross_listings(
             result.get("hash_cross"), result["id"], listing_type
         )
+
+        # Resolve previous listing price for re-list tracking
+        prev_id = result.get("previous_listing_id")
+        if prev_id:
+            actual_table = db._table_for(listing_type)
+            conn2 = db.get_connection()
+            prev_row = conn2.execute(
+                f"SELECT price_amount, price_per_sqm FROM {actual_table} WHERE id=?", (prev_id,)
+            ).fetchone()
+            conn2.close()
+            if prev_row:
+                result["previous_price_amount"] = prev_row["price_amount"]
+                result["previous_price_per_sqm"] = prev_row["price_per_sqm"]
+
         self.write_json(result)
 
 
@@ -592,6 +606,67 @@ def _find_parish(lat, lon, features):
     return None
 
 
+class NearbyProjectsHandler(BaseHandler):
+    """GET /api/nearby-projects?lat=...&lon=...&radius_m=500 — count construction projects near a point"""
+
+    def get(self):
+        import math
+        lat = self.get_float_arg("lat")
+        lon = self.get_float_arg("lon")
+        radius_m = self.get_int_arg("radius_m", 500)
+        if lat is None or lon is None:
+            self.write_error_json("lat and lon required", 400)
+            return
+
+        # Approximate degree offset for bounding box
+        dlat = radius_m / 111_320
+        dlon = radius_m / (111_320 * math.cos(math.radians(lat)))
+
+        conn = db.get_connection()
+        rows = conn.execute(
+            """SELECT source_id, layer, operation, subject, address,
+                      centroid_lat, centroid_lon
+               FROM construction_projects
+               WHERE centroid_lat BETWEEN ? AND ?
+                 AND centroid_lon BETWEEN ? AND ?""",
+            (lat - dlat, lat + dlat, lon - dlon, lon + dlon),
+        ).fetchall()
+        conn.close()
+
+        # Haversine filter for exact radius
+        projects = []
+        for r in rows:
+            plat, plon = r["centroid_lat"], r["centroid_lon"]
+            if plat is None or plon is None:
+                continue
+            a = math.sin(math.radians(plat - lat) / 2) ** 2 + \
+                math.cos(math.radians(lat)) * math.cos(math.radians(plat)) * \
+                math.sin(math.radians(plon - lon) / 2) ** 2
+            d = 6_371_000 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+            if d <= radius_m:
+                projects.append({
+                    "layer": r["layer"],
+                    "operation": r["operation"],
+                    "subject": r["subject"],
+                    "address": r["address"],
+                    "distance_m": round(d),
+                })
+
+        # Sort by distance
+        projects.sort(key=lambda p: p["distance_m"])
+
+        # Summary counts
+        issued = sum(1 for p in projects if p["layer"] == "issued")
+        pending = sum(1 for p in projects if p["layer"] == "pending")
+
+        self.write_json({
+            "count": len(projects),
+            "issued": issued,
+            "pending": pending,
+            "projects": projects[:20],  # Top 20 closest
+        })
+
+
 class ParishStatsHandler(BaseHandler):
     """GET /api/parish-stats — per-parish statistics computed via point-in-polygon"""
 
@@ -690,6 +765,7 @@ def make_app() -> tornado.web.Application:
             (r"/api/chat",                  ChatHandler),
             (r"/api/neighbourhood-typologies", NeighbourhoodTypologiesHandler),
             (r"/api/parish-stats",          ParishStatsHandler),
+            (r"/api/nearby-projects",       NearbyProjectsHandler),
         ],
         debug=False,
     )

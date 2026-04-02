@@ -5,6 +5,7 @@ import ListingCard from './ListingCard'
 import ListingDetail from './ListingDetail'
 import SidebarTabs from './SidebarTabs'
 import NeighbourhoodPanel from './NeighbourhoodPanel'
+import NeighbourhoodComparison from './NeighbourhoodComparison'
 
 const CollapseChevron = ({ collapsed }) => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -21,7 +22,7 @@ export default function Sidebar({
   selectedListing, onSelectListing,
   sidebarTab, onChangeTab,
   // Neighbourhood panel props
-  neighborhoods, neighbourhoodTypologies, parishStats,
+  neighborhoods, neighbourhoodTypologies, parishStats, ineStats,
   showNeighborhoods, onToggleNeighborhoods,
   visibleGroups, onToggleGroup,
   neighborhoodGroups, hiddenParishes, onToggleParish,
@@ -31,6 +32,7 @@ export default function Sidebar({
   showSoldTrends, onToggleSoldTrends,
   soldDateRange, onSoldDateRangeChange, soldTrendsData,
   showSecurity, onToggleSecurity, securityPois,
+  selectedParishes, onToggleSelectedParish, onClearSelectedParishes,
 }) {
   const { t } = useLanguage()
   const [collapsed, setCollapsed] = useState(false)
@@ -59,7 +61,7 @@ export default function Sidebar({
       <div className="relative w-80 shrink-0">
         {toggleBtn}
         <div className="flex flex-col bg-white border-r border-gray-200 overflow-hidden h-full">
-          <ListingDetail listing={selectedListing} onBack={() => onSelectListing(null)} />
+          <ListingDetail listing={selectedListing} onBack={() => onSelectListing(null)} parishStats={parishStats} ineStats={ineStats} />
         </div>
       </div>
     )
@@ -127,6 +129,19 @@ export default function Sidebar({
           showSecurity={showSecurity}
           onToggleSecurity={onToggleSecurity}
           securityPois={securityPois}
+          selectedParishes={selectedParishes}
+          onToggleSelectedParish={onToggleSelectedParish}
+          onClearSelectedParishes={onClearSelectedParishes}
+        />
+      )}
+
+      {/* Comparison cards */}
+      {selectedParishes?.size > 0 && (
+        <NeighbourhoodComparison
+          selectedParishes={selectedParishes}
+          parishStats={parishStats}
+          onRemoveParish={onToggleSelectedParish}
+          onClearAll={onClearSelectedParishes}
         />
       )}
 

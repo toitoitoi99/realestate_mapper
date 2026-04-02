@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useLanguage } from '../LanguageContext'
-import { translateDescription, fetchListingDetail } from '../api'
+import { translateDescription, fetchListingDetail, fetchNearbyProjects } from '../api'
 import RarityBadge from './RarityBadge'
 import AmenityRating from './AmenityRating'
 import ListingComparison from './ListingComparison'
@@ -15,11 +15,44 @@ function PriceDiff({ current, other }) {
   return <span className={`text-xs ml-1 ${color}`}>{sign}{diff.toFixed(1)}%</span>
 }
 
-export default function ListingDetail({ listing, onBack }) {
+/** Parse floor field — handles raw strings like "['floor_3']", "floor_3", "3", etc. */
+function parseFloor(raw) {
+  if (raw == null) return null
+  let s = String(raw).trim()
+  // Strip list brackets and quotes
+  s = s.replace(/^\[?'?"?/, '').replace(/'?"?\]?$/, '')
+  // Extract number from "floor_N" pattern
+  const m = s.match(/floor[_\s]*(\d+)/i)
+  if (m) return m[1]
+  // Already a clean value (number, "RC", etc.)
+  if (s && s !== 'null' && s !== 'undefined') return s
+  return null
+}
+
+/** Days between scraped_at and now */
+function daysAgo(scrapedAt) {
+  if (!scrapedAt) return null
+  const scraped = new Date(scrapedAt)
+  const now = new Date()
+  return Math.max(0, Math.round((now - scraped) / 86_400_000))
+}
+
+/** Format percentage diff with color */
+function PctBadge({ pct, invert = false }) {
+  if (pct == null || !isFinite(pct)) return null
+  const isNeg = pct < 0
+  const color = (invert ? !isNeg : isNeg) ? 'text-green-600' : 'text-red-500'
+  const sign = pct > 0 ? '+' : ''
+  return <span className={`text-xs font-semibold ${color}`}>{sign}{pct.toFixed(0)}%</span>
+}
+
+export default function ListingDetail({ listing, onBack, parishStats, ineStats }) {
   const { lang, t } = useLanguage()
   const [descriptionEn, setDescriptionEn] = useState(null)
   const [translating, setTranslating] = useState(false)
   const [crossListings, setCrossListings] = useState([])
+  const [previousPrice, setPreviousPrice] = useState(null)
+  const [nearbyProjects, setNearbyProjects] = useState(null)
 
   useEffect(() => {
     if (lang !== 'en' || !listing.description) {
@@ -40,13 +73,28 @@ export default function ListingDetail({ listing, onBack }) {
   useEffect(() => {
     let cancelled = false
     setCrossListings([])
+    setPreviousPrice(null)
     fetchListingDetail(listing.id, listing.listing_type || 'sale')
       .then(data => {
-        if (!cancelled) setCrossListings(data.cross_listings || [])
+        if (!cancelled) {
+          setCrossListings(data.cross_listings || [])
+          if (data.previous_price_amount) setPreviousPrice(data.previous_price_amount)
+        }
       })
       .catch(() => {})
     return () => { cancelled = true }
   }, [listing.id, listing.listing_type])
+
+  // Fetch nearby construction projects
+  useEffect(() => {
+    if (!listing?.lat || !listing?.lon) return
+    let cancelled = false
+    fetchNearbyProjects(listing.lat, listing.lon, 500)
+      .then(data => { if (!cancelled) setNearbyProjects(data) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [listing?.lat, listing?.lon])
+
   const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
 
   const images = (() => {
@@ -59,15 +107,78 @@ export default function ListingDetail({ listing, onBack }) {
   const isSold = listing.status === 'sold'
   const isReserved = listing.status === 'reserved'
 
+  // --- Computed values ---
+  const days = daysAgo(listing.scraped_at)
+  const floorClean = parseFloor(listing.floor)
+  const tp = listing.price_per_sqm
+
+  // Parish median comparison — try multiple fields since scraper data is inconsistent
+  const parishCandidates = [listing.parish, listing.city, listing.neighborhood, listing.district].filter(Boolean)
+  const parishData = parishStats?.stats || parishStats || {}
+  let parishMedianPsm = null
+  let parishDiffPct = null
+  let matchedParish = null
+  if (tp && Object.keys(parishData).length > 0) {
+    for (const candidate of parishCandidates) {
+      // Try exact match
+      if (parishData[candidate]) {
+        matchedParish = candidate
+        break
+      }
+      // Try partial match
+      const found = Object.entries(parishData).find(([k]) =>
+        k.toLowerCase().includes(candidate.toLowerCase()) ||
+        candidate.toLowerCase().includes(k.toLowerCase())
+      )
+      if (found) {
+        matchedParish = found[0]
+        break
+      }
+    }
+    if (matchedParish && parishData[matchedParish]?.median_price_per_sqm) {
+      parishMedianPsm = parishData[matchedParish].median_price_per_sqm
+      parishDiffPct = ((tp - parishMedianPsm) / parishMedianPsm) * 100
+    }
+  }
+
+  // INE sold price comparison
+  let ineSoldPsm = null
+  let ineDiffPct = null
+  if (tp && ineStats?.stats) {
+    // Use "Total" category for the municipality
+    const total = ineStats.stats.find(s => s.category === 'Total' || s.category_label?.includes('Total'))
+    if (total?.median_price_per_sqm) {
+      ineSoldPsm = total.median_price_per_sqm
+      ineDiffPct = ((tp - ineSoldPsm) / ineSoldPsm) * 100
+    }
+  }
+
+  // Re-list price drop
+  const priceDropPct = previousPrice && listing.price_amount
+    ? ((listing.price_amount - previousPrice) / previousPrice) * 100
+    : null
+
+  // Gross/living area
+  const grossArea = listing.gross_area_sqm
+  const livingArea = listing.size_sqm
+  const areaEfficiency = grossArea && livingArea && grossArea > 0
+    ? Math.round((livingArea / grossArea) * 100)
+    : null
+
+  // Property details grid
   const details = [
     { label: t.rooms,        value: listing.rooms != null ? `T${listing.rooms}` : null },
     { label: t.bedrooms,     value: listing.bedrooms },
     { label: t.bathrooms,    value: listing.bathrooms },
-    { label: t.size,         value: listing.size_sqm ? `${fmt(listing.size_sqm)} m²` : null },
-    { label: t.floor,        value: listing.floor },
+    { label: t.livingArea || 'Living area', value: livingArea ? `${fmt(livingArea)} m²` : null },
+    ...(grossArea && grossArea !== livingArea ? [{
+      label: t.grossArea || 'Gross area',
+      value: `${fmt(grossArea)} m²${areaEfficiency ? ` (${areaEfficiency}% ${t.efficiency || 'eff.'})` : ''}`
+    }] : []),
+    { label: t.floor,        value: floorClean },
     { label: t.condition,    value: listing.condition },
     { label: t.propertyType, value: listing.property_type },
-    { label: `€/m²`,        value: listing.price_per_sqm ? `€${fmt(listing.price_per_sqm)}` : null },
+    { label: `€/m²`,        value: tp ? `€${fmt(tp)}` : null },
   ].filter(d => d.value != null)
 
   const location = [
@@ -76,6 +187,17 @@ export default function ListingDetail({ listing, onBack }) {
     { label: t.neighborhoods, value: listing.neighborhood },
     { label: t.parish,       value: listing.parish },
   ].filter(d => d.value)
+
+  // Sanitize description HTML
+  const descriptionHtml = (() => {
+    const raw = lang === 'en' && descriptionEn ? descriptionEn : listing.description
+    if (!raw) return null
+    // Convert <br/> and <br> to newlines, strip other tags
+    return raw
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .trim()
+  })()
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -130,7 +252,7 @@ export default function ListingDetail({ listing, onBack }) {
         )}
 
         <div className="p-4 flex flex-col gap-4">
-          {/* Title + Price */}
+          {/* Title + Price + Days on market */}
           <div>
             {(isSold || isReserved) && (
               <span className="inline-block text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded mb-1 uppercase tracking-wide">
@@ -143,13 +265,86 @@ export default function ListingDetail({ listing, onBack }) {
               </h2>
               <SourceLogo source={listing.source} size="md" />
             </div>
-            <div className="text-xl font-bold text-blue-700 mt-1">
-              €{fmt(listing.price_amount)}{isRent ? '/mo' : ''}
+            <div className="flex items-baseline gap-2 mt-1">
+              <span className="text-xl font-bold text-blue-700">
+                €{fmt(listing.price_amount)}{isRent ? '/mo' : ''}
+              </span>
+              {days != null && (
+                <span className="text-xs text-gray-400">
+                  {days === 0 ? (t.justListed || 'Just listed') : `${days} ${t.daysOnMarket || 'days'}`}
+                </span>
+              )}
             </div>
+
+            {/* Re-list price drop */}
+            {previousPrice && priceDropPct != null && (
+              <div className="flex items-center gap-1.5 mt-1 bg-green-50 border border-green-200 rounded px-2 py-1">
+                <span className="text-xs text-gray-600">{t.priceDropFrom || 'Price drop from'}</span>
+                <span className="text-xs text-gray-500 line-through">€{fmt(previousPrice)}</span>
+                <PctBadge pct={priceDropPct} invert />
+              </div>
+            )}
           </div>
 
-          {/* Rarity */}
-          <RarityBadge score={listing.rarity_score} factors={listing.rarity_factors} />
+          {/* ============ VALUE SUMMARY CARD ============ */}
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
+            {/* Row 1: Quick badges */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <RarityBadge score={listing.rarity_score} factors={listing.rarity_factors} compact />
+              {listing.condition && (
+                <span className="text-[10px] font-medium bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">
+                  {listing.condition}
+                </span>
+              )}
+              {days != null && days <= 3 && (
+                <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">NEW</span>
+              )}
+            </div>
+
+            {/* Row 2: €/m² vs parish median */}
+            {parishMedianPsm && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-500">{t.parishMedian || 'Parish median'}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-gray-600">€{fmt(parishMedianPsm)}/m²</span>
+                  <PctBadge pct={parishDiffPct} />
+                </div>
+              </div>
+            )}
+
+            {/* Row 3: €/m² vs INE sold */}
+            {ineSoldPsm && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-500">{t.ineSoldMedian || 'INE sold median'}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-gray-600">€{fmt(ineSoldPsm)}/m²</span>
+                  <PctBadge pct={ineDiffPct} />
+                  {ineDiffPct > 0 && (
+                    <span className="text-[10px] text-gray-400">({t.askingPremium || 'premium'})</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Row 4: Nearby construction */}
+            {nearbyProjects && nearbyProjects.count > 0 && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-500">{t.nearbyProjects || 'Nearby construction'}</span>
+                <div className="flex items-center gap-1.5">
+                  {nearbyProjects.issued > 0 && (
+                    <span className="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded text-[10px] font-medium">
+                      {nearbyProjects.issued} {t.issuedPermits || 'issued'}
+                    </span>
+                  )}
+                  {nearbyProjects.pending > 0 && (
+                    <span className="bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded text-[10px] font-medium">
+                      {nearbyProjects.pending} {t.pendingApps || 'pending'}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Price comparison across sites */}
           {crossListings.length > 0 && (
@@ -180,6 +375,9 @@ export default function ListingDetail({ listing, onBack }) {
             </div>
           )}
 
+          {/* ============ PRICE COMPARISON (MOVED UP) ============ */}
+          <ListingComparison listing={listing} />
+
           {/* Property details */}
           {details.length > 0 && (
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
@@ -207,18 +405,39 @@ export default function ListingDetail({ listing, onBack }) {
           {/* Amenity Rating */}
           <AmenityRating lat={listing.lat} lon={listing.lon} />
 
-          {/* Price Comparison & Yield */}
-          <ListingComparison listing={listing} />
+          {/* Nearby construction projects detail */}
+          {nearbyProjects && nearbyProjects.count > 0 && (
+            <details className="text-sm">
+              <summary className="font-semibold text-gray-700 cursor-pointer hover:text-blue-600">
+                {t.nearbyProjects || 'Nearby construction'} ({nearbyProjects.count})
+              </summary>
+              <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto">
+                {nearbyProjects.projects.map((p, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs py-1 border-b border-gray-100">
+                    <span className="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded text-[10px] font-medium w-10 text-center">
+                      {p.distance_m}m
+                    </span>
+                    <span className={`px-1 py-0.5 rounded text-[10px] font-medium ${
+                      p.layer === 'issued' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                    }`}>
+                      {p.layer}
+                    </span>
+                    <span className="flex-1 truncate text-gray-600">{p.operation || p.subject || p.address || '—'}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
 
-          {/* Description */}
-          {listing.description && (
+          {/* Description (sanitized) */}
+          {descriptionHtml && (
             <div className="text-sm">
               <h3 className="font-semibold text-gray-700 mb-1">{t.description}</h3>
               {translating ? (
                 <p className="text-gray-400 text-xs italic">Translating…</p>
               ) : (
                 <p className="text-gray-600 whitespace-pre-line text-xs leading-relaxed">
-                  {lang === 'en' && descriptionEn ? descriptionEn : listing.description}
+                  {descriptionHtml}
                 </p>
               )}
             </div>
