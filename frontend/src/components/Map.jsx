@@ -102,7 +102,9 @@ function FitToParishes({ parishFeatures, hiddenParishes, visibleGroups, parishTo
 
     const bounds = L.geoJSON(visibleFeatures).getBounds()
     if (bounds.isValid()) {
-      map.flyToBounds(bounds, { padding: [50, 50], duration: 0.8, maxZoom: 15 })
+      const fitZoom = map.getBoundsZoom(bounds, false, [50, 50])
+      const zoom = Math.min(fitZoom + 0.6, 15)
+      map.flyTo(bounds.getCenter(), zoom, { duration: 0.8 })
     }
   }, [visibleKey, parishFeatures, map])
   return null
