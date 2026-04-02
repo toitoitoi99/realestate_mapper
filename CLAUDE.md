@@ -73,6 +73,20 @@ npm run build                          # Production build
 
 Note: The API (`database.py`) queries `sales` and `rentals` tables separately, not a unified `listings` table. The `/api/listings` endpoint unions them.
 
+## Preview / Dev setup
+
+### launch.json
+The `.claude/launch.json` defines `backend` and `frontend` server configs for the preview module. Key gotchas:
+
+- **Node.js PATH**: The preview shell doesn't inherit the user's full PATH. The frontend launch command must explicitly set `PATH=/usr/local/bin:$PATH` (or wherever `node`/`npx` live) in the bash command.
+- **Port conflicts**: Port 8000 (backend) and 3000 (frontend) may already be in use (e.g. by the main repo when running in a worktree). Both configs use `autoPort: true` to handle this. The Vite proxy target must be dynamic — use `process.env.BACKEND_PORT || 8000` in `vite.config.js` and pass `BACKEND_PORT=<port>` in the frontend launch command.
+- **Worktree setup**: Git worktrees don't share `node_modules`. After creating a worktree, you must run `cd frontend && npm install` before starting the frontend. The SQLite DB will also be empty — the app will show 0 listings until scrapers are run.
+
+### Known UI issues
+- **Mobile layout**: At mobile viewport widths, the sidebar overlaps the map with no toggle. Not currently responsive.
+- **Area switching**: When switching areas (e.g. AML → Porto), the map may not re-center correctly and the app title / search placeholder remain Lisbon-specific.
+- **Backend root route**: The Tornado backend has no handler for `GET /` — health-check probes log 404 warnings. Not a functional issue.
+
 ## Key constraints
 
 - **Python 3.9**: No `str | None` union syntax — use `Optional[str]` from `typing`
@@ -80,3 +94,4 @@ Note: The API (`database.py`) queries `sales` and `rentals` tables separately, n
 - **ArcGIS pagination**: Break only when `len(batch) < PAGE_SIZE`; don't rely on `exceededTransferLimit`
 - **`/api/projects`**: Excludes `geometry` column and defaults to `limit=5000` (most recent) to keep response size manageable
 - **DataDome**: Idealista blocks automated browsers; requires real Chrome + persistent profile + one-time manual challenge solve via `--setup`
+- **Vite proxy port**: The proxy target in `vite.config.js` reads `process.env.BACKEND_PORT` (default 8000). When running backend on a non-standard port (worktrees, port conflicts), set `BACKEND_PORT` accordingly before starting the frontend.
