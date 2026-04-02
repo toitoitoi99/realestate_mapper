@@ -1,5 +1,6 @@
 import { useLanguage } from '../LanguageContext'
 import RarityBadge from './RarityBadge'
+import SourceLogo from './SourceLogo'
 
 export default function ListingCard({ listing, onSelect }) {
   const { t } = useLanguage()
@@ -25,9 +26,12 @@ export default function ListingCard({ listing, onSelect }) {
         {listing.price_per_sqm && <span>€{fmt(listing.price_per_sqm)}/m²</span>}
       </div>
 
-      {listing.neighborhood && (
-        <div className="text-xs text-gray-400 mt-1 truncate">{listing.neighborhood}</div>
-      )}
+      <div className="flex items-center justify-between mt-1">
+        {listing.neighborhood && (
+          <span className="text-xs text-gray-400 truncate">{listing.neighborhood}</span>
+        )}
+        <SourceLogo source={listing.source} />
+      </div>
 
       <RarityBadge score={listing.rarity_score} factors={listing.rarity_factors} />
     </div>

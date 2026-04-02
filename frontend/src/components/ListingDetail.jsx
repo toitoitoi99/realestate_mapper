@@ -4,20 +4,7 @@ import { translateDescription, fetchListingDetail } from '../api'
 import RarityBadge from './RarityBadge'
 import AmenityRating from './AmenityRating'
 import ListingComparison from './ListingComparison'
-
-const SOURCE_STYLES = {
-  idealista: { bg: 'bg-green-100', text: 'text-green-800', label: 'idealista' },
-  imovirtual: { bg: 'bg-purple-100', text: 'text-purple-800', label: 'imovirtual' },
-}
-
-function SourceBadge({ source }) {
-  const s = SOURCE_STYLES[source] || { bg: 'bg-gray-100', text: 'text-gray-700', label: source }
-  return (
-    <span className={`${s.bg} ${s.text} text-xs font-semibold px-2 py-0.5 rounded`}>
-      {s.label}
-    </span>
-  )
-}
+import SourceLogo from './SourceLogo'
 
 function PriceDiff({ current, other }) {
   if (!current || !other) return null
@@ -150,9 +137,12 @@ export default function ListingDetail({ listing, onBack }) {
                 {isSold ? t.sold : t.reserved}
               </span>
             )}
-            <h2 className="font-bold text-gray-900 text-base leading-snug">
-              {listing.title || `T${listing.rooms ?? '?'} ${t.inArea(listing.neighborhood || 'Lisboa')}`}
-            </h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-bold text-gray-900 text-base leading-snug">
+                {listing.title || `T${listing.rooms ?? '?'} ${t.inArea(listing.neighborhood || 'Lisboa')}`}
+              </h2>
+              <SourceLogo source={listing.source} size="md" />
+            </div>
             <div className="text-xl font-bold text-blue-700 mt-1">
               €{fmt(listing.price_amount)}{isRent ? '/mo' : ''}
             </div>
@@ -167,7 +157,7 @@ export default function ListingDetail({ listing, onBack }) {
               <h3 className="font-semibold text-gray-700 text-sm mb-2">Price comparison</h3>
               <div className="flex items-center justify-between py-1.5 border-b border-gray-100">
                 <div className="flex items-center gap-2">
-                  <SourceBadge source={listing.source} />
+                  <SourceLogo source={listing.source} size="md" />
                   <span className="text-xs text-gray-400">this listing</span>
                 </div>
                 <span className="font-bold text-blue-700 text-sm">€{fmt(listing.price_amount)}</span>
@@ -180,7 +170,7 @@ export default function ListingDetail({ listing, onBack }) {
                   rel="noopener noreferrer"
                   className="flex items-center justify-between py-1.5 hover:bg-gray-50 rounded -mx-1 px-1"
                 >
-                  <SourceBadge source={cl.source} />
+                  <SourceLogo source={cl.source} size="md" />
                   <div className="text-right">
                     <span className="font-bold text-gray-900 text-sm">€{fmt(cl.price_amount)}</span>
                     <PriceDiff current={listing.price_amount} other={cl.price_amount} />
