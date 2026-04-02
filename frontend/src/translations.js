@@ -210,6 +210,10 @@ export const translations = {
     density:            'Density',
     low:                'Low',
     high:               'High',
+
+    // NeighbourhoodComparison
+    comparison:         'Comparison',
+    clearComparison:    'Clear',
   },
 
   pt: {
@@ -383,5 +387,9 @@ export const translations = {
     density:            'Densidade',
     low:                'Baixo',
     high:               'Alto',
+
+    // NeighbourhoodComparison
+    comparison:         'Comparacao',
+    clearComparison:    'Limpar',
   },
 }

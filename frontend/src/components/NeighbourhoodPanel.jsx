@@ -11,6 +11,7 @@ export default function NeighbourhoodPanel({
   neighborhoodGroups, hiddenParishes, onToggleParish,
   neighborhoods, typologies, parishStats,
   onSelectNeighborhood,
+  selectedParishes, onToggleSelectedParish, onClearSelectedParishes,
   // Construction projects
   showProjects, onToggleProjects,
   visibleCategories, onToggleCategory, projects,
@@ -118,6 +119,15 @@ export default function NeighbourhoodPanel({
             {neighbourhoodListCollapsed ? '▼ Show' : '▲ Hide'}
           </button>
         </div>
+
+        {selectedParishes?.size > 0 && (
+          <button
+            className="text-xs text-blue-500 hover:text-blue-700 cursor-pointer mb-1"
+            onClick={onClearSelectedParishes}
+          >
+            {t.clearComparison ?? 'Clear comparison'} ({selectedParishes.size})
+          </button>
+        )}
 
         {!neighbourhoodListCollapsed && <div className="pl-1 mt-1 space-y-1">
           {Object.entries(neighborhoodGroups ?? {}).map(([key, group]) => {
@@ -274,8 +284,12 @@ export default function NeighbourhoodPanel({
                               onClick={(e) => { e.stopPropagation(); handleParishToggle() }}
                             />
                             <span
-                              className="leading-tight cursor-pointer select-none flex-1 text-gray-400 hover:text-gray-600"
-                              onClick={handleParishToggle}
+                              className={`leading-tight cursor-pointer select-none flex-1 ${
+                                selectedParishes?.has(name)
+                                  ? 'text-blue-600 font-medium'
+                                  : 'text-gray-400 hover:text-gray-600'
+                              }`}
+                              onClick={() => onToggleSelectedParish?.(name)}
                             >
                               {name}
                             </span>
