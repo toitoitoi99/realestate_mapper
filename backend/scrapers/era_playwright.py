@@ -319,9 +319,10 @@ def extract_search_listings(page: Page) -> list:
     """
     try:
         # Wait for property cards to render (ERA uses client-side rendering)
+        # ERA listing links use /imovel/ pattern, not /comprar/ or /arrendar/
         try:
             page.wait_for_selector(
-                'a[href*="/comprar/"], a[href*="/arrendar/"], .property-card, '
+                'a[href*="/imovel/"], .property-card, '
                 '.listing-card, [class*="PropertyCard"], [class*="property-list"]',
                 timeout=10000
             )
@@ -352,17 +353,12 @@ def extract_search_listings(page: Page) -> list:
                         // Match paths like /comprar/apartamento/t2/cidade/slug-12345
                         (/\/(comprar|arrendar)\/(apartamento|moradia|vivenda|terreno|loja|garagem|armazem|escritorio|andar|quinta|predio)[\/\-]/.test(href) &&
                          href.split('/').length >= 6) ||
-                        // Match /imovel/ pattern
-                        /\/imovel\/\d+/.test(href)
+                        // Match /imovel/ pattern (slug with ID suffix, e.g. /imovel/apartamento-t2-lisboa-265260067)
+                        /\/imovel\/[a-z]/.test(href)
                     );
 
                     if (!isDetailPage) continue;
                     if (seen.has(href)) continue;
-
-                    // Skip if this looks like a search/category page (too few path segments)
-                    const path = new URL(href).pathname;
-                    const segments = path.split('/').filter(s => s.length > 0);
-                    if (segments.length < 4) continue;
 
                     seen.add(href);
 
@@ -410,8 +406,9 @@ def _extract_source_id(url: str) -> str:
     - /imovel/12345
     - URL path ending with a numeric segment
     """
-    # Try /imovel/ID pattern
-    m = re.search(r'/imovel/(\d+)', url)
+    # Try /imovel/ pattern — extract trailing numeric ID from slug
+    # e.g. /imovel/apartamento-t2-lisboa-alvalade-265260067
+    m = re.search(r'/imovel/.*?(\d{6,})$', url)
     if m:
         return m.group(1)
 
