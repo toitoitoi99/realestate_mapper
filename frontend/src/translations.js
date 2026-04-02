@@ -194,6 +194,23 @@ export const translations = {
     addressHistory:     'Address History',
     previousListings:   'Other listings at this address',
 
+    // ValueSummary
+    daysOnMarket:       'days listed',
+    justListed:         'Just listed',
+    priceDropFrom:      'Price drop from',
+    vsParishMedian:     'vs parish median',
+    vsIneSold:          'vs INE sold median',
+    grossArea:          'Gross area',
+    livingArea:         'Living area',
+    efficiency:         'efficiency',
+    nearbyProjects:     'Nearby construction',
+    issuedPermits:      'issued permits',
+    pendingApps:        'pending',
+    noProjectsNearby:   'No construction projects nearby',
+    parishMedian:       'Parish median',
+    ineSoldMedian:      'INE sold median',
+    askingPremium:      'Asking premium',
+
     // SidebarTabs
     tabListings:        'Listings',
     tabNeighbourhoods:  'Neighbourhoods',
@@ -370,6 +387,23 @@ export const translations = {
     priceHistory:       'Histórico de Preços',
     addressHistory:     'Histórico do Endereço',
     previousListings:   'Outros anúncios neste endereço',
+
+    // ValueSummary
+    daysOnMarket:       'dias anunciado',
+    justListed:         'Recém-publicado',
+    priceDropFrom:      'Descida de preço de',
+    vsParishMedian:     'vs mediana da freguesia',
+    vsIneSold:          'vs mediana INE vendido',
+    grossArea:          'Área bruta',
+    livingArea:         'Área útil',
+    efficiency:         'eficiência',
+    nearbyProjects:     'Construção próxima',
+    issuedPermits:      'alvarás emitidos',
+    pendingApps:        'em curso',
+    noProjectsNearby:   'Sem projectos de construção próximos',
+    parishMedian:       'Mediana da freguesia',
+    ineSoldMedian:      'Mediana INE vendido',
+    askingPremium:      'Prémio pedido',
 
     // SidebarTabs
     tabListings:        'Anúncios',

@@ -22,7 +22,7 @@ export default function Sidebar({
   selectedListing, onSelectListing,
   sidebarTab, onChangeTab,
   // Neighbourhood panel props
-  neighborhoods, neighbourhoodTypologies, parishStats,
+  neighborhoods, neighbourhoodTypologies, parishStats, ineStats,
   showNeighborhoods, onToggleNeighborhoods,
   visibleGroups, onToggleGroup,
   neighborhoodGroups, hiddenParishes, onToggleParish,
@@ -61,7 +61,7 @@ export default function Sidebar({
       <div className="relative w-80 shrink-0">
         {toggleBtn}
         <div className="flex flex-col bg-white border-r border-gray-200 overflow-hidden h-full">
-          <ListingDetail listing={selectedListing} onBack={() => onSelectListing(null)} />
+          <ListingDetail listing={selectedListing} onBack={() => onSelectListing(null)} parishStats={parishStats} ineStats={ineStats} />
         </div>
       </div>
     )
