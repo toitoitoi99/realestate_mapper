@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { TileLayer, CircleMarker, GeoJSON, Popup, useMap } from 'react-leaflet'
 import { LeafletContext, createLeafletContext } from '@react-leaflet/core'
 import L from 'leaflet'
@@ -66,6 +66,45 @@ function FlyToArea({ areaConfig }) {
     }
     map.flyTo(areaConfig.center, areaConfig.zoom || DEFAULT_ZOOM, { duration: 1.5 })
   }, [areaConfig?.center?.[0], areaConfig?.center?.[1], areaConfig?.zoom, map])
+  return null
+}
+
+function FitToParishes({ parishFeatures, hiddenParishes, visibleGroups, parishToGroup, showNeighborhoods }) {
+  const map = useMap()
+  // Serialize visible parish set for stable dependency tracking
+  const visibleKey = useMemo(() => {
+    if (!showNeighborhoods || !parishFeatures?.length) return ''
+    return parishFeatures
+      .filter(f => {
+        const name = f.properties?.name
+        if (!name) return false
+        const group = parishToGroup?.[name]
+        if (!group || !visibleGroups[group]) return false
+        if (hiddenParishes?.has(name)) return false
+        return true
+      })
+      .map(f => f.properties.name)
+      .sort()
+      .join('|')
+  }, [parishFeatures, hiddenParishes, visibleGroups, parishToGroup, showNeighborhoods])
+
+  useEffect(() => {
+    if (!visibleKey || !parishFeatures?.length) return
+
+    const allNames = parishFeatures.map(f => f.properties?.name).filter(Boolean)
+    const visibleNames = visibleKey.split('|')
+
+    // Don't zoom if all parishes are visible
+    if (visibleNames.length === allNames.length) return
+
+    const visibleFeatures = parishFeatures.filter(f => visibleNames.includes(f.properties?.name))
+    if (visibleFeatures.length === 0) return
+
+    const bounds = L.geoJSON(visibleFeatures).getBounds()
+    if (bounds.isValid()) {
+      map.flyToBounds(bounds, { padding: [50, 50], duration: 0.8, maxZoom: 15 })
+    }
+  }, [visibleKey, parishFeatures, map])
   return null
 }
 
@@ -140,6 +179,13 @@ export default function Map({
           <InvalidateOnResize />
           <FlyToArea areaConfig={areaConfig} />
           <FlyTo neighborhood={selectedNeighborhood} listings={withCoords} />
+          <FitToParishes
+            parishFeatures={parishFeatures}
+            hiddenParishes={hiddenParishes}
+            visibleGroups={visibleGroups}
+            parishToGroup={parishToGroup}
+            showNeighborhoods={showNeighborhoods}
+          />
 
           <NeighborhoodLayer
             showNeighborhoods={showNeighborhoods}
