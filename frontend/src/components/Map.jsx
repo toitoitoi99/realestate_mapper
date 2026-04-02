@@ -55,6 +55,16 @@ function InvalidateOnResize() {
   return null
 }
 
+function FlyToListing({ listing }) {
+  const map = useMap()
+  useEffect(() => {
+    if (listing?.lat && listing?.lon) {
+      map.flyTo([listing.lat, listing.lon], 16, { duration: 1 })
+    }
+  }, [listing?.id, map])
+  return null
+}
+
 function FlyToArea({ areaConfig }) {
   const map = useMap()
   const initialRef = useRef(true)
@@ -102,6 +112,7 @@ export default function Map({
   showNeighborhoods, visibleGroups,
   neighborhoodGroups, parishToGroup,
   parishFeatures, hiddenParishes,
+  selectedListing,
   showSoldTrends, soldTrendsData,
 }) {
   const { t } = useLanguage()
@@ -140,6 +151,7 @@ export default function Map({
           <InvalidateOnResize />
           <FlyToArea areaConfig={areaConfig} />
           <FlyTo neighborhood={selectedNeighborhood} listings={withCoords} />
+          <FlyToListing listing={selectedListing} />
 
           <NeighborhoodLayer
             showNeighborhoods={showNeighborhoods}

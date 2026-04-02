@@ -205,6 +205,7 @@ export default function App() {
           onSelectNeighborhood={handleSelectNeighborhood}
           selectedNeighborhood={selectedNeighborhood}
           onSelectListing={setSelectedListing}
+          selectedListing={selectedListing}
           projects={projects}
           showProjects={showProjects}
           visibleCategories={visibleCategories}

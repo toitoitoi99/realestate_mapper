@@ -59,6 +59,20 @@ npm run build                          # Production build
 - **INE sold prices**: INE JSON API (`pindica.jsp`), indicator `0012234`; covers all 18 AML municipalities (9 Grande Lisboa + 9 Península de Setúbal); quarterly median €/m²
 - **Geographic scope**: Multi-area — configurable via `backend/areas.json` (Lisbon, AML, Porto, Algarve); area switcher in the UI; default area is AML centred at [38.68, -9.10] zoom 10
 
+### Database (`backend/data/lisboa_realestate.db`)
+- **`sales`** — Sale listings (main table); columns include `source`, `source_id`, `url`, `status`, `price_amount`, `price_per_sqm`, `size_sqm`, `rooms`, `neighborhood`, `parish`, `lat`, `lon`, `rarity_score`, `rarity_factors`, `building_geojson`, etc.
+- **`rentals`** — Rental listings; same schema as `sales` minus rarity/building columns
+- **`neighborhoods`** — Aggregated per-neighborhood stats (avg/median prices, counts)
+- **`construction_projects`** — CML building permits/applications with centroid coords
+- **`ine_stats`** — INE quarterly median sold prices per municipality
+- **`security_pois`** — PSP stations and CCTV cameras
+- **`amenity_ratings`** — Per-location amenity scores (green spaces, convenience, etc.)
+- **`scrape_runs`** — Scraper execution history
+- **`listing_history`** — Price/status change tracking
+- **`sold_transactions`** — Detected sold properties
+
+Note: The API (`database.py`) queries `sales` and `rentals` tables separately, not a unified `listings` table. The `/api/listings` endpoint unions them.
+
 ## Key constraints
 
 - **Python 3.9**: No `str | None` union syntax — use `Optional[str]` from `typing`
