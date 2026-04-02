@@ -3,6 +3,7 @@ import { useLanguage } from '../LanguageContext'
 import { translateDescription, fetchListingDetail } from '../api'
 import RarityBadge from './RarityBadge'
 import AmenityRating from './AmenityRating'
+import ListingComparison from './ListingComparison'
 
 const SOURCE_STYLES = {
   idealista: { bg: 'bg-green-100', text: 'text-green-800', label: 'idealista' },
@@ -215,6 +216,9 @@ export default function ListingDetail({ listing, onBack }) {
 
           {/* Amenity Rating */}
           <AmenityRating lat={listing.lat} lon={listing.lon} />
+
+          {/* Price Comparison & Yield */}
+          <ListingComparison listing={listing} />
 
           {/* Description */}
           {listing.description && (

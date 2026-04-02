@@ -8,9 +8,11 @@ Listings are stored in two separate tables: `sales` and `rentals`.
 import hashlib
 import json
 import math
+import re
 import sqlite3
 import logging
 import statistics
+import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List
@@ -38,6 +40,14 @@ def _compute_hash_cross(address, city, price, size) -> str:
     size_r = str(round(size)) if size else ""
     raw = f"{addr}|{(city or '').lower()}|{price_r}|{size_r}"
     return hashlib.sha1(raw.encode()).hexdigest()
+
+
+def _haversine(lat1, lon1, lat2, lon2):
+    """Great-circle distance in metres."""
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    return 6371000 * 2 * math.asin(math.sqrt(a))
 
 
 _LISTING_COLS = """
@@ -264,6 +274,20 @@ def init_db():
             UNIQUE(lat_key, lon_key)
         );
         CREATE INDEX IF NOT EXISTS idx_amenity_ratings_latlon ON amenity_ratings(lat_key, lon_key);
+
+        CREATE TABLE IF NOT EXISTS listing_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            listing_id INTEGER NOT NULL,
+            listing_type TEXT NOT NULL,
+            source TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            field TEXT NOT NULL,
+            old_value TEXT,
+            new_value TEXT,
+            changed_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_listing_history_listing ON listing_history(listing_id, listing_type);
+        CREATE INDEX IF NOT EXISTS idx_listing_history_source ON listing_history(source, source_id);
     """)
 
     # -- Additive column migrations ---------------------------------------------
@@ -309,14 +333,38 @@ def upsert_listing(listing: Listing) -> tuple:
     conn = get_connection()
     try:
         row = conn.execute(
-            f"SELECT id FROM {table} WHERE source=? AND source_id=?",
+            f"SELECT id, status, price_amount, price_per_sqm FROM {table} WHERE source=? AND source_id=?",
             (listing.source, listing.source_id)
         ).fetchone()
 
         ts = listing.scraped_at.isoformat() if listing.scraped_at else datetime.utcnow().isoformat()
 
         if row:
+            # Track changes to key fields
+            _TRACKED = ['status', 'price_amount', 'price_per_sqm']
+            lt = "rent" if table == "rentals" else "sale"
+            now = datetime.utcnow().isoformat()
+            history_records = []
+            for field_name in _TRACKED:
+                old_val = row[field_name]
+                new_val = getattr(listing, field_name)
+                if old_val is None and new_val is None:
+                    continue
+                if str(old_val) != str(new_val):
+                    history_records.append((
+                        row["id"], lt, listing.source, listing.source_id,
+                        field_name,
+                        str(old_val) if old_val is not None else None,
+                        str(new_val) if new_val is not None else None,
+                        now
+                    ))
             with conn:
+                for rec in history_records:
+                    conn.execute("""
+                        INSERT INTO listing_history
+                            (listing_id, listing_type, source, source_id, field, old_value, new_value, changed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, rec)
                 conn.execute(f"""
                     UPDATE {table} SET
                         url=?, status=?, price_amount=?, price_per_sqm=?,
@@ -487,6 +535,262 @@ def get_cross_listings(hash_cross: Optional[str], exclude_id: int, listing_type:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_listing_history(listing_id: int, listing_type: str = "sale") -> List[dict]:
+    """Return change history for a listing."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM listing_history WHERE listing_id=? AND listing_type=? ORDER BY changed_at DESC",
+        (listing_id, listing_type)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_radius_comparison(
+    listing_id: int,
+    listing_type: str = "sale",
+    radius_m: int = 500,
+    filter_property_type: Optional[str] = None,
+    filter_bedrooms: Optional[int] = None,
+) -> dict:
+    """Compare a listing's price/m² to nearby sales and rentals within a radius."""
+    conn = get_connection()
+    table = _table_for(listing_type)
+
+    # Fetch target listing
+    target = conn.execute(
+        f"SELECT id, lat, lon, price_per_sqm, price_amount, size_sqm, property_type, bedrooms FROM {table} WHERE id=?",
+        (listing_id,)
+    ).fetchone()
+    if not target or target["lat"] is None or target["lon"] is None:
+        conn.close()
+        return {"error": "Listing not found or missing coordinates"}
+
+    lat, lon = target["lat"], target["lon"]
+    # Bounding box (at ~38.7N: 1 lat ~ 111km, 1 lon ~ 87km)
+    dlat = radius_m / 111000
+    dlon = radius_m / 87000
+
+    # --- Comparable sales ---
+    where = ["lat BETWEEN ? AND ?", "lon BETWEEN ? AND ?", "price_per_sqm IS NOT NULL", "id != ?"]
+    params = [lat - dlat, lat + dlat, lon - dlon, lon + dlon, listing_id]
+
+    if filter_property_type:
+        where.append("property_type = ?")
+        params.append(filter_property_type)
+    if filter_bedrooms is not None:
+        where.append("bedrooms = ?")
+        params.append(filter_bedrooms)
+
+    sales_rows = conn.execute(
+        f"SELECT id, price_per_sqm, price_amount, size_sqm, property_type, bedrooms, "
+        f"address, lat, lon, status, source, scraped_at "
+        f"FROM {table} WHERE {' AND '.join(where)}",
+        params
+    ).fetchall()
+
+    # Haversine refinement
+    comparables = []
+    for r in sales_rows:
+        dist = _haversine(lat, lon, r["lat"], r["lon"])
+        if dist <= radius_m:
+            d = dict(r)
+            d["distance_m"] = round(dist)
+            comparables.append(d)
+
+    comparables.sort(key=lambda x: x["distance_m"])
+
+    # Stats
+    psqm_values = [c["price_per_sqm"] for c in comparables if c["price_per_sqm"]]
+    comp_stats = {}
+    if psqm_values:
+        psqm_sorted = sorted(psqm_values)
+        n = len(psqm_sorted)
+        comp_stats = {
+            "median_price_per_sqm": round(statistics.median(psqm_sorted), 2),
+            "avg_price_per_sqm": round(statistics.mean(psqm_sorted), 2),
+            "min_price_per_sqm": round(psqm_sorted[0], 2),
+            "max_price_per_sqm": round(psqm_sorted[-1], 2),
+            "p25_price_per_sqm": round(psqm_sorted[max(0, n // 4 - 1)], 2),
+            "p75_price_per_sqm": round(psqm_sorted[min(n - 1, 3 * n // 4)], 2),
+        }
+        # Where does the target listing fall?
+        tp = target["price_per_sqm"]
+        if tp is not None:
+            below = sum(1 for v in psqm_sorted if v < tp)
+            comp_stats["listing_percentile"] = round(below / n * 100, 1)
+
+    # --- Nearby rentals ---
+    rent_table = "rentals" if table == "sales" else "sales"
+    rent_rows = conn.execute(
+        f"SELECT id, price_per_sqm, price_amount, size_sqm, bedrooms, address, lat, lon, source "
+        f"FROM {rent_table} WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? AND price_per_sqm IS NOT NULL",
+        (lat - dlat, lat + dlat, lon - dlon, lon + dlon)
+    ).fetchall()
+
+    rentals = []
+    for r in rent_rows:
+        dist = _haversine(lat, lon, r["lat"], r["lon"])
+        if dist <= radius_m:
+            d = dict(r)
+            d["distance_m"] = round(dist)
+            rentals.append(d)
+
+    rentals.sort(key=lambda x: x["distance_m"])
+
+    rent_psqm = [r["price_per_sqm"] for r in rentals if r["price_per_sqm"]]
+    rent_stats = {}
+    if rent_psqm:
+        avg_rent = statistics.mean(rent_psqm)
+        med_rent = statistics.median(rent_psqm)
+        est_monthly = round(avg_rent * (target["size_sqm"] or 0), 2)
+        gross_yield = round((avg_rent * 12 / target["price_per_sqm"]) * 100, 2) if target["price_per_sqm"] else None
+        rent_stats = {
+            "avg_rent_per_sqm": round(avg_rent, 2),
+            "median_rent_per_sqm": round(med_rent, 2),
+            "estimated_monthly_rent": est_monthly,
+            "gross_yield_pct": gross_yield,
+        }
+
+    # --- History ---
+    history = get_listing_history(listing_id, listing_type if table == "sales" else "rent")
+
+    conn.close()
+    return {
+        "radius_m": radius_m,
+        "comparables": {
+            "count": len(comparables),
+            "stats": comp_stats,
+            "listings": comparables[:20],
+        },
+        "rentals": {
+            "count": len(rentals),
+            "stats": rent_stats,
+            "listings": rentals[:10],
+        },
+        "history": history,
+    }
+
+
+_STRIP_PREFIXES = re.compile(
+    r'^(rua|avenida|av\.|travessa|tv\.|largo|praça|praca|beco|calçada|calc\.|estrada|estr\.)\s+',
+    re.IGNORECASE
+)
+
+def _normalize_address(address: Optional[str]) -> Optional[str]:
+    """Normalize a Portuguese address for fuzzy matching."""
+    if not address:
+        return None
+    nfkd = unicodedata.normalize('NFKD', address)
+    ascii_str = ''.join(c for c in nfkd if not unicodedata.combining(c))
+    s = ascii_str.lower().strip()
+    s = _STRIP_PREFIXES.sub('', s)
+    s = re.sub(r'[,.\-/]+', ' ', s)
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s
+
+
+def _address_similarity(a: str, b: str) -> float:
+    """Simple similarity: ratio of common words."""
+    if not a or not b:
+        return 0.0
+    wa = set(a.split())
+    wb = set(b.split())
+    if not wa or not wb:
+        return 0.0
+    common = wa & wb
+    return len(common) / max(len(wa), len(wb))
+
+
+def get_address_matches(listing_id: int, listing_type: str = "sale") -> List[dict]:
+    """Find other listings at the same or similar address."""
+    conn = get_connection()
+    table = _table_for(listing_type)
+
+    target = conn.execute(
+        f"SELECT id, address, postal_code, lat, lon, hash_cross FROM {table} WHERE id=?",
+        (listing_id,)
+    ).fetchone()
+    if not target:
+        conn.close()
+        return []
+
+    norm_addr = _normalize_address(target["address"])
+    results = {}  # keyed by (table, id) to dedupe
+
+    # Tier 1: Same postal code prefix
+    if target["postal_code"]:
+        prefix = target["postal_code"][:4]
+        for tbl in ("sales", "rentals"):
+            lt = "rent" if tbl == "rentals" else "sale"
+            rows = conn.execute(
+                f"SELECT id, source, price_amount, price_per_sqm, status, address, scraped_at, postal_code "
+                f"FROM {tbl} WHERE postal_code LIKE ? AND NOT (id=? AND ?=?)",
+                (prefix + "%", listing_id, tbl, table)
+            ).fetchall()
+            for r in rows:
+                r_norm = _normalize_address(r["address"])
+                sim = _address_similarity(norm_addr, r_norm) if norm_addr and r_norm else 0
+                if sim >= 0.6:
+                    key = (tbl, r["id"])
+                    if key not in results:
+                        d = dict(r)
+                        d["listing_type"] = lt
+                        d["match_type"] = "postal_address"
+                        d["similarity"] = round(sim, 2)
+                        results[key] = d
+
+    # Tier 2: Proximity (50m) + address match
+    if target["lat"] and target["lon"]:
+        dlat = 50 / 111000
+        dlon = 50 / 87000
+        for tbl in ("sales", "rentals"):
+            lt = "rent" if tbl == "rentals" else "sale"
+            rows = conn.execute(
+                f"SELECT id, source, price_amount, price_per_sqm, status, address, scraped_at, lat, lon "
+                f"FROM {tbl} WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? AND NOT (id=? AND ?=?)",
+                (target["lat"] - dlat, target["lat"] + dlat,
+                 target["lon"] - dlon, target["lon"] + dlon,
+                 listing_id, tbl, table)
+            ).fetchall()
+            for r in rows:
+                key = (tbl, r["id"])
+                if key in results:
+                    continue
+                dist = _haversine(target["lat"], target["lon"], r["lat"], r["lon"])
+                if dist <= 50:
+                    r_norm = _normalize_address(r["address"])
+                    sim = _address_similarity(norm_addr, r_norm) if norm_addr and r_norm else 0
+                    if sim >= 0.4:
+                        d = dict(r)
+                        d["listing_type"] = lt
+                        d["match_type"] = "proximity"
+                        d["similarity"] = round(sim, 2)
+                        d["distance_m"] = round(dist)
+                        results[key] = d
+
+    # Tier 3: Cross-hash match
+    if target["hash_cross"]:
+        for tbl in ("sales", "rentals"):
+            lt = "rent" if tbl == "rentals" else "sale"
+            rows = conn.execute(
+                f"SELECT id, source, price_amount, price_per_sqm, status, address, scraped_at "
+                f"FROM {tbl} WHERE hash_cross=? AND NOT (id=? AND ?=?)",
+                (target["hash_cross"], listing_id, tbl, table)
+            ).fetchall()
+            for r in rows:
+                key = (tbl, r["id"])
+                if key not in results:
+                    d = dict(r)
+                    d["listing_type"] = lt
+                    d["match_type"] = "cross_hash"
+                    results[key] = d
+
+    conn.close()
+    matches = sorted(results.values(), key=lambda x: x.get("scraped_at", ""), reverse=True)
+    return matches
 
 
 # ── Neighborhoods ─────────────────────────────────────────────────────────────

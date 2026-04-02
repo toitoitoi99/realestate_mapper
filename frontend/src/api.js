@@ -98,3 +98,17 @@ export async function sendChatMessage(message, history = []) {
   })
   return res.json()
 }
+
+export async function fetchListingComparison(id, listingType = 'sale', radiusM = 500, propertyType = null, bedrooms = null) {
+  const params = new URLSearchParams({ listing_type: listingType, radius_m: radiusM })
+  if (propertyType) params.set('property_type', propertyType)
+  if (bedrooms != null) params.set('bedrooms', bedrooms)
+  const res = await fetch(`${BASE}/listings/${id}/compare?${params}`)
+  return res.json()
+}
+
+export async function fetchAddressHistory(id, listingType = 'sale') {
+  const params = new URLSearchParams({ listing_type: listingType })
+  const res = await fetch(`${BASE}/listings/${id}/address-history?${params}`)
+  return res.json()
+}

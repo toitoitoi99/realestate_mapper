@@ -17,6 +17,7 @@ Run with:  python api.py
 
 import json
 import logging
+import os
 import threading
 import sys
 import urllib.request
@@ -38,7 +39,7 @@ from chat_handler import ChatHandler
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-PORT = 8000
+PORT = int(os.environ.get("PORT", 8000))
 _executor = ThreadPoolExecutor(max_workers=4)
 
 # ── Area config ──────────────────────────────────────────────────────────────
@@ -525,12 +526,40 @@ def _add_gradient_values(neighborhoods: list) -> list:
     return neighborhoods
 
 
+class ComparisonHandler(BaseHandler):
+    """GET /api/listings/:id/compare"""
+
+    def get(self, listing_id):
+        listing_type = self.get_argument("listing_type", "sale")
+        radius_m = self.get_int_arg("radius_m", 500)
+        radius_m = max(100, min(3000, radius_m))
+        filter_property_type = self.get_argument("property_type", None)
+        filter_bedrooms = self.get_int_arg("bedrooms", None)
+
+        result = db.get_radius_comparison(
+            int(listing_id), listing_type, radius_m,
+            filter_property_type, filter_bedrooms
+        )
+        self.write_json(result)
+
+
+class AddressHistoryHandler(BaseHandler):
+    """GET /api/listings/:id/address-history"""
+
+    def get(self, listing_id):
+        listing_type = self.get_argument("listing_type", "sale")
+        matches = db.get_address_matches(int(listing_id), listing_type)
+        self.write_json({"count": len(matches), "matches": matches})
+
+
 # ── App setup ─────────────────────────────────────────────────────────────────
 
 def make_app() -> tornado.web.Application:
     return tornado.web.Application(
         [
             (r"/api/listings",              ListingsHandler),
+            (r"/api/listings/(\d+)/compare",         ComparisonHandler),
+            (r"/api/listings/(\d+)/address-history",  AddressHistoryHandler),
             (r"/api/listings/(\d+)",        ListingDetailHandler),
             (r"/api/neighborhoods",         NeighborhoodsHandler),
             (r"/api/neighborhoods/(.+)",    NeighborhoodDetailHandler),
