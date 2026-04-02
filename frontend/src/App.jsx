@@ -174,6 +174,7 @@ export default function App() {
           neighborhoods={neighborhoods}
           neighbourhoodTypologies={neighbourhoodTypologies}
           parishStats={parishStats}
+          ineStats={ineStats}
           showNeighborhoods={showNeighborhoods}
           onToggleNeighborhoods={() => setShowNeighborhoods(p => !p)}
           visibleGroups={visibleGroups}

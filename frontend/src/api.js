@@ -117,6 +117,12 @@ export async function fetchNeighbourhoodTypologies() {
   return res.json()
 }
 
+export async function fetchNearbyProjects(lat, lon, radiusM = 500) {
+  const params = new URLSearchParams({ lat, lon, radius_m: radiusM })
+  const res = await fetch(`${BASE}/nearby-projects?${params}`)
+  return res.json()
+}
+
 export async function fetchAddressHistory(id, listingType = 'sale') {
   const params = new URLSearchParams({ listing_type: listingType })
   const res = await fetch(`${BASE}/listings/${id}/address-history?${params}`)
