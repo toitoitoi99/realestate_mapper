@@ -552,6 +552,119 @@ class AddressHistoryHandler(BaseHandler):
         self.write_json({"count": len(matches), "matches": matches})
 
 
+class NeighbourhoodTypologiesHandler(BaseHandler):
+    """GET /api/neighbourhood-typologies"""
+
+    def get(self):
+        typologies = db.get_neighbourhood_typologies()
+        self.write_json({"typologies": typologies})
+
+
+def _point_in_polygon(lat, lon, polygon_coords):
+    """Ray-casting point-in-polygon test. coords = list of [lon, lat] rings."""
+    ring = polygon_coords[0]  # outer ring
+    n = len(ring)
+    inside = False
+    px, py = lon, lat
+    j = n - 1
+    for i in range(n):
+        xi, yi = ring[i]
+        xj, yj = ring[j]
+        if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+def _find_parish(lat, lon, features):
+    """Find which parish feature contains the point."""
+    for f in features:
+        geom = f.get("geometry", {})
+        gtype = geom.get("type", "")
+        coords = geom.get("coordinates", [])
+        if gtype == "Polygon":
+            if _point_in_polygon(lat, lon, coords):
+                return f
+        elif gtype == "MultiPolygon":
+            for poly in coords:
+                if _point_in_polygon(lat, lon, poly):
+                    return f
+    return None
+
+
+class ParishStatsHandler(BaseHandler):
+    """GET /api/parish-stats — per-parish statistics computed via point-in-polygon"""
+
+    _cache = {}
+
+    def get(self):
+        import statistics
+        area = self.get_argument("area", "aml")
+        cache_key = area
+
+        # Use cache if available (recompute on restart)
+        if cache_key in ParishStatsHandler._cache:
+            self.write_json(ParishStatsHandler._cache[cache_key])
+            return
+
+        # Load parish GeoJSON
+        area_cfg = AREAS.get(area, AREAS.get("lisbon", {}))
+        geojson_file = area_cfg.get("parishes_geojson")
+        if not geojson_file:
+            self.write_json({"stats": {}})
+            return
+        geojson_path = Path(__file__).parent / "data" / geojson_file
+        if not geojson_path.exists():
+            self.write_json({"stats": {}})
+            return
+        fc = json.loads(geojson_path.read_text(encoding="utf-8"))
+        features = fc.get("features", [])
+
+        # Get listings with coords
+        listings = db.get_active_sales_with_coords()
+
+        # Assign each listing to a parish
+        parish_listings = {}  # parish_name -> list of listings
+        for ls in listings:
+            f = _find_parish(ls["lat"], ls["lon"], features)
+            if f:
+                name = f.get("properties", {}).get("Freguesia") or f.get("properties", {}).get("name", "")
+                if name:
+                    parish_listings.setdefault(name, []).append(ls)
+
+        # Compute stats per parish
+        result = {}
+        for name, pls in parish_listings.items():
+            prices_sqm = [l["price_per_sqm"] for l in pls if l.get("price_per_sqm")]
+            prices = [l["price_amount"] for l in pls if l.get("price_amount")]
+            rooms_list = [l["rooms"] for l in pls if l.get("rooms") is not None]
+            sizes = [l["size_sqm"] for l in pls if l.get("size_sqm")]
+
+            # Most common room count
+            most_common_rooms = None
+            rooms_dist = {}
+            for r in rooms_list:
+                rooms_dist[r] = rooms_dist.get(r, 0) + 1
+            if rooms_dist:
+                most_common_rooms = max(rooms_dist, key=rooms_dist.get)
+
+            result[name] = {
+                "listing_count": len(pls),
+                "avg_price": round(statistics.mean(prices), 0) if prices else None,
+                "median_price": round(statistics.median(prices), 0) if prices else None,
+                "avg_price_per_sqm": round(statistics.mean(prices_sqm), 0) if prices_sqm else None,
+                "median_price_per_sqm": round(statistics.median(prices_sqm), 0) if prices_sqm else None,
+                "min_price_per_sqm": round(min(prices_sqm), 0) if prices_sqm else None,
+                "max_price_per_sqm": round(max(prices_sqm), 0) if prices_sqm else None,
+                "avg_size": round(statistics.mean(sizes), 0) if sizes else None,
+                "most_common_rooms": most_common_rooms,
+                "rooms_distribution": {str(k): v for k, v in sorted(rooms_dist.items())},
+            }
+
+        ParishStatsHandler._cache[cache_key] = {"stats": result}
+        self.write_json({"stats": result})
+
+
 # ── App setup ─────────────────────────────────────────────────────────────────
 
 def make_app() -> tornado.web.Application:
@@ -575,6 +688,8 @@ def make_app() -> tornado.web.Application:
             (r"/api/parishes",              ParishesHandler),
             (r"/api/translate",              TranslateHandler),
             (r"/api/chat",                  ChatHandler),
+            (r"/api/neighbourhood-typologies", NeighbourhoodTypologiesHandler),
+            (r"/api/parish-stats",          ParishStatsHandler),
         ],
         debug=False,
     )

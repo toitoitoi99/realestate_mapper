@@ -96,13 +96,13 @@ export default function Map({
   listings, neighborhoods,
   onSelectNeighborhood, selectedNeighborhood,
   onSelectListing,
-  projects, showProjects, onToggleProjects,
-  visibleCategories, onToggleCategory,
-  securityPois, showSecurity, onToggleSecurity,
-  showNeighborhoods, onToggleNeighborhoods, visibleGroups, onToggleGroup,
+  projects, showProjects,
+  visibleCategories,
+  securityPois, showSecurity,
+  showNeighborhoods, visibleGroups,
   neighborhoodGroups, parishToGroup,
-  parishFeatures, hiddenParishes, onToggleParish,
-  showSoldTrends, onToggleSoldTrends, soldTrendsData, soldDateRange, onSoldDateRangeChange,
+  parishFeatures, hiddenParishes,
+  showSoldTrends, soldTrendsData,
 }) {
   const { t } = useLanguage()
   const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
@@ -252,26 +252,6 @@ export default function Map({
       <MapLegend
         baseMap={baseMap}
         onChangeBaseMap={onChangeBaseMap}
-        showProjects={showProjects}
-        onToggleProjects={onToggleProjects}
-        visibleCategories={visibleCategories}
-        onToggleCategory={onToggleCategory}
-        projects={projects}
-        showSecurity={showSecurity}
-        onToggleSecurity={onToggleSecurity}
-        securityPois={securityPois}
-        showNeighborhoods={showNeighborhoods}
-        onToggleNeighborhoods={onToggleNeighborhoods}
-        visibleGroups={visibleGroups}
-        onToggleGroup={onToggleGroup}
-        neighborhoodGroups={neighborhoodGroups}
-        hiddenParishes={hiddenParishes}
-        onToggleParish={onToggleParish}
-        showSoldTrends={showSoldTrends}
-        onToggleSoldTrends={onToggleSoldTrends}
-        soldDateRange={soldDateRange}
-        onSoldDateRangeChange={onSoldDateRangeChange}
-        soldTrendsData={soldTrendsData}
       />
     </div>
   )
