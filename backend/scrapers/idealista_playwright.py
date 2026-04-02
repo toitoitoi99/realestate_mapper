@@ -932,9 +932,12 @@ def run_scraper(
 
         # ── Filter out already-known listings ─────────────────────────────────
         new_urls = []
+        seen_source_ids = set()
         for url in all_detail_urls:
             id_match = re.search(r"/imovel/(\d+)", url)
             source_id = id_match.group(1) if id_match else None
+            if source_id:
+                seen_source_ids.add(source_id)
             if source_id and source_id in known_ids:
                 skipped_known += 1
             else:
@@ -1000,6 +1003,16 @@ def run_scraper(
             _polite_delay()
 
         context.close()
+
+    # ── Detect missing listings ──────────────────────────────────────────────
+    if len(known_ids) > 0 and len(seen_source_ids) < len(known_ids) * 0.5:
+        log.warning(f"Only saw {len(seen_source_ids)}/{len(known_ids)} listings — skipping missing detection (possible block)")
+    else:
+        missing_result = db.process_missing_listings(
+            source="idealista", listing_type=listing_type,
+            seen_source_ids=seen_source_ids, run_id=run_id,
+        )
+        log.info(f"Missing detection: {missing_result}")
 
     # ── Rebuild stats and close run ───────────────────────────────────────────
     db.rebuild_neighborhoods()
