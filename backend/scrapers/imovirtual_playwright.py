@@ -844,9 +844,12 @@ def run_scraper(
 
         # ── Filter: skip known listings whose price hasn't changed ────────────
         urls_to_scrape = []
+        seen_source_ids = set()
         price_changed = 0
         for item in all_search_items:
             sid = _extract_source_id(item["url"])
+            if sid:
+                seen_source_ids.add(sid)
             if sid in known_listings:
                 old_price = known_listings[sid]
                 new_price = item.get("price")
@@ -919,6 +922,16 @@ def run_scraper(
             _polite_delay()
 
         context.close()
+
+    # ── Detect missing listings ──────────────────────────────────────────────
+    if len(known_listings) > 0 and len(seen_source_ids) < len(known_listings) * 0.5:
+        log.warning(f"Only saw {len(seen_source_ids)}/{len(known_listings)} listings — skipping missing detection (possible block)")
+    else:
+        missing_result = db.process_missing_listings(
+            source="imovirtual", listing_type=listing_type,
+            seen_source_ids=seen_source_ids, run_id=run_id,
+        )
+        log.info(f"Missing detection: {missing_result}")
 
     # ── Rebuild stats and close run ───────────────────────────────────────────
     db.rebuild_neighborhoods()

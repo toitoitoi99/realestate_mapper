@@ -42,6 +42,16 @@ def _compute_hash_cross(address, city, price, size) -> str:
     return hashlib.sha1(raw.encode()).hexdigest()
 
 
+def _compute_hash_location(address, city, size, rooms=None) -> str:
+    """Price-independent hash for re-list detection.
+    Same property at a different price will still match."""
+    addr = (address or "").lower().strip()
+    size_r = str(round(size)) if size else ""
+    rooms_r = str(rooms) if rooms is not None else ""
+    raw = f"{addr}|{(city or '').lower()}|{size_r}|{rooms_r}"
+    return hashlib.sha1(raw.encode()).hexdigest()
+
+
 def _haversine(lat1, lon1, lat2, lon2):
     """Great-circle distance in metres."""
     dlat = math.radians(lat2 - lat1)
@@ -78,6 +88,9 @@ _LISTING_COLS = """
     images          TEXT,
     hash_dedupe     TEXT,
     hash_cross      TEXT,
+    hash_location   TEXT,
+    missing_since   TEXT,
+    previous_listing_id INTEGER,
     description     TEXT,
     scraped_at      TEXT NOT NULL,
 """
@@ -303,6 +316,16 @@ def init_db():
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN hash_cross TEXT")
             conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{tbl}_hash_cross ON {tbl}(hash_cross)")
             logger.info(f"[DB] Added hash_cross column to {tbl}")
+        if "hash_location" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN hash_location TEXT")
+            conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{tbl}_hash_location ON {tbl}(hash_location)")
+            logger.info(f"[DB] Added hash_location column to {tbl}")
+        if "missing_since" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN missing_since TEXT")
+            logger.info(f"[DB] Added missing_since column to {tbl}")
+        if "previous_listing_id" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN previous_listing_id INTEGER")
+            logger.info(f"[DB] Added previous_listing_id column to {tbl}")
     conn.commit()
 
     # -- Backfill hash_cross for existing rows ------------------------------------
@@ -317,11 +340,141 @@ def init_db():
             conn.commit()
             logger.info(f"[DB] Backfilled hash_cross for {len(rows)} rows in {tbl}")
 
+    # -- Backfill hash_location for existing rows --------------------------------
+    for tbl in ("sales", "rentals"):
+        rows = conn.execute(
+            f"SELECT id, address, city, size_sqm, rooms FROM {tbl} WHERE hash_location IS NULL AND address IS NOT NULL"
+        ).fetchall()
+        if rows:
+            for r in rows:
+                hl = _compute_hash_location(r["address"], r["city"], r["size_sqm"], r["rooms"])
+                conn.execute(f"UPDATE {tbl} SET hash_location=? WHERE id=?", (hl, r["id"]))
+            conn.commit()
+            logger.info(f"[DB] Backfilled hash_location for {len(rows)} rows in {tbl}")
+
     conn.close()
     logger.info(f"[DB] Initialised at {DB_PATH}")
 
 
 # ── Listings ─────────────────────────────────────────────────────────────────
+
+MISSING_GRACE_DAYS = 7
+
+
+def _detect_relist(listing: Listing, table: str, conn, hash_location: Optional[str]) -> Optional[int]:
+    """Check if a new listing is a re-list of a previous one at a different price.
+
+    Match criteria: same hash_location + same source + different source_id.
+    If found, marks the old listing as 'delisted' and returns its id.
+    """
+    if not hash_location or not listing.address:
+        return None
+
+    rows = conn.execute(
+        f"SELECT id, source_id, price_amount, status FROM {table} "
+        f"WHERE hash_location=? AND source=? AND source_id!=? AND status IN ('active','reserved') "
+        f"ORDER BY scraped_at DESC LIMIT 5",
+        (hash_location, listing.source, listing.source_id)
+    ).fetchall()
+
+    for old in rows:
+        old_price = old["price_amount"]
+        new_price = listing.price_amount
+        # Only link if price actually differs (or one is missing)
+        if old_price and new_price and round(old_price / 1000) == round(new_price / 1000):
+            continue  # Same price band — not a re-list, likely a duplicate
+
+        lt = "rent" if table == "rentals" else "sale"
+        now = datetime.utcnow().isoformat()
+        conn.execute(
+            f"UPDATE {table} SET status='delisted', missing_since=NULL WHERE id=?",
+            (old["id"],)
+        )
+        conn.execute(
+            "INSERT INTO listing_history "
+            "(listing_id, listing_type, source, source_id, field, old_value, new_value, changed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (old["id"], lt, listing.source, old["source_id"],
+             "status", old["status"], "delisted", now)
+        )
+        logger.info(
+            f"[DB] Re-list detected: old #{old['id']} ({old_price}) → new {listing.source_id} ({new_price}), "
+            f"marked old as delisted"
+        )
+        return old["id"]
+
+    return None
+
+
+def process_missing_listings(
+    source: str,
+    listing_type: str,
+    seen_source_ids: set,
+    run_id: Optional[int] = None,
+) -> dict:
+    """After a scrape run, detect listings that have gone missing.
+
+    - Newly missing: set missing_since = now
+    - Missing > MISSING_GRACE_DAYS days: transition to 'sold'
+    - Reappeared during grace period: clear missing_since
+    """
+    table = _table_for(listing_type)
+    lt = "rent" if table == "rentals" else "sale"
+    conn = get_connection()
+    now = datetime.utcnow()
+    now_iso = now.isoformat()
+    cutoff = (now - timedelta(days=MISSING_GRACE_DAYS)).isoformat()
+
+    rows = conn.execute(
+        f"SELECT id, source_id, missing_since FROM {table} "
+        f"WHERE source=? AND status='active'",
+        (source,)
+    ).fetchall()
+
+    newly_missing = 0
+    marked_sold = 0
+    reappeared = 0
+
+    with conn:
+        for r in rows:
+            sid = r["source_id"]
+            ms = r["missing_since"]
+
+            if sid in seen_source_ids:
+                # Still on the site
+                if ms is not None:
+                    conn.execute(
+                        f"UPDATE {table} SET missing_since=NULL WHERE id=?",
+                        (r["id"],)
+                    )
+                    reappeared += 1
+            else:
+                # Not found on site
+                if ms is None:
+                    conn.execute(
+                        f"UPDATE {table} SET missing_since=? WHERE id=?",
+                        (now_iso, r["id"])
+                    )
+                    newly_missing += 1
+                elif ms <= cutoff:
+                    conn.execute(
+                        f"UPDATE {table} SET status='sold', missing_since=NULL WHERE id=?",
+                        (r["id"],)
+                    )
+                    conn.execute(
+                        "INSERT INTO listing_history "
+                        "(listing_id, listing_type, source, source_id, field, old_value, new_value, changed_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (r["id"], lt, source, sid, "status", "active", "sold", now_iso)
+                    )
+                    marked_sold += 1
+
+    conn.close()
+
+    result = {"newly_missing": newly_missing, "marked_sold": marked_sold, "reappeared": reappeared}
+    logger.info(f"[DB] Missing detection for {source}/{listing_type}: {result}")
+    return result
+
 
 def upsert_listing(listing: Listing) -> tuple:
     """
@@ -365,13 +518,15 @@ def upsert_listing(listing: Listing) -> tuple:
                             (listing_id, listing_type, source, source_id, field, old_value, new_value, changed_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, rec)
+                hl = _compute_hash_location(listing.address, listing.city, listing.size_sqm, listing.rooms)
                 conn.execute(f"""
                     UPDATE {table} SET
                         url=?, status=?, price_amount=?, price_per_sqm=?,
                         size_sqm=?, gross_area_sqm=?, rooms=?, bedrooms=?, bathrooms=?, floor=?,
                         property_type=?, condition=?, title=?, address=?, postal_code=?,
                         neighborhood=?, parish=?, district=?, city=?, lat=?, lon=?,
-                        images=?, hash_dedupe=?, hash_cross=?, description=?, scraped_at=?
+                        images=?, hash_dedupe=?, hash_cross=?, hash_location=?,
+                        missing_since=NULL, description=?, scraped_at=?
                     WHERE source=? AND source_id=?
                 """, (
                     listing.url, listing.status,
@@ -381,11 +536,14 @@ def upsert_listing(listing: Listing) -> tuple:
                     listing.condition, listing.title, listing.address,
                     listing.postal_code, listing.neighborhood, listing.parish,
                     listing.district, listing.city, listing.lat, listing.lon,
-                    listing.images, listing.hash_dedupe, listing.hash_cross, listing.description,
+                    listing.images, listing.hash_dedupe, listing.hash_cross, hl,
+                    listing.description,
                     ts, listing.source, listing.source_id
                 ))
             return row["id"], False
         else:
+            hl = _compute_hash_location(listing.address, listing.city, listing.size_sqm, listing.rooms)
+            prev_id = _detect_relist(listing, table, conn, hl)
             with conn:
                 cur = conn.execute(f"""
                     INSERT INTO {table} (
@@ -393,8 +551,9 @@ def upsert_listing(listing: Listing) -> tuple:
                         price_amount, price_per_sqm, size_sqm, gross_area_sqm, rooms, bedrooms,
                         bathrooms, floor, property_type, condition, title,
                         address, postal_code, neighborhood, parish, district,
-                        city, lat, lon, images, hash_dedupe, hash_cross, description, scraped_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        city, lat, lon, images, hash_dedupe, hash_cross,
+                        hash_location, previous_listing_id, description, scraped_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     listing.source, listing.source_id, listing.url,
                     listing.status,
@@ -404,7 +563,8 @@ def upsert_listing(listing: Listing) -> tuple:
                     listing.condition, listing.title, listing.address,
                     listing.postal_code, listing.neighborhood, listing.parish,
                     listing.district, listing.city, listing.lat, listing.lon,
-                    listing.images, listing.hash_dedupe, listing.hash_cross, listing.description, ts
+                    listing.images, listing.hash_dedupe, listing.hash_cross,
+                    hl, prev_id, listing.description, ts
                 ))
             return cur.lastrowid, True
     finally:
@@ -491,7 +651,8 @@ def get_listings(
         "id, source, source_id, url, status, price_amount, price_per_sqm, "
         "size_sqm, gross_area_sqm, rooms, bedrooms, bathrooms, floor, property_type, condition, "
         "title, address, postal_code, neighborhood, parish, district, city, "
-        "lat, lon, images, hash_dedupe, hash_cross, description, scraped_at"
+        "lat, lon, images, hash_dedupe, hash_cross, hash_location, "
+        "missing_since, previous_listing_id, description, scraped_at"
     )
 
     if table:

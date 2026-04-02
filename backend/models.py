@@ -16,7 +16,7 @@ class Listing:
     source_id: str                      # Listing ID on source site (from URL)
     url: str                            # Full listing URL
     listing_type: str = 'sale'          # 'sale' | 'rent'
-    status: str = 'active'             # 'active' | 'sold' | 'reserved'
+    status: str = 'active'             # 'active' | 'sold' | 'reserved' | 'delisted'
 
     # Price
     price_amount: Optional[float] = None    # Asking price in EUR
@@ -51,6 +51,15 @@ class Listing:
 
     # Cross-site matching (SHA-1 of address+city+price+size, no source)
     hash_cross: Optional[str] = None
+
+    # Re-list detection (SHA-1 of address+city+size+rooms, no price)
+    hash_location: Optional[str] = None
+
+    # Staleness tracking
+    missing_since: Optional[str] = None       # ISO timestamp when listing first went missing
+
+    # Re-list linking
+    previous_listing_id: Optional[int] = None  # Points to old listing when re-listed at new price
 
     # Metadata
     description: Optional[str] = None
@@ -89,6 +98,9 @@ class Listing:
             "images": self.images,
             "hash_dedupe": self.hash_dedupe,
             "hash_cross": self.hash_cross,
+            "hash_location": self.hash_location,
+            "missing_since": self.missing_since,
+            "previous_listing_id": self.previous_listing_id,
             "description": self.description,
             "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
         }
