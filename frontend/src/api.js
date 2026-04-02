@@ -107,6 +107,16 @@ export async function fetchListingComparison(id, listingType = 'sale', radiusM =
   return res.json()
 }
 
+export async function fetchParishStats(area = 'aml') {
+  const res = await fetch(`${BASE}/parish-stats?area=${encodeURIComponent(area)}`)
+  return res.json()
+}
+
+export async function fetchNeighbourhoodTypologies() {
+  const res = await fetch(`${BASE}/neighbourhood-typologies`)
+  return res.json()
+}
+
 export async function fetchAddressHistory(id, listingType = 'sale') {
   const params = new URLSearchParams({ listing_type: listingType })
   const res = await fetch(`${BASE}/listings/${id}/address-history?${params}`)

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { fetchAreas, fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes, fetchSoldTrends } from './api'
+import { fetchAreas, fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes, fetchSoldTrends, fetchNeighbourhoodTypologies, fetchParishStats } from './api'
 import { useFilters } from './useFilters'
 import { CATEGORIES } from './projectCategories'
 import { DEFAULT_BASE_MAP } from './baseMaps'
@@ -35,6 +35,9 @@ export default function App() {
   const [scraping, setScraping] = useState(false)
   const [selectedNeighborhood, setSelectedNeighborhood] = useState(null)
   const [selectedListing, setSelectedListing] = useState(null)
+  const [sidebarTab, setSidebarTab] = useState('listings')
+  const [neighbourhoodTypologies, setNeighbourhoodTypologies] = useState({})
+  const [parishStats, setParishStats] = useState({})
 
   const { filters, setFilter, reset } = useFilters()
 
@@ -51,6 +54,8 @@ export default function App() {
       const total = (d.stats ?? []).find(s => s.category === 'H1')
       setIneStats(total ?? null)
     }).catch(console.error)
+    fetchNeighbourhoodTypologies().then(d => setNeighbourhoodTypologies(d.typologies ?? {})).catch(console.error)
+    fetchParishStats(currentArea).then(d => setParishStats(d.stats ?? {})).catch(console.error)
   }, [])
 
   useEffect(() => {
@@ -163,6 +168,33 @@ export default function App() {
           onClearNeighborhood={() => setSelectedNeighborhood(null)}
           selectedListing={selectedListing}
           onSelectListing={setSelectedListing}
+          sidebarTab={sidebarTab}
+          onChangeTab={setSidebarTab}
+          // Neighbourhood panel props
+          neighborhoods={neighborhoods}
+          neighbourhoodTypologies={neighbourhoodTypologies}
+          parishStats={parishStats}
+          showNeighborhoods={showNeighborhoods}
+          onToggleNeighborhoods={() => setShowNeighborhoods(p => !p)}
+          visibleGroups={visibleGroups}
+          onToggleGroup={toggleGroup}
+          neighborhoodGroups={neighborhoodGroups}
+          hiddenParishes={hiddenParishes}
+          onToggleParish={toggleParish}
+          onSelectNeighborhood={handleSelectNeighborhood}
+          showProjects={showProjects}
+          onToggleProjects={() => setShowProjects(p => !p)}
+          visibleCategories={visibleCategories}
+          onToggleCategory={key => setVisibleCategories(prev => ({ ...prev, [key]: !prev[key] }))}
+          projects={projects}
+          showSoldTrends={showSoldTrends}
+          onToggleSoldTrends={() => setShowSoldTrends(p => !p)}
+          soldDateRange={soldDateRange}
+          onSoldDateRangeChange={setSoldDateRange}
+          soldTrendsData={soldTrendsData}
+          showSecurity={showSecurity}
+          onToggleSecurity={() => setShowSecurity(p => !p)}
+          securityPois={securityPois}
         />
         <Map
           areaConfig={areas[currentArea]}
@@ -175,26 +207,17 @@ export default function App() {
           onSelectListing={setSelectedListing}
           projects={projects}
           showProjects={showProjects}
-          onToggleProjects={() => setShowProjects(p => !p)}
           visibleCategories={visibleCategories}
-          onToggleCategory={key => setVisibleCategories(prev => ({ ...prev, [key]: !prev[key] }))}
           securityPois={securityPois}
           showSecurity={showSecurity}
-          onToggleSecurity={() => setShowSecurity(p => !p)}
           showNeighborhoods={showNeighborhoods}
-          onToggleNeighborhoods={() => setShowNeighborhoods(p => !p)}
           visibleGroups={visibleGroups}
-          onToggleGroup={toggleGroup}
           neighborhoodGroups={neighborhoodGroups}
           parishToGroup={parishToGroup}
           parishFeatures={parishFeatures}
           hiddenParishes={hiddenParishes}
-          onToggleParish={toggleParish}
           showSoldTrends={showSoldTrends}
-          onToggleSoldTrends={() => setShowSoldTrends(p => !p)}
           soldTrendsData={soldTrendsData}
-          soldDateRange={soldDateRange}
-          onSoldDateRangeChange={setSoldDateRange}
         />
       </div>
     </div>

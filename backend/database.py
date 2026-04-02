@@ -1559,5 +1559,42 @@ def cache_amenity_rating(lat_key: float, lon_key: float, rating: dict) -> None:
         conn.close()
 
 
+def get_active_sales_with_coords():
+    """Return active sales listings with lat/lon for point-in-polygon matching."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT lat, lon, price_amount, price_per_sqm, size_sqm, rooms "
+            "FROM sales WHERE status = 'active' AND lat IS NOT NULL AND lon IS NOT NULL"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_neighbourhood_typologies():
+    """Room-count distribution per neighbourhood for active sales."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT neighborhood, rooms, COUNT(*) as cnt "
+            "FROM sales "
+            "WHERE neighborhood IS NOT NULL AND rooms IS NOT NULL AND status = 'active' "
+            "GROUP BY neighborhood, rooms "
+            "ORDER BY neighborhood, cnt DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    result = {}
+    for r in rows:
+        name = r["neighborhood"]
+        if name not in result:
+            result[name] = {"most_common_rooms": r["rooms"], "distribution": {}, "total": 0}
+        result[name]["distribution"][str(r["rooms"])] = r["cnt"]
+        result[name]["total"] += r["cnt"]
+    return result
+
+
 if __name__ == "__main__":
     init_db()

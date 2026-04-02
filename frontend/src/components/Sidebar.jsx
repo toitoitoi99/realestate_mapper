@@ -3,6 +3,8 @@ import { useLanguage } from '../LanguageContext'
 import FilterPanel from './FilterPanel'
 import ListingCard from './ListingCard'
 import ListingDetail from './ListingDetail'
+import SidebarTabs from './SidebarTabs'
+import NeighbourhoodPanel from './NeighbourhoodPanel'
 
 const CollapseChevron = ({ collapsed }) => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -17,6 +19,18 @@ export default function Sidebar({
   listings, loading,
   selectedNeighborhood, onClearNeighborhood,
   selectedListing, onSelectListing,
+  sidebarTab, onChangeTab,
+  // Neighbourhood panel props
+  neighborhoods, neighbourhoodTypologies, parishStats,
+  showNeighborhoods, onToggleNeighborhoods,
+  visibleGroups, onToggleGroup,
+  neighborhoodGroups, hiddenParishes, onToggleParish,
+  onSelectNeighborhood,
+  showProjects, onToggleProjects,
+  visibleCategories, onToggleCategory, projects,
+  showSoldTrends, onToggleSoldTrends,
+  soldDateRange, onSoldDateRangeChange, soldTrendsData,
+  showSecurity, onToggleSecurity, securityPois,
 }) {
   const { t } = useLanguage()
   const [collapsed, setCollapsed] = useState(false)
@@ -56,30 +70,65 @@ export default function Sidebar({
       {toggleBtn}
       <div className="flex flex-col bg-white border-r border-gray-200 overflow-hidden h-full">
 
-      {/* Collapsible filter section */}
-      {!filtersCollapsed && (
-        <div className="overflow-y-auto shrink-0" style={{ maxHeight: '50vh' }}>
-          <FilterPanel
-            filters={filters}
-            setFilter={setFilter}
-            reset={reset}
-          />
-        </div>
-      )}
+      {/* Tab toggle */}
+      <SidebarTabs activeTab={sidebarTab} onChangeTab={onChangeTab} />
 
-      {/* Filter collapse toggle */}
-      <button
-        onClick={() => setFiltersCollapsed(v => !v)}
-        className="flex items-center justify-center gap-1 px-4 py-1.5 bg-gray-50 border-y border-gray-200 text-xs text-gray-500 hover:bg-gray-100 cursor-pointer shrink-0 transition-colors"
-      >
-        <span>{filtersCollapsed ? t.filters : ''}</span>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          {filtersCollapsed
-            ? <polyline points="6 9 12 15 18 9" />
-            : <polyline points="6 15 12 9 18 15" />}
-        </svg>
-        {filtersCollapsed && <span className="text-gray-400 ml-1">({t.filters})</span>}
-      </button>
+      {/* Top section — switches by tab */}
+      {sidebarTab === 'listings' ? (
+        <>
+          {/* Collapsible filter section */}
+          {!filtersCollapsed && (
+            <div className="overflow-y-auto shrink-0" style={{ maxHeight: '50vh' }}>
+              <FilterPanel
+                filters={filters}
+                setFilter={setFilter}
+                reset={reset}
+              />
+            </div>
+          )}
+
+          {/* Filter collapse toggle */}
+          <button
+            onClick={() => setFiltersCollapsed(v => !v)}
+            className="flex items-center justify-center gap-1 px-4 py-1.5 bg-gray-50 border-y border-gray-200 text-xs text-gray-500 hover:bg-gray-100 cursor-pointer shrink-0 transition-colors"
+          >
+            <span>{filtersCollapsed ? t.filters : ''}</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              {filtersCollapsed
+                ? <polyline points="6 9 12 15 18 9" />
+                : <polyline points="6 15 12 9 18 15" />}
+            </svg>
+            {filtersCollapsed && <span className="text-gray-400 ml-1">({t.filters})</span>}
+          </button>
+        </>
+      ) : (
+        <NeighbourhoodPanel
+          showNeighborhoods={showNeighborhoods}
+          onToggleNeighborhoods={onToggleNeighborhoods}
+          visibleGroups={visibleGroups}
+          onToggleGroup={onToggleGroup}
+          neighborhoodGroups={neighborhoodGroups}
+          hiddenParishes={hiddenParishes}
+          onToggleParish={onToggleParish}
+          neighborhoods={neighborhoods}
+          typologies={neighbourhoodTypologies}
+          parishStats={parishStats}
+          onSelectNeighborhood={onSelectNeighborhood}
+          showProjects={showProjects}
+          onToggleProjects={onToggleProjects}
+          visibleCategories={visibleCategories}
+          onToggleCategory={onToggleCategory}
+          projects={projects}
+          showSoldTrends={showSoldTrends}
+          onToggleSoldTrends={onToggleSoldTrends}
+          soldDateRange={soldDateRange}
+          onSoldDateRangeChange={onSoldDateRangeChange}
+          soldTrendsData={soldTrendsData}
+          showSecurity={showSecurity}
+          onToggleSecurity={onToggleSecurity}
+          securityPois={securityPois}
+        />
+      )}
 
       {/* Results header: count + sort — always visible */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white shrink-0">

@@ -193,6 +193,23 @@ export const translations = {
     priceHistory:       'Price History',
     addressHistory:     'Address History',
     previousListings:   'Other listings at this address',
+
+    // SidebarTabs
+    tabListings:        'Listings',
+    tabNeighbourhoods:  'Neighbourhoods',
+
+    // NeighbourhoodStats
+    avgPrice:           'Avg. price',
+    medianPrice:        'Median price',
+    typicalType:        'Most common',
+    listingsForSale:    'For sale',
+    rentPerSqm:         'Rent/m²',
+    soldCount:          'Sold',
+    noStatsAvailable:   'No statistics available',
+    perSqm:             'per m²',
+    density:            'Density',
+    low:                'Low',
+    high:               'High',
   },
 
   pt: {
@@ -349,5 +366,22 @@ export const translations = {
     priceHistory:       'Histórico de Preços',
     addressHistory:     'Histórico do Endereço',
     previousListings:   'Outros anúncios neste endereço',
+
+    // SidebarTabs
+    tabListings:        'Anúncios',
+    tabNeighbourhoods:  'Bairros',
+
+    // NeighbourhoodStats
+    avgPrice:           'Preço médio',
+    medianPrice:        'Preço mediano',
+    typicalType:        'Mais comum',
+    listingsForSale:    'Para venda',
+    rentPerSqm:         'Renda/m²',
+    soldCount:          'Vendidos',
+    noStatsAvailable:   'Sem estatísticas disponíveis',
+    perSqm:             'por m²',
+    density:            'Densidade',
+    low:                'Baixo',
+    high:               'Alto',
   },
 }
