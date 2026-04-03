@@ -7,6 +7,22 @@ from datetime import datetime
 from typing import Optional
 
 
+import re
+
+# Patterns that indicate a rental listing URL or title
+_RENT_URL_RE = re.compile(r'arrendar|/arrendamento/|/alugar/|/aluguer/', re.IGNORECASE)
+_SALE_URL_RE = re.compile(r'comprar|/venda/', re.IGNORECASE)
+
+
+def detect_listing_type(url: str, fallback: str = 'sale') -> str:
+    """Infer listing type from the URL.  Returns 'rent' or 'sale'."""
+    if _RENT_URL_RE.search(url):
+        return 'rent'
+    if _SALE_URL_RE.search(url):
+        return 'sale'
+    return fallback
+
+
 @dataclass
 class Listing:
     """A single real estate listing."""

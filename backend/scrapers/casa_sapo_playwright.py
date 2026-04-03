@@ -675,6 +675,8 @@ def extract_from_dom(page: Page) -> dict:
 
 def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Optional[Listing]:
     """Visit a listing detail page and return a Listing object."""
+    from models import detect_listing_type
+    listing_type = detect_listing_type(url, fallback=listing_type)
 
     source_id = _extract_source_id(url)
 
