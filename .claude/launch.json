@@ -2,16 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "backend",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": ["backend/api.py"],
-      "port": 8000,
-      "autoPort": true
-    },
-    {
-      "name": "frontend",
+      "name": "app",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "export PATH=/usr/local/bin:$PATH && cd frontend && BACKEND_PORT=54698 npx vite --port ${PORT:-3000}"],
+      "runtimeArgs": [
+        "-c",
+        "export PATH=/usr/local/bin:$PATH\n\n# --- Database: copy from main repo if worktree copy is empty/missing ---\nMAIN_REPO=$(git worktree list --porcelain | head -1 | sed 's/worktree //')\nMAIN_DB=\"$MAIN_REPO/backend/data/lisboa_realestate.db\"\nWT_DB=\"backend/data/lisboa_realestate.db\"\nmkdir -p backend/data\nif [ -f \"$MAIN_DB\" ]; then\n  MAIN_SIZE=$(stat -f%z \"$MAIN_DB\" 2>/dev/null || stat -c%s \"$MAIN_DB\" 2>/dev/null)\n  WT_SIZE=$(stat -f%z \"$WT_DB\" 2>/dev/null || stat -c%s \"$WT_DB\" 2>/dev/null || echo 0)\n  if [ \"$WT_SIZE\" -lt 500000 ] 2>/dev/null; then\n    rm -f \"$WT_DB\" \"${WT_DB}-shm\" \"${WT_DB}-wal\"\n    cp \"$MAIN_DB\" \"$WT_DB\"\n    echo \"[launch] Copied DB from main repo (${MAIN_SIZE} bytes)\"\n  fi\nfi\n\n# --- Backend: find a free port and start ---\nBACKEND_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind((\"\",0)); print(s.getsockname()[1]); s.close()')\nPORT=$BACKEND_PORT python3 backend/api.py &\nBACKEND_PID=$!\ntrap \"kill $BACKEND_PID 2>/dev/null\" EXIT\n\n# Wait for backend to be ready (up to 15s)\nfor i in $(seq 1 30); do\n  curl -s http://localhost:$BACKEND_PORT/api/stats >/dev/null 2>&1 && break\n  sleep 0.5\ndone\necho \"[launch] Backend ready on port $BACKEND_PORT\"\n\n# --- Frontend: start Vite with proxy pointing to backend ---\ncd frontend\n[ -d node_modules ] || npm install\nBACKEND_PORT=$BACKEND_PORT npx vite --port ${PORT:-3000}"
+      ],
       "port": 3000,
       "autoPort": true
     }

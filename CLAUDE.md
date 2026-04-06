@@ -73,14 +73,18 @@ npm run build                          # Production build
 
 Note: The API (`database.py`) queries `sales` and `rentals` tables separately, not a unified `listings` table. The `/api/listings` endpoint unions them.
 
-## Preview / Dev setup
+## Preview
 
-### launch.json
-The `.claude/launch.json` defines `backend` and `frontend` server configs for the preview module. Key gotchas:
+Use `preview_start("app")` to launch the full stack. The single `app` config in `.claude/launch.json` handles everything:
 
-- **Node.js PATH**: The preview shell doesn't inherit the user's full PATH. The frontend launch command must explicitly set `PATH=/usr/local/bin:$PATH` (or wherever `node`/`npx` live) in the bash command.
-- **Port conflicts**: Port 8000 (backend) and 3000 (frontend) may already be in use (e.g. by the main repo when running in a worktree). Both configs use `autoPort: true` to handle this. The Vite proxy target must be dynamic — use `process.env.BACKEND_PORT || 8000` in `vite.config.js` and pass `BACKEND_PORT=<port>` in the frontend launch command.
-- **Worktree setup**: Git worktrees don't share `node_modules`. After creating a worktree, you must run `cd frontend && npm install` before starting the frontend. The SQLite DB will also be empty — the app will show 0 listings until scrapers are run.
+1. **Database**: In worktrees, copies the main repo's DB into the worktree if the local copy is missing or empty (<500KB). This gives each worktree an isolated snapshot of the data — scrapes in a worktree won't affect the main DB.
+2. **Backend**: Dynamically finds a free port via `socket.bind(0)`, so multiple previews (main repo + any number of worktrees) never collide.
+3. **Frontend**: Starts Vite with `BACKEND_PORT` env var pointing to the backend's dynamic port. The `vite.config.js` reads `process.env.BACKEND_PORT` (defaults to 8000 for manual `npm run dev`).
+4. **Cleanup**: Backend subprocess is killed via `trap EXIT` when the preview stops.
+5. **npm install**: Runs automatically if `node_modules/` is missing (common in fresh worktrees).
+6. **PATH**: Exports `/usr/local/bin` so `node`/`npx` are found regardless of shell config.
+
+Do NOT start `backend` and `frontend` as separate preview configs — the frontend proxy port must match the backend's dynamic port, which only the unified `app` config can coordinate.
 
 ### Known UI issues
 - **Mobile layout**: At mobile viewport widths, the sidebar overlaps the map with no toggle. Not currently responsive.
@@ -94,4 +98,3 @@ The `.claude/launch.json` defines `backend` and `frontend` server configs for th
 - **ArcGIS pagination**: Break only when `len(batch) < PAGE_SIZE`; don't rely on `exceededTransferLimit`
 - **`/api/projects`**: Excludes `geometry` column and defaults to `limit=5000` (most recent) to keep response size manageable
 - **DataDome**: Idealista blocks automated browsers; requires real Chrome + persistent profile + one-time manual challenge solve via `--setup`
-- **Vite proxy port**: The proxy target in `vite.config.js` reads `process.env.BACKEND_PORT` (default 8000). When running backend on a non-standard port (worktrees, port conflicts), set `BACKEND_PORT` accordingly before starting the frontend.
