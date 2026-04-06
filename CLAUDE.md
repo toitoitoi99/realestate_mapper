@@ -73,6 +73,19 @@ npm run build                          # Production build
 
 Note: The API (`database.py`) queries `sales` and `rentals` tables separately, not a unified `listings` table. The `/api/listings` endpoint unions them.
 
+## Preview
+
+Use `preview_start("app")` to launch the full stack. The single `app` config in `.claude/launch.json` handles everything:
+
+1. **Database**: In worktrees, copies the main repo's DB into the worktree if the local copy is missing or empty (<500KB). This gives each worktree an isolated snapshot of the data — scrapes in a worktree won't affect the main DB.
+2. **Backend**: Dynamically finds a free port via `socket.bind(0)`, so multiple previews (main repo + any number of worktrees) never collide.
+3. **Frontend**: Starts Vite with `BACKEND_PORT` env var pointing to the backend's dynamic port. The `vite.config.js` reads `process.env.BACKEND_PORT` (defaults to 8000 for manual `npm run dev`).
+4. **Cleanup**: Backend subprocess is killed via `trap EXIT` when the preview stops.
+5. **npm install**: Runs automatically if `node_modules/` is missing (common in fresh worktrees).
+6. **PATH**: Exports `/usr/local/bin` so `node`/`npx` are found regardless of shell config.
+
+Do NOT start `backend` and `frontend` as separate preview configs — the frontend proxy port must match the backend's dynamic port, which only the unified `app` config can coordinate.
+
 ## Key constraints
 
 - **Python 3.9**: No `str | None` union syntax — use `Optional[str]` from `typing`
