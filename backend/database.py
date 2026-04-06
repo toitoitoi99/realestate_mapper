@@ -101,6 +101,44 @@ def _table_for(listing_type):
     return "rentals" if listing_type == "rent" else "sales"
 
 
+def _reclassify_rentals(conn):
+    """Move listings that are clearly rentals from sales → rentals.
+
+    Detection: low price (< 5000 €) combined with rental keywords in
+    the URL or title (arrend*, alug*).  High-price listings mentioning
+    'arrendamento' alongside 'venda' are left in sales.
+    """
+    rental_cols = [
+        "source", "source_id", "url", "status", "price_amount",
+        "price_per_sqm", "size_sqm", "gross_area_sqm", "rooms", "bedrooms",
+        "bathrooms", "floor", "property_type", "condition", "title",
+        "address", "postal_code", "neighborhood", "parish", "district",
+        "city", "lat", "lon", "images", "hash_dedupe", "hash_cross",
+        "hash_location", "missing_since", "previous_listing_id",
+        "description", "scraped_at",
+    ]
+    # Only include columns that exist in rentals table
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(rentals)").fetchall()}
+    cols = [c for c in rental_cols if c in existing]
+    col_list = ", ".join(cols)
+
+    where = """
+        price_amount > 0 AND price_amount < 5000
+        AND (
+            url LIKE '%arrend%' OR url LIKE '%alug%'
+            OR title LIKE '%arrend%' OR title LIKE '%alug%'
+        )
+    """
+    moved = conn.execute(f"""
+        INSERT OR IGNORE INTO rentals ({col_list})
+        SELECT {col_list} FROM sales WHERE {where}
+    """).rowcount
+    if moved:
+        conn.execute(f"DELETE FROM sales WHERE {where}")
+        conn.commit()
+        logger.info(f"[DB] Reclassified {moved} rental(s) from sales → rentals")
+
+
 def init_db():
     """Create tables if they don't exist. Migrate old `listings` table if present."""
     conn = get_connection()
@@ -184,6 +222,9 @@ def init_db():
         sale_count = conn.execute("SELECT COUNT(*) as c FROM sales").fetchone()["c"]
         rent_count = conn.execute("SELECT COUNT(*) as c FROM rentals").fetchone()["c"]
         logger.info(f"[DB] Migration complete: {sale_count} sales, {rent_count} rentals")
+
+    # -- Reclassify misplaced rentals in the sales table ----------------------
+    _reclassify_rentals(conn)
 
     # -- Other tables ---------------------------------------------------------
     conn.executescript("""

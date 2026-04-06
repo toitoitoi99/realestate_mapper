@@ -86,6 +86,11 @@ Use `preview_start("app")` to launch the full stack. The single `app` config in 
 
 Do NOT start `backend` and `frontend` as separate preview configs — the frontend proxy port must match the backend's dynamic port, which only the unified `app` config can coordinate.
 
+### Known UI issues
+- **Mobile layout**: At mobile viewport widths, the sidebar overlaps the map with no toggle. Not currently responsive.
+- **Area switching**: When switching areas (e.g. AML → Porto), the map may not re-center correctly and the app title / search placeholder remain Lisbon-specific.
+- **Backend root route**: The Tornado backend has no handler for `GET /` — health-check probes log 404 warnings. Not a functional issue.
+
 ## Key constraints
 
 - **Python 3.9**: No `str | None` union syntax — use `Optional[str]` from `typing`
