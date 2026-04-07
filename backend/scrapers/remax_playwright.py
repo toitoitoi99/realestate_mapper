@@ -72,6 +72,44 @@ MAX_DELAY = 5.5
 
 PROFILE_DIR = Path(__file__).parent.parent / "data" / "browser_profile_remax"
 
+# -- Listing exclusion filters -------------------------------------------------
+# Exclude non-property listings: timeshares, garages, storage, parking, etc.
+
+# URL path slugs that indicate non-property listings (RE/MAX uses slugs like
+# "venda-outros---habitacao-..." or "venda-garagem-...")
+EXCLUDED_URL_SLUGS = [
+    "outros---habitac",   # "Outros - Habitação/Habitacional" — timeshares, hotel weeks
+    "garagem",            # garages / parking boxes
+    "armazem", "armazém", # warehouses / storage
+    "escritorio", "escritório",  # offices
+    "loja",               # shops / commercial
+]
+
+# Keywords in title or description that indicate non-property listings
+EXCLUDED_KEYWORDS = [
+    "time sharing", "timesharing", "time-sharing", "timeshare",
+    "semana ", "semana)",  # "semana 14" = week 14 (timeshare week)
+    "direito de habitação periódica",  # Portuguese legal term for timeshare
+    "habitação periódica",
+    "multipropriedade",  # fractional ownership
+]
+
+
+def _is_excluded_url(url: str) -> bool:
+    """Check if a listing URL contains a slug indicating a non-property type."""
+    path = url.lower()
+    return any(slug in path for slug in EXCLUDED_URL_SLUGS)
+
+
+def _is_excluded_listing(listing: "Listing") -> bool:
+    """Check if a listing's title/description indicates a non-property (e.g. timeshare)."""
+    text = " ".join(filter(None, [
+        (listing.title or "").lower(),
+        (listing.description or "").lower(),
+    ]))
+    return any(kw in text for kw in EXCLUDED_KEYWORDS)
+
+
 # -- Utilities -----------------------------------------------------------------
 
 def _num(v) -> Optional[float]:
@@ -987,6 +1025,9 @@ def run_scraper(
 
             for item in search_items:
                 if item["url"] not in seen_urls:
+                    if _is_excluded_url(item["url"]):
+                        log.info(f"  Excluded (non-property URL): {item['url']}")
+                        continue
                     seen_urls.add(item["url"])
                     all_search_items.append(item)
 
@@ -1054,6 +1095,9 @@ def run_scraper(
                 if listing is None or listing.price_amount is None:
                     log.warning(f"  No price extracted -- skipping")
                     error_count += 1
+                elif _is_excluded_listing(listing):
+                    log.info(f"  Excluded (non-property): {listing.title}")
+                    continue
                 else:
                     _, is_new = db.upsert_listing(listing)
                     if is_new:

@@ -23,6 +23,22 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).parent / "data" / "lisboa_realestate.db"
 
+# -- Listing exclusion filters -------------------------------------------------
+# Keywords that indicate non-property listings (timeshares, hotel weeks, etc.)
+# Checked in upsert_listing() so all scrapers benefit automatically.
+EXCLUDED_TITLE_KEYWORDS = [
+    "time sharing", "timesharing", "time-sharing", "timeshare",
+    "direito de habitação periódica",  # Portuguese legal term for timeshare
+    "habitação periódica",
+    "multipropriedade",               # fractional ownership
+]
+EXCLUDED_DESCRIPTION_KEYWORDS = [
+    "time sharing", "timesharing", "time-sharing", "timeshare",
+    "direito de habitação periódica",
+    "habitação periódica",
+    "multipropriedade",
+]
+
 
 def get_connection() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -481,7 +497,18 @@ def upsert_listing(listing: Listing) -> tuple:
     Insert or update a listing. Returns (id, is_new).
     Natural key: (source, source_id).
     Routes to the correct table based on listing_type.
+    Returns (None, False) if listing is excluded (timeshare, etc.).
     """
+    # Filter out non-property listings (timeshares, hotel weeks, etc.)
+    title_lower = (listing.title or "").lower()
+    desc_lower = (listing.description or "").lower()
+    if any(kw in title_lower for kw in EXCLUDED_TITLE_KEYWORDS):
+        logger.info(f"[DB] Excluded non-property listing (title): {listing.source_id} — {listing.title}")
+        return (None, False)
+    if any(kw in desc_lower for kw in EXCLUDED_DESCRIPTION_KEYWORDS):
+        logger.info(f"[DB] Excluded non-property listing (description): {listing.source_id}")
+        return (None, False)
+
     table = _table_for(getattr(listing, "listing_type", None) or "sale")
     conn = get_connection()
     try:
