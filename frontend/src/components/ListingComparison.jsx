@@ -181,19 +181,42 @@ export default function ListingComparison({ listing }) {
           <h3 className="font-semibold text-gray-700 mb-2">{t.rentalYield || 'Rental Yield Estimate'}</h3>
           <div className="bg-green-50 rounded-lg p-3">
             <div className="grid grid-cols-2 gap-2 text-xs">
-              <div>
-                <div className="text-gray-500">{t.avgRentSqm || 'Avg rent/m²'}</div>
-                <div className="font-medium text-gray-800">€{rentals.stats?.avg_rent_per_sqm?.toFixed(2)}/m²</div>
-              </div>
-              <div>
-                <div className="text-gray-500">{t.medianRentSqm || 'Median rent/m²'}</div>
-                <div className="font-medium text-gray-800">€{rentals.stats?.median_rent_per_sqm?.toFixed(2)}/m²</div>
-              </div>
-              {rentals.stats?.estimated_monthly_rent > 0 && (
-                <div>
-                  <div className="text-gray-500">{t.estimatedRent || 'Est. monthly rent'}</div>
-                  <div className="font-medium text-gray-800">€{Math.round(rentals.stats.estimated_monthly_rent).toLocaleString()}</div>
-                </div>
+              {rentals.stats?.source === 'sales' ? (
+                /* Viewing a rental listing: show nearby sale prices */
+                <>
+                  <div>
+                    <div className="text-gray-500">{t.avgSaleSqm || 'Avg sale price/m²'}</div>
+                    <div className="font-medium text-gray-800">€{rentals.stats?.avg_sale_per_sqm?.toFixed(0)}/m²</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">{t.medianSaleSqm || 'Median sale price/m²'}</div>
+                    <div className="font-medium text-gray-800">€{rentals.stats?.median_sale_per_sqm?.toFixed(0)}/m²</div>
+                  </div>
+                  {rentals.stats?.estimated_purchase_price > 0 && (
+                    <div>
+                      <div className="text-gray-500">{t.estimatedPurchase || 'Est. purchase price'}</div>
+                      <div className="font-medium text-gray-800">€{Math.round(rentals.stats.estimated_purchase_price).toLocaleString()}</div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                /* Viewing a sale listing: show nearby rental prices */
+                <>
+                  <div>
+                    <div className="text-gray-500">{t.avgRentSqm || 'Avg rent/m²'}</div>
+                    <div className="font-medium text-gray-800">€{rentals.stats?.avg_rent_per_sqm?.toFixed(2)}/m²</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">{t.medianRentSqm || 'Median rent/m²'}</div>
+                    <div className="font-medium text-gray-800">€{rentals.stats?.median_rent_per_sqm?.toFixed(2)}/m²</div>
+                  </div>
+                  {rentals.stats?.estimated_monthly_rent > 0 && (
+                    <div>
+                      <div className="text-gray-500">{t.estimatedRent || 'Est. monthly rent'}</div>
+                      <div className="font-medium text-gray-800">€{Math.round(rentals.stats.estimated_monthly_rent).toLocaleString()}</div>
+                    </div>
+                  )}
+                </>
               )}
               {rentals.stats?.gross_yield_pct != null && (
                 <div>
@@ -203,7 +226,7 @@ export default function ListingComparison({ listing }) {
               )}
             </div>
             <div className="text-[10px] text-gray-400 mt-2">
-              {t.basedOn || 'Based on'} {rentals.count} {t.nearbyRentals || 'nearby rentals'} {t.within || 'within'} {radiusM}m
+              {t.basedOn || 'Based on'} {rentals.count} {rentals.stats?.source === 'sales' ? (t.nearbySales || 'nearby sales') : (t.nearbyRentals || 'nearby rentals')} {t.within || 'within'} {radiusM}m
             </div>
           </div>
         </div>

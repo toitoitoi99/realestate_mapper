@@ -64,13 +64,15 @@ CATEGORY_TAGS: Dict[str, List[Tuple[str, str]]] = {
     ],
 }
 
-# Scale factors per category (tuned so typical urban area scores ~60-70)
+# Log-scale factors per category.
+# Score = min(100, SF * ln(1 + weighted_sum)).
+# Tuned so a typical urban Lisbon location (~median OSM density) scores ~60-70.
 SCALE_FACTORS: Dict[str, float] = {
-    "green_spaces": 15.0,
-    "convenience": 5.0,
-    "education": 20.0,
-    "transportation": 4.0,
-    "healthcare": 12.0,
+    "green_spaces": 21.0,   # median ws ~21 → score ~65
+    "convenience": 16.0,    # median ws ~59 → score ~65
+    "education": 28.0,      # median ws ~7.5 → score ~60
+    "transportation": 15.0, # median ws ~67  → score ~63
+    "healthcare": 28.0,     # median ws ~8   → score ~62
 }
 
 # Category weights for overall score (must sum to 1.0)
@@ -203,7 +205,10 @@ def _compute_scores(
 
     categories = {}
     for cat, data in category_data.items():
-        score = min(100.0, data["weighted_sum"] * SCALE_FACTORS[cat])
+        # Logarithmic scaling: diminishing returns as amenity count grows.
+        # This prevents dense urban areas from all saturating to 100.
+        ws = data["weighted_sum"]
+        score = min(100.0, SCALE_FACTORS[cat] * math.log1p(ws))
         categories[cat] = {
             "score": round(score),
             "count": data["count"],

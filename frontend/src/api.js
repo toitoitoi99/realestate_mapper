@@ -90,15 +90,6 @@ export async function translateDescription(id, listingType = 'sale') {
   return res.json()
 }
 
-export async function sendChatMessage(message, history = []) {
-  const res = await fetch(`${BASE}/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, history }),
-  })
-  return res.json()
-}
-
 export async function fetchDealScore(id, listingType = 'sale') {
   const params = new URLSearchParams({ listing_type: listingType })
   const res = await fetch(`${BASE}/listings/${id}/deal-score?${params}`)
