@@ -35,6 +35,7 @@ export default function App() {
   const [scraping, setScraping] = useState(false)
   const [selectedNeighborhood, setSelectedNeighborhood] = useState(null)
   const [selectedListing, setSelectedListing] = useState(null)
+  const [highlightedListing, setHighlightedListing] = useState(null)
   const [sidebarTab, setSidebarTab] = useState('listings')
   const [neighbourhoodTypologies, setNeighbourhoodTypologies] = useState({})
   const [parishStats, setParishStats] = useState({})
@@ -139,15 +140,22 @@ export default function App() {
   }, [])
 
   const filteredListings = useMemo(() => {
-    if (!showNeighborhoods || hiddenParishes.size === 0) return listings
+    if (!showNeighborhoods) return listings
+
+    // If parishes selected for comparison, show only those
+    if (selectedParishes?.size > 0) {
+      return listings.filter(l => l.neighborhood && selectedParishes.has(l.neighborhood))
+    }
+
     return listings.filter(l => {
       if (!l.neighborhood) return true
       const group = parishToGroup?.[l.neighborhood]
-      if (!group || !visibleGroups[group]) return false
+      if (!group) return true           // unknown parish → keep visible
+      if (!visibleGroups[group]) return false
       if (hiddenParishes.has(l.neighborhood)) return false
       return true
     })
-  }, [listings, showNeighborhoods, hiddenParishes, parishToGroup, visibleGroups])
+  }, [listings, showNeighborhoods, hiddenParishes, parishToGroup, visibleGroups, selectedParishes])
 
   const toggleGroup = useCallback((key) => {
     setVisibleGroups(prev => ({ ...prev, [key]: !prev[key] }))
@@ -193,6 +201,8 @@ export default function App() {
           onClearNeighborhood={() => setSelectedNeighborhood(null)}
           selectedListing={selectedListing}
           onSelectListing={setSelectedListing}
+          highlightedListing={highlightedListing}
+          onClearHighlight={() => setHighlightedListing(null)}
           sidebarTab={sidebarTab}
           onChangeTab={setSidebarTab}
           // Neighbourhood panel props
@@ -233,8 +243,8 @@ export default function App() {
           neighborhoods={neighborhoods}
           onSelectNeighborhood={handleSelectNeighborhood}
           selectedNeighborhood={selectedNeighborhood}
-          onSelectListing={setSelectedListing}
-          selectedListing={selectedListing}
+          onSelectListing={setHighlightedListing}
+          selectedListing={highlightedListing}
           projects={projects}
           showProjects={showProjects}
           visibleCategories={visibleCategories}

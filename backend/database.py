@@ -23,6 +23,22 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).parent / "data" / "lisboa_realestate.db"
 
+# -- Listing exclusion filters -------------------------------------------------
+# Keywords that indicate non-property listings (timeshares, hotel weeks, etc.)
+# Checked in upsert_listing() so all scrapers benefit automatically.
+EXCLUDED_TITLE_KEYWORDS = [
+    "time sharing", "timesharing", "time-sharing", "timeshare",
+    "direito de habitação periódica",  # Portuguese legal term for timeshare
+    "habitação periódica",
+    "multipropriedade",               # fractional ownership
+]
+EXCLUDED_DESCRIPTION_KEYWORDS = [
+    "time sharing", "timesharing", "time-sharing", "timeshare",
+    "direito de habitação periódica",
+    "habitação periódica",
+    "multipropriedade",
+]
+
 
 def get_connection() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -99,6 +115,44 @@ _LISTING_COLS = """
 def _table_for(listing_type):
     """Return the table name for a listing type."""
     return "rentals" if listing_type == "rent" else "sales"
+
+
+def _reclassify_rentals(conn):
+    """Move listings that are clearly rentals from sales → rentals.
+
+    Detection: low price (< 5000 €) combined with rental keywords in
+    the URL or title (arrend*, alug*).  High-price listings mentioning
+    'arrendamento' alongside 'venda' are left in sales.
+    """
+    rental_cols = [
+        "source", "source_id", "url", "status", "price_amount",
+        "price_per_sqm", "size_sqm", "gross_area_sqm", "rooms", "bedrooms",
+        "bathrooms", "floor", "property_type", "condition", "title",
+        "address", "postal_code", "neighborhood", "parish", "district",
+        "city", "lat", "lon", "images", "hash_dedupe", "hash_cross",
+        "hash_location", "missing_since", "previous_listing_id",
+        "description", "scraped_at",
+    ]
+    # Only include columns that exist in rentals table
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(rentals)").fetchall()}
+    cols = [c for c in rental_cols if c in existing]
+    col_list = ", ".join(cols)
+
+    where = """
+        price_amount > 0 AND price_amount < 5000
+        AND (
+            url LIKE '%arrend%' OR url LIKE '%alug%'
+            OR title LIKE '%arrend%' OR title LIKE '%alug%'
+        )
+    """
+    moved = conn.execute(f"""
+        INSERT OR IGNORE INTO rentals ({col_list})
+        SELECT {col_list} FROM sales WHERE {where}
+    """).rowcount
+    if moved:
+        conn.execute(f"DELETE FROM sales WHERE {where}")
+        conn.commit()
+        logger.info(f"[DB] Reclassified {moved} rental(s) from sales → rentals")
 
 
 def init_db():
@@ -184,6 +238,9 @@ def init_db():
         sale_count = conn.execute("SELECT COUNT(*) as c FROM sales").fetchone()["c"]
         rent_count = conn.execute("SELECT COUNT(*) as c FROM rentals").fetchone()["c"]
         logger.info(f"[DB] Migration complete: {sale_count} sales, {rent_count} rentals")
+
+    # -- Reclassify misplaced rentals in the sales table ----------------------
+    _reclassify_rentals(conn)
 
     # -- Other tables ---------------------------------------------------------
     conn.executescript("""
@@ -481,7 +538,18 @@ def upsert_listing(listing: Listing) -> tuple:
     Insert or update a listing. Returns (id, is_new).
     Natural key: (source, source_id).
     Routes to the correct table based on listing_type.
+    Returns (None, False) if listing is excluded (timeshare, etc.).
     """
+    # Filter out non-property listings (timeshares, hotel weeks, etc.)
+    title_lower = (listing.title or "").lower()
+    desc_lower = (listing.description or "").lower()
+    if any(kw in title_lower for kw in EXCLUDED_TITLE_KEYWORDS):
+        logger.info(f"[DB] Excluded non-property listing (title): {listing.source_id} — {listing.title}")
+        return (None, False)
+    if any(kw in desc_lower for kw in EXCLUDED_DESCRIPTION_KEYWORDS):
+        logger.info(f"[DB] Excluded non-property listing (description): {listing.source_id}")
+        return (None, False)
+
     table = _table_for(getattr(listing, "listing_type", None) or "sale")
     conn = get_connection()
     try:
@@ -1295,12 +1363,12 @@ def get_neighborhoods(district: Optional[str] = None) -> List[dict]:
     conn = get_connection()
     if district:
         rows = conn.execute(
-            "SELECT * FROM neighborhoods WHERE district=? ORDER BY avg_price_per_sqm",
+            "SELECT * FROM neighborhoods WHERE district=? ORDER BY name",
             (district,)
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM neighborhoods ORDER BY avg_price_per_sqm"
+            "SELECT * FROM neighborhoods ORDER BY name"
         ).fetchall()
     conn.close()
     return [dict(r) for r in rows]

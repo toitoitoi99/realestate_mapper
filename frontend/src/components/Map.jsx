@@ -307,6 +307,8 @@ export default function Map({
               </Popup>
             )
 
+            const handleClick = () => onSelectListing(l)
+
             if (l.building_geojson) {
               const geojson = typeof l.building_geojson === 'string'
                 ? JSON.parse(l.building_geojson) : l.building_geojson
@@ -315,6 +317,7 @@ export default function Map({
                   key={`bldg-${l.id}`}
                   data={{ type: 'Feature', geometry: geojson, properties: {} }}
                   style={() => ({ ...markerColor, fillOpacity: 0.35, weight: mapZoom >= 15 ? 3 : 2 })}
+                  eventHandlers={{ click: handleClick }}
                 >
                   {popupContent}
                 </GeoJSON>
@@ -328,6 +331,7 @@ export default function Map({
                 center={[l.lat, l.lon]}
                 radius={mSize.radius}
                 pathOptions={{ ...markerColor, fillOpacity: 0.6, weight: mSize.weight }}
+                eventHandlers={{ click: handleClick }}
               >
                 {popupContent}
               </CircleMarker>

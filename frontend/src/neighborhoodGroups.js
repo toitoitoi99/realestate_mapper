@@ -28,7 +28,7 @@ export function buildGroups(features) {
 
   const groups = {}
   const parishToGroup = {}
-  const munNames = Object.keys(munMap)
+  const munNames = Object.keys(munMap).sort((a, b) => a.localeCompare(b, 'pt'))
 
   munNames.forEach((mun, i) => {
     const key = mun  // use municipality name as group key
@@ -37,7 +37,7 @@ export function buildGroups(features) {
       label: mun,
       color,
       fillColor: color,
-      neighborhoods: munMap[mun],
+      neighborhoods: munMap[mun].sort((a, b) => a.localeCompare(b, 'pt')),
     }
     for (const parish of munMap[mun]) {
       parishToGroup[parish] = key
