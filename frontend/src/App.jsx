@@ -35,6 +35,7 @@ export default function App() {
   const [scraping, setScraping] = useState(false)
   const [selectedNeighborhood, setSelectedNeighborhood] = useState(null)
   const [selectedListing, setSelectedListing] = useState(null)
+  const [highlightedListing, setHighlightedListing] = useState(null)
   const [sidebarTab, setSidebarTab] = useState('listings')
   const [neighbourhoodTypologies, setNeighbourhoodTypologies] = useState({})
   const [parishStats, setParishStats] = useState({})
@@ -200,6 +201,8 @@ export default function App() {
           onClearNeighborhood={() => setSelectedNeighborhood(null)}
           selectedListing={selectedListing}
           onSelectListing={setSelectedListing}
+          highlightedListing={highlightedListing}
+          onClearHighlight={() => setHighlightedListing(null)}
           sidebarTab={sidebarTab}
           onChangeTab={setSidebarTab}
           // Neighbourhood panel props
@@ -240,8 +243,8 @@ export default function App() {
           neighborhoods={neighborhoods}
           onSelectNeighborhood={handleSelectNeighborhood}
           selectedNeighborhood={selectedNeighborhood}
-          onSelectListing={setSelectedListing}
-          selectedListing={selectedListing}
+          onSelectListing={setHighlightedListing}
+          selectedListing={highlightedListing}
           projects={projects}
           showProjects={showProjects}
           visibleCategories={visibleCategories}
