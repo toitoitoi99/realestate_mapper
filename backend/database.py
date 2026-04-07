@@ -851,37 +851,51 @@ def get_radius_comparison(
             below = sum(1 for v in psqm_sorted if v < tp)
             comp_stats["listing_percentile"] = round(below / n * 100, 1)
 
-    # --- Nearby rentals ---
-    rent_table = "rentals" if table == "sales" else "sales"
-    rent_rows = conn.execute(
+    # --- Cross-reference: nearby rentals (for sales) or nearby sales (for rentals) ---
+    cross_table = "rentals" if table == "sales" else "sales"
+    cross_rows = conn.execute(
         f"SELECT id, price_per_sqm, price_amount, size_sqm, bedrooms, address, lat, lon, source "
-        f"FROM {rent_table} WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? AND price_per_sqm IS NOT NULL",
+        f"FROM {cross_table} WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? AND price_per_sqm IS NOT NULL",
         (lat - dlat, lat + dlat, lon - dlon, lon + dlon)
     ).fetchall()
 
-    rentals = []
-    for r in rent_rows:
+    cross_listings = []
+    for r in cross_rows:
         dist = _haversine(lat, lon, r["lat"], r["lon"])
         if dist <= radius_m:
             d = dict(r)
             d["distance_m"] = round(dist)
-            rentals.append(d)
+            cross_listings.append(d)
 
-    rentals.sort(key=lambda x: x["distance_m"])
+    cross_listings.sort(key=lambda x: x["distance_m"])
 
-    rent_psqm = [r["price_per_sqm"] for r in rentals if r["price_per_sqm"]]
+    cross_psqm = [r["price_per_sqm"] for r in cross_listings if r["price_per_sqm"]]
     rent_stats = {}
-    if rent_psqm:
-        avg_rent = statistics.mean(rent_psqm)
-        med_rent = statistics.median(rent_psqm)
-        est_monthly = round(avg_rent * (target["size_sqm"] or 0), 2)
-        gross_yield = round((avg_rent * 12 / target["price_per_sqm"]) * 100, 2) if target["price_per_sqm"] else None
-        rent_stats = {
-            "avg_rent_per_sqm": round(avg_rent, 2),
-            "median_rent_per_sqm": round(med_rent, 2),
-            "estimated_monthly_rent": est_monthly,
-            "gross_yield_pct": gross_yield,
-        }
+    if cross_psqm:
+        avg_cross = statistics.mean(cross_psqm)
+        med_cross = statistics.median(cross_psqm)
+        if table == "sales":
+            # Viewing a sale: show nearby rental prices and yield = rent*12/sale_price
+            est_monthly = round(avg_cross * (target["size_sqm"] or 0), 2)
+            gross_yield = round((avg_cross * 12 / target["price_per_sqm"]) * 100, 2) if target["price_per_sqm"] else None
+            rent_stats = {
+                "avg_rent_per_sqm": round(avg_cross, 2),
+                "median_rent_per_sqm": round(med_cross, 2),
+                "estimated_monthly_rent": est_monthly,
+                "gross_yield_pct": gross_yield,
+            }
+        else:
+            # Viewing a rental: show nearby sale prices and yield = this_rent*12/avg_sale_price
+            target_rent_psqm = target["price_per_sqm"]
+            gross_yield = round((target_rent_psqm * 12 / avg_cross) * 100, 2) if avg_cross else None
+            est_purchase = round(avg_cross * (target["size_sqm"] or 0), 2)
+            rent_stats = {
+                "avg_sale_per_sqm": round(avg_cross, 2),
+                "median_sale_per_sqm": round(med_cross, 2),
+                "estimated_purchase_price": est_purchase,
+                "gross_yield_pct": gross_yield,
+                "source": "sales",
+            }
 
     # --- History ---
     history = get_listing_history(listing_id, listing_type if table == "sales" else "rent")
@@ -895,9 +909,9 @@ def get_radius_comparison(
             "listings": comparables[:20],
         },
         "rentals": {
-            "count": len(rentals),
+            "count": len(cross_listings),
             "stats": rent_stats,
-            "listings": rentals[:10],
+            "listings": cross_listings[:10],
         },
         "history": history,
     }
