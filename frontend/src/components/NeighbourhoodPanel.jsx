@@ -25,6 +25,8 @@ export default function NeighbourhoodPanel({
   const [expandedGroups, setExpandedGroups] = useState({})
   const [neighbourhoodListCollapsed, setNeighbourhoodListCollapsed] = useState(false)
   const [projectsListCollapsed, setProjectsListCollapsed] = useState(false)
+  const [priceTrendsCollapsed, setPriceTrendsCollapsed] = useState(false)
+  const [securityCollapsed, setSecurityCollapsed] = useState(false)
 
   // Master toggle: toggles all layers on/off together
   const handleMasterToggle = () => {
@@ -95,6 +97,24 @@ export default function NeighbourhoodPanel({
 
   return (
     <div className="overflow-y-auto p-3 text-xs space-y-3" style={{ maxHeight: '50vh' }}>
+
+      {/* ── Collapse/expand all toggle ── */}
+      <div className="flex justify-end">
+        <button
+          className="text-gray-400 hover:text-gray-600 text-[10px] cursor-pointer select-none"
+          onClick={() => {
+            const allCollapsed = neighbourhoodListCollapsed && projectsListCollapsed && priceTrendsCollapsed && securityCollapsed
+            setNeighbourhoodListCollapsed(!allCollapsed)
+            setProjectsListCollapsed(!allCollapsed)
+            setPriceTrendsCollapsed(!allCollapsed)
+            setSecurityCollapsed(!allCollapsed)
+          }}
+        >
+          {neighbourhoodListCollapsed && projectsListCollapsed && priceTrendsCollapsed && securityCollapsed
+            ? '▼ Expand all'
+            : '▲ Collapse all'}
+        </button>
+      </div>
 
       {/* ── Neighbourhoods ── */}
       <div>
@@ -357,15 +377,23 @@ export default function NeighbourhoodPanel({
 
       {/* ── Price Trends (Sold) ── */}
       <div className="border-t border-gray-100 pt-2">
-        <div
-          className="flex items-center gap-2 cursor-pointer select-none mb-1"
-          onClick={onToggleSoldTrends}
-        >
-          <input type="checkbox" readOnly checked={showSoldTrends} className="cursor-pointer" />
-          <span className="text-gray-700 font-medium text-sm">{t.soldTrends}</span>
+        <div className="flex items-center gap-2 mb-1">
+          <div
+            className="flex items-center gap-2 cursor-pointer select-none flex-1"
+            onClick={onToggleSoldTrends}
+          >
+            <input type="checkbox" readOnly checked={showSoldTrends} className="cursor-pointer" />
+            <span className="text-gray-700 font-medium text-sm">{t.soldTrends}</span>
+          </div>
+          <button
+            className="text-gray-400 hover:text-gray-600 text-[10px] cursor-pointer select-none shrink-0"
+            onClick={() => setPriceTrendsCollapsed(v => !v)}
+          >
+            {priceTrendsCollapsed ? '▼ Show' : '▲ Hide'}
+          </button>
         </div>
 
-        <div className="pl-1 mt-1 space-y-2">
+        {!priceTrendsCollapsed && <div className="pl-1 mt-1 space-y-2">
           <div className="space-y-1">
             <div className="text-gray-400">{t.dateRange}</div>
             <div className="flex gap-1 items-center">
@@ -408,20 +436,28 @@ export default function NeighbourhoodPanel({
               {soldTrendsData.trends.length} {t.parishesWithData}
             </div>
           )}
-        </div>
+        </div>}
       </div>
 
       {/* ── Security ── */}
       <div className="border-t border-gray-100 pt-2">
-        <div
-          className="flex items-center gap-2 cursor-pointer select-none mb-1"
-          onClick={onToggleSecurity}
-        >
-          <input type="checkbox" readOnly checked={showSecurity} className="cursor-pointer" />
-          <span className="text-gray-700 font-medium text-sm">{t.security}</span>
+        <div className="flex items-center gap-2 mb-1">
+          <div
+            className="flex items-center gap-2 cursor-pointer select-none flex-1"
+            onClick={onToggleSecurity}
+          >
+            <input type="checkbox" readOnly checked={showSecurity} className="cursor-pointer" />
+            <span className="text-gray-700 font-medium text-sm">{t.security}</span>
+          </div>
+          <button
+            className="text-gray-400 hover:text-gray-600 text-[10px] cursor-pointer select-none shrink-0"
+            onClick={() => setSecurityCollapsed(v => !v)}
+          >
+            {securityCollapsed ? '▼ Show' : '▲ Hide'}
+          </button>
         </div>
 
-        <div className="pl-1 mt-1 space-y-1">
+        {!securityCollapsed && <div className="pl-1 mt-1 space-y-1">
           {SECURITY_LAYERS.map(([key, label]) => {
             const cfg = SECURITY_LAYER_CONFIG[key]
             return (
@@ -436,7 +472,7 @@ export default function NeighbourhoodPanel({
               </div>
             )
           })}
-        </div>
+        </div>}
       </div>
     </div>
   )
