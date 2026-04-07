@@ -1295,12 +1295,12 @@ def get_neighborhoods(district: Optional[str] = None) -> List[dict]:
     conn = get_connection()
     if district:
         rows = conn.execute(
-            "SELECT * FROM neighborhoods WHERE district=? ORDER BY avg_price_per_sqm",
+            "SELECT * FROM neighborhoods WHERE district=? ORDER BY name",
             (district,)
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM neighborhoods ORDER BY avg_price_per_sqm"
+            "SELECT * FROM neighborhoods ORDER BY name"
         ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
