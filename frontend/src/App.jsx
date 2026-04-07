@@ -85,7 +85,9 @@ export default function App() {
   useEffect(() => {
     setLoading(true)
     // show_sold and sort_by are UI-only — don't send them to the API
-    const { show_sold, sort_by, ...apiFilters } = filters
+    const { show_sold, sort_by, listing_type, ...apiFilters } = filters
+    // 'all' means no listing_type filter (backend unions both tables)
+    if (listing_type && listing_type !== 'all') apiFilters.listing_type = listing_type
     if (selectedNeighborhood) apiFilters.neighborhood = selectedNeighborhood
     fetchListings(apiFilters)
       .then(d => {
