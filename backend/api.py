@@ -34,7 +34,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 import database as db
 from scrapers.idealista import IdealistaScraper
 from models import ScrapeRun
-from chat_handler import ChatHandler
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -762,7 +761,6 @@ def make_app() -> tornado.web.Application:
             (r"/api/areas",                 AreasHandler),
             (r"/api/parishes",              ParishesHandler),
             (r"/api/translate",              TranslateHandler),
-            (r"/api/chat",                  ChatHandler),
             (r"/api/neighbourhood-typologies", NeighbourhoodTypologiesHandler),
             (r"/api/parish-stats",          ParishStatsHandler),
             (r"/api/nearby-projects",       NearbyProjectsHandler),

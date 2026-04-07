@@ -133,11 +133,30 @@ def _polite_delay():
 
 # ── Blocked page detection ────────────────────────────────────────────────────
 
+def _wait_for_interstitial(page: "Page") -> bool:
+    """If the page is a 'Site Offline' interstitial with meta-refresh, wait for
+    the real page to load.  Returns True if the interstitial was detected and
+    resolved, False if it wasn't an interstitial."""
+    try:
+        content = page.content()
+        if "Site Offline" in content and 'http-equiv="refresh"' in content:
+            log.info("  Interstitial 'Site Offline' page — waiting for meta-refresh...")
+            page.wait_for_timeout(12000)
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _is_blocked(page: "Page") -> bool:
     """Check if we got a blocked/challenge page."""
     try:
         content = page.content()
         if len(content) < 5000:
+            # Don't flag the Site Offline interstitial as blocked — it's
+            # handled separately by _wait_for_interstitial.
+            if "Site Offline" in content:
+                return False
             return True
         # Common challenge indicators
         if "cf-challenge" in content or "Just a moment" in content:
@@ -163,6 +182,11 @@ def _goto_with_retry(page: "Page", url: str, retries: int = BLOCKED_RETRIES) -> 
                 continue
             return False
 
+        # Handle "Site Offline" interstitial (meta-refresh after ~10s)
+        if _wait_for_interstitial(page):
+            if not _is_blocked(page):
+                return True
+
         if not _is_blocked(page):
             return True
 
@@ -172,9 +196,13 @@ def _goto_with_retry(page: "Page", url: str, retries: int = BLOCKED_RETRIES) -> 
             try:
                 page.reload(timeout=30000, wait_until="domcontentloaded")
                 page.wait_for_timeout(2000)
+                if _wait_for_interstitial(page):
+                    if not _is_blocked(page):
+                        return True
                 if not _is_blocked(page):
                     return True
-            except PWTimeout:
+            except Exception:
+                # Catch net::ERR_ABORTED etc. from reload during meta-refresh
                 pass
         else:
             log.warning(f"  Blocked after {retries} attempts: {url}")
@@ -675,6 +703,8 @@ def extract_from_dom(page: Page) -> dict:
 
 def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Optional[Listing]:
     """Visit a listing detail page and return a Listing object."""
+    from models import detect_listing_type
+    listing_type = detect_listing_type(url, fallback=listing_type)
 
     source_id = _extract_source_id(url)
 
@@ -811,7 +841,7 @@ def run_scraper(
             user_agent=(
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
+                "Chrome/131.0.0.0 Safari/537.36"
             ),
             viewport={"width": 1280, "height": 900},
             locale="pt-PT",

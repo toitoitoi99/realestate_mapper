@@ -236,10 +236,13 @@ class IdealistaScraper(BaseScraper):
         raw = f"{addr}|lisboa|{price_r}|{size_r}|idealista"
         hash_dedupe = hashlib.sha1(raw.encode()).hexdigest()
 
+        from models import detect_listing_type
+
         return Listing(
             source="idealista",
             source_id=source_id,
             url=url,
+            listing_type=detect_listing_type(url),
             price_amount=price,
             price_per_sqm=price_per_sqm,
             size_sqm=area_sqm,

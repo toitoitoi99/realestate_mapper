@@ -101,7 +101,7 @@ export default function FilterPanel({ filters, setFilter, reset }) {
       <div>
         <label className="text-xs text-gray-500 mb-1 block">{t.listingType}</label>
         <div className="flex rounded overflow-hidden border border-gray-200 text-sm">
-          {[['sale', t.buy], ['rent', t.rent]].map(([type, label]) => (
+          {[['sale', t.buy], ['rent', t.rent], ['all', t.all]].map(([type, label]) => (
             <button key={type} onClick={() => setFilter('listing_type', type)}
               className={`flex-1 py-1.5 ${filters.listing_type === type
                 ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>

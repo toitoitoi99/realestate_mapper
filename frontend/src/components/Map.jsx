@@ -9,7 +9,6 @@ import SecurityLayer from './SecurityLayer'
 import NeighborhoodLayer from './NeighborhoodLayer'
 import MapLegend from './MapLegend'
 import AddressSearch from './AddressSearch'
-import ChatPanel from './ChatPanel'
 import SoldTrendsLayer from './SoldTrendsLayer'
 import { BASE_MAPS } from '../baseMaps'
 import RarityBadge from './RarityBadge'
@@ -291,9 +290,7 @@ export default function Map({
               </Popup>
             )
 
-            const selectHandler = {
-              click: () => onSelectListing(l)
-            }
+            const handleClick = () => onSelectListing(l)
 
             if (l.building_geojson) {
               const geojson = typeof l.building_geojson === 'string'
@@ -303,7 +300,7 @@ export default function Map({
                   key={`bldg-${l.id}`}
                   data={{ type: 'Feature', geometry: geojson, properties: {} }}
                   style={() => ({ ...markerColor, fillOpacity: 0.35, weight: 2 })}
-                  eventHandlers={selectHandler}
+                  eventHandlers={{ click: handleClick }}
                 >
                   {popupContent}
                 </GeoJSON>
@@ -316,7 +313,7 @@ export default function Map({
                 center={[l.lat, l.lon]}
                 radius={3}
                 pathOptions={{ ...markerColor, fillOpacity: 0.6, weight: 0.5 }}
-                eventHandlers={selectHandler}
+                eventHandlers={{ click: handleClick }}
               >
                 {popupContent}
               </CircleMarker>
@@ -356,8 +353,6 @@ export default function Map({
           <AddressSearch />
         </LeafletContext.Provider>
       )}
-
-      <ChatPanel />
 
       <MapLegend
         baseMap={baseMap}

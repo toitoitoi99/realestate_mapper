@@ -12,7 +12,7 @@ const DEFAULT_FILTERS = {
   sold_after: '',
   sold_before: '',
   sort_by: 'default',
-  limit: 500,
+  limit: 10000,
   min_price_per_sqm: '',
   max_price_per_sqm: '',
   bedrooms: '',
