@@ -263,7 +263,7 @@ export default function Map({
             if (isSold || isReserved) {
               markerColor = { color: '#92400e', fillColor: '#f59e0b' }
             } else if (isRent) {
-              markerColor = { color: '#065f46', fillColor: '#10b981' }
+              markerColor = { color: '#6b21a8', fillColor: '#a855f7' }
             } else {
               markerColor = { color: '#1d4ed8', fillColor: '#3b82f6' }
             }
