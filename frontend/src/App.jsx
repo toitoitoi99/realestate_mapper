@@ -139,15 +139,22 @@ export default function App() {
   }, [])
 
   const filteredListings = useMemo(() => {
-    if (!showNeighborhoods || hiddenParishes.size === 0) return listings
+    if (!showNeighborhoods) return listings
+
+    // If parishes selected for comparison, show only those
+    if (selectedParishes?.size > 0) {
+      return listings.filter(l => l.neighborhood && selectedParishes.has(l.neighborhood))
+    }
+
     return listings.filter(l => {
       if (!l.neighborhood) return true
       const group = parishToGroup?.[l.neighborhood]
-      if (!group || !visibleGroups[group]) return false
+      if (!group) return true           // unknown parish → keep visible
+      if (!visibleGroups[group]) return false
       if (hiddenParishes.has(l.neighborhood)) return false
       return true
     })
-  }, [listings, showNeighborhoods, hiddenParishes, parishToGroup, visibleGroups])
+  }, [listings, showNeighborhoods, hiddenParishes, parishToGroup, visibleGroups, selectedParishes])
 
   const toggleGroup = useCallback((key) => {
     setVisibleGroups(prev => ({ ...prev, [key]: !prev[key] }))
