@@ -9,7 +9,6 @@ import SecurityLayer from './SecurityLayer'
 import NeighborhoodLayer from './NeighborhoodLayer'
 import MapLegend from './MapLegend'
 import AddressSearch from './AddressSearch'
-import ChatPanel from './ChatPanel'
 import SoldTrendsLayer from './SoldTrendsLayer'
 import { BASE_MAPS } from '../baseMaps'
 import RarityBadge from './RarityBadge'
@@ -350,8 +349,6 @@ export default function Map({
           <AddressSearch />
         </LeafletContext.Provider>
       )}
-
-      <ChatPanel />
 
       <MapLegend
         baseMap={baseMap}
