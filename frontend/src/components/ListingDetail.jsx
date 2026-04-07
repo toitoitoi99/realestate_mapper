@@ -4,6 +4,7 @@ import { translateDescription, fetchListingDetail, fetchNearbyProjects } from '.
 import RarityBadge from './RarityBadge'
 import AmenityRating from './AmenityRating'
 import ListingComparison from './ListingComparison'
+import DealScore from './DealScore'
 import SourceLogo from './SourceLogo'
 
 function PriceDiff({ current, other }) {
@@ -345,6 +346,11 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
               </div>
             )}
           </div>
+
+          {/* Deal Score */}
+          {listing.listing_type !== 'rent' && (
+            <DealScore listing={listing} listingType={listing.listing_type || 'sale'} />
+          )}
 
           {/* Price comparison across sites */}
           {crossListings.length > 0 && (
