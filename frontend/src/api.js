@@ -90,6 +90,12 @@ export async function translateDescription(id, listingType = 'sale') {
   return res.json()
 }
 
+export async function fetchDealScore(id, listingType = 'sale') {
+  const params = new URLSearchParams({ listing_type: listingType })
+  const res = await fetch(`${BASE}/listings/${id}/deal-score?${params}`)
+  return res.json()
+}
+
 export async function fetchListingComparison(id, listingType = 'sale', radiusM = 500, propertyType = null, bedrooms = null) {
   const params = new URLSearchParams({ listing_type: listingType, radius_m: radiusM })
   if (propertyType) params.set('property_type', propertyType)

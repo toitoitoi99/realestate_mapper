@@ -1839,5 +1839,186 @@ def get_neighbourhood_typologies():
     return result
 
 
+# ── Deal Score ───────────────────────────────────────────────────────────────
+
+def _deal_rating(score):
+    """Letter rating for a 0-100 score."""
+    if score >= 80:
+        return "A"
+    if score >= 60:
+        return "B"
+    if score >= 40:
+        return "C"
+    return "D"
+
+
+def compute_deal_score(listing_id, listing_type="sale"):
+    """
+    Composite deal score (0-100) combining value, location, yield, scarcity, and growth.
+    Returns dict with deal_score, deal_rating, and per-dimension breakdown.
+    """
+    conn = get_connection()
+    table = _table_for(listing_type)
+    try:
+        row = conn.execute(
+            f"SELECT id, lat, lon, price_per_sqm, price_amount, size_sqm, "
+            f"parish, neighborhood, rarity_score, rarity_factors "
+            f"FROM {table} WHERE id=?",
+            (listing_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        return {"error": "Listing not found"}
+    if row["lat"] is None or row["lon"] is None:
+        return {"error": "Listing missing coordinates"}
+
+    lat, lon = row["lat"], row["lon"]
+    price_psm = row["price_per_sqm"]
+
+    # ── 1. VALUE (price percentile + INE benchmark) ──
+    comparison = get_radius_comparison(listing_id, listing_type, 500)
+    percentile = None
+    comp_count = 0
+    if "comparables" in comparison:
+        comp_count = comparison["comparables"].get("count", 0)
+        percentile = comparison["comparables"].get("stats", {}).get("listing_percentile")
+
+    value_from_percentile = (100.0 - percentile) if percentile is not None else 50.0
+
+    ine_component = 50.0
+    ine_detail = ""
+    conn2 = get_connection()
+    try:
+        ine_row = conn2.execute(
+            "SELECT median_price_per_sqm FROM ine_stats "
+            "WHERE is_latest=1 AND (category='Total' OR category LIKE '%otal%') "
+            "ORDER BY median_price_per_sqm DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        conn2.close()
+
+    if ine_row and ine_row["median_price_per_sqm"] and price_psm:
+        ine_median = ine_row["median_price_per_sqm"]
+        ine_diff_pct = ((price_psm - ine_median) / ine_median) * 100
+        ine_component = max(0, min(100, (1 - (ine_diff_pct + 30) / 60) * 100))
+        ine_detail = ", {:.0f}% vs INE median".format(ine_diff_pct)
+
+    value_score = value_from_percentile * 0.6 + ine_component * 0.4
+    if percentile is not None:
+        value_detail = "{}th pctl (cheaper than {:.0f}%){}".format(
+            int(percentile), 100 - percentile, ine_detail
+        )
+    else:
+        value_detail = "No nearby comparables" + ine_detail
+
+    # ── 2. LOCATION (amenity score) ──
+    from amenity_rating import get_amenity_rating
+    amenity = get_amenity_rating(lat, lon)
+    location_score = float(amenity.get("overall_score", 50))
+    location_class = amenity.get("classification", "?")
+    location_detail = "Class {} amenity area (score {:.0f})".format(location_class, location_score)
+
+    # ── 3. YIELD (gross rental yield) ──
+    yield_score = 0.0
+    yield_detail = "N/A"
+    if listing_type == "sale":
+        rent_stats = comparison.get("rentals", {}).get("stats", {})
+        gross_yield = rent_stats.get("gross_yield_pct")
+        est_rent = rent_stats.get("estimated_monthly_rent")
+        if gross_yield is not None:
+            yield_score = min(100.0, (gross_yield / 6.0) * 100)
+            yield_detail = "{:.1f}% gross yield".format(gross_yield)
+            if est_rent:
+                yield_detail += ", est. \u20ac{:,.0f}/mo rent".format(est_rent)
+        else:
+            yield_detail = "No nearby rentals for yield calc"
+
+    # ── 4. SCARCITY (rarity score) ──
+    scarcity_score = float(row["rarity_score"] or 0)
+    scarcity_detail = "Rarity score {:.0f}".format(scarcity_score)
+    factors_raw = row["rarity_factors"]
+    if factors_raw:
+        try:
+            factors = json.loads(factors_raw) if isinstance(factors_raw, str) else factors_raw
+            if factors:
+                factor_labels = {
+                    "price_dev": "unusual price",
+                    "typology": "uncommon typology",
+                    "size_dev": "unusual size",
+                    "condition": "condition contrast",
+                    "scarcity": "low supply",
+                    "prop_type": "rare property type",
+                    "vs_sold": "below sold prices",
+                    "new_build_prox": "near new builds",
+                }
+                top_factor = max(factors.items(), key=lambda x: x[1])
+                scarcity_detail += " \u2014 {}".format(factor_labels.get(top_factor[0], top_factor[0]))
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # ── 5. GROWTH (parish sold trend) ──
+    growth_score = 50.0
+    growth_detail = "No sold trend data"
+    parish = row["parish"]
+    if parish:
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        trends = get_sold_trends(start_date, end_date)
+        parish_trend = None
+        for t in trends:
+            if t["parish"] and parish.lower() in t["parish"].lower():
+                parish_trend = t
+                break
+        if parish_trend:
+            pct = parish_trend["pct_change"]
+            growth_score = max(0, min(100, (pct + 10) / 20 * 100))
+            growth_detail = "{:+.1f}% parish trend ({} txns)".format(pct, parish_trend["count"])
+
+    # ── Composite ──
+    if listing_type == "sale":
+        weights = {"value": 30, "location": 25, "yield": 20, "scarcity": 15, "growth": 10}
+    else:
+        weights = {"value": 35, "location": 30, "yield": 0, "scarcity": 20, "growth": 15}
+
+    scores = {
+        "value": value_score,
+        "location": location_score,
+        "yield": yield_score,
+        "scarcity": scarcity_score,
+        "growth": growth_score,
+    }
+
+    total_weight = sum(weights.values())
+    deal_score = sum(scores[k] * weights[k] for k in scores) / total_weight
+
+    details = {
+        "value": value_detail,
+        "location": location_detail,
+        "yield": yield_detail,
+        "scarcity": scarcity_detail,
+        "growth": growth_detail,
+    }
+
+    dimensions = {}
+    for k in ["value", "location", "yield", "scarcity", "growth"]:
+        s = round(scores[k], 1)
+        dimensions[k] = {
+            "score": s,
+            "rating": _deal_rating(s),
+            "weight": weights[k],
+            "detail": details[k],
+        }
+
+    return {
+        "deal_score": round(deal_score, 1),
+        "deal_rating": _deal_rating(deal_score),
+        "dimensions": dimensions,
+        "comparables_count": comp_count,
+        "listing_type": listing_type,
+    }
+
+
 if __name__ == "__main__":
     init_db()

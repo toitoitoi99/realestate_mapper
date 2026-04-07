@@ -556,6 +556,17 @@ class ComparisonHandler(BaseHandler):
         self.write_json(result)
 
 
+class DealScoreHandler(BaseHandler):
+    """GET /api/listings/:id/deal-score — composite purchase evaluation score"""
+
+    async def get(self, listing_id):
+        listing_type = self.get_argument("listing_type", "sale")
+        result = await tornado.ioloop.IOLoop.current().run_in_executor(
+            _executor, db.compute_deal_score, int(listing_id), listing_type
+        )
+        self.write_json(result)
+
+
 class AddressHistoryHandler(BaseHandler):
     """GET /api/listings/:id/address-history"""
 
@@ -745,6 +756,7 @@ def make_app() -> tornado.web.Application:
     return tornado.web.Application(
         [
             (r"/api/listings",              ListingsHandler),
+            (r"/api/listings/(\d+)/deal-score",       DealScoreHandler),
             (r"/api/listings/(\d+)/compare",         ComparisonHandler),
             (r"/api/listings/(\d+)/address-history",  AddressHistoryHandler),
             (r"/api/listings/(\d+)",        ListingDetailHandler),
