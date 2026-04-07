@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { TileLayer, CircleMarker, GeoJSON, Popup, useMap } from 'react-leaflet'
+import { TileLayer, CircleMarker, GeoJSON, Popup, useMap, useMapEvents } from 'react-leaflet'
 import { LeafletContext, createLeafletContext } from '@react-leaflet/core'
 import L from 'leaflet'
 import { useLanguage } from '../LanguageContext'
@@ -141,6 +141,20 @@ function DynamicTileLayer({ baseMap }) {
   return null
 }
 
+function ZoomTracker({ onZoom }) {
+  const map = useMapEvents({
+    zoomend: () => onZoom(map.getZoom()),
+  })
+  useEffect(() => { onZoom(map.getZoom()) }, [map])
+  return null
+}
+
+function listingMarkerSize(zoom) {
+  const radius = Math.max(3, Math.min(10, zoom - 8))
+  const weight = zoom >= 15 ? 1.5 : zoom >= 13 ? 1 : 0.5
+  return { radius, weight }
+}
+
 // Simple ray-casting point-in-polygon for client-side filtering
 function pointInPolygon(lat, lon, ring) {
   let inside = false
@@ -216,6 +230,7 @@ export default function Map({
 
   const ref = useRef(null)
   const [ctx, setCtx] = useState(null)
+  const [mapZoom, setMapZoom] = useState(areaConfig?.zoom || DEFAULT_ZOOM)
 
   useEffect(() => {
     if (!ref.current) return
@@ -244,6 +259,7 @@ export default function Map({
             showNeighborhoods={showNeighborhoods}
           />
           <FlyToListing listing={selectedListing} />
+          <ZoomTracker onZoom={setMapZoom} />
 
           <NeighborhoodLayer
             showNeighborhoods={showNeighborhoods}
@@ -298,19 +314,20 @@ export default function Map({
                 <GeoJSON
                   key={`bldg-${l.id}`}
                   data={{ type: 'Feature', geometry: geojson, properties: {} }}
-                  style={() => ({ ...markerColor, fillOpacity: 0.35, weight: 2 })}
+                  style={() => ({ ...markerColor, fillOpacity: 0.35, weight: mapZoom >= 15 ? 3 : 2 })}
                 >
                   {popupContent}
                 </GeoJSON>
               )
             }
 
+            const mSize = listingMarkerSize(mapZoom)
             return (
               <CircleMarker
                 key={l.id}
                 center={[l.lat, l.lon]}
-                radius={3}
-                pathOptions={{ ...markerColor, fillOpacity: 0.6, weight: 0.5 }}
+                radius={mSize.radius}
+                pathOptions={{ ...markerColor, fillOpacity: 0.6, weight: mSize.weight }}
               >
                 {popupContent}
               </CircleMarker>
