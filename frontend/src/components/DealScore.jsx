@@ -27,7 +27,7 @@ function ratingBgHex(rating) {
 
 /** SVG radar chart — 5-axis pentagon */
 function RadarChart({ dimensions }) {
-  const cx = 90, cy = 90, r = 70
+  const cx = 110, cy = 100, r = 70
   const axes = DIMENSIONS.filter(k => dimensions[k]?.weight > 0)
   const n = axes.length
 
@@ -56,7 +56,7 @@ function RadarChart({ dimensions }) {
   const scores = axes.map(k => dimensions[k]?.score || 0)
 
   return (
-    <svg viewBox="0 0 180 180" className="w-full max-w-[200px] mx-auto">
+    <svg viewBox="0 0 220 200" className="w-full max-w-[220px] mx-auto">
       {rings.map(pct => (
         <polygon
           key={pct}
@@ -127,7 +127,7 @@ export default function DealScore({ listing, listingType = 'sale' }) {
       <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
         <div className="h-4 w-24 bg-gray-200 rounded animate-pulse" />
         <div className="flex justify-center">
-          <div className="w-[200px] h-[200px] bg-gray-100 rounded-full animate-pulse" />
+          <div className="w-[220px] h-[200px] bg-gray-100 rounded-full animate-pulse" />
         </div>
         {[...Array(5)].map((_, i) => (
           <div key={i} className="h-6 bg-gray-200 rounded animate-pulse" />
@@ -136,7 +136,19 @@ export default function DealScore({ listing, listingType = 'sale' }) {
     )
   }
 
-  if (error || !data) return null
+  if (error) {
+    return (
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Deal Score</span>
+          <span className="text-xs text-gray-400">Unavailable</span>
+        </div>
+        <p className="text-xs text-gray-400 mt-1">{error}</p>
+      </div>
+    )
+  }
+
+  if (!data) return null
 
   const { deal_score, deal_rating, dimensions } = data
   const overallColor = ratingBgHex(deal_rating)
