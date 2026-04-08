@@ -561,8 +561,10 @@ class DealScoreHandler(BaseHandler):
 
     async def get(self, listing_id):
         listing_type = self.get_argument("listing_type", "sale")
+        radius_m = int(self.get_argument("radius", "500"))
+        radius_m = max(100, min(5000, radius_m))  # clamp to sane range
         result = await tornado.ioloop.IOLoop.current().run_in_executor(
-            _executor, db.compute_deal_score, int(listing_id), listing_type
+            _executor, db.compute_deal_score, int(listing_id), listing_type, radius_m
         )
         self.write_json(result)
 
