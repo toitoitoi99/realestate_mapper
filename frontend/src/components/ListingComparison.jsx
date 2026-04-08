@@ -2,9 +2,11 @@ import { useState, useEffect, useRef } from 'react'
 import { useLanguage } from '../LanguageContext'
 import { fetchListingComparison, fetchAddressHistory } from '../api'
 
-export default function ListingComparison({ listing }) {
+export default function ListingComparison({ listing, radiusM: externalRadius, onRadiusChange }) {
   const { t } = useLanguage()
-  const [radiusM, setRadiusM] = useState(500)
+  const [internalRadius, setInternalRadius] = useState(500)
+  const radiusM = externalRadius ?? internalRadius
+  const setRadiusM = onRadiusChange ?? setInternalRadius
   const [matchType, setMatchType] = useState(true)    // filter by property_type
   const [matchBeds, setMatchBeds] = useState(true)     // filter by bedrooms
   const [data, setData] = useState(null)

@@ -1852,9 +1852,9 @@ def _deal_rating(score):
     return "D"
 
 
-def compute_deal_score(listing_id, listing_type="sale"):
+def compute_deal_score(listing_id, listing_type="sale", radius_m=500):
     """
-    Composite deal score (0-100) combining value, location, yield, scarcity, and growth.
+    Composite deal score (0-100) combining value, location, yield, scarcity, growth, and risk.
     Returns dict with deal_score, deal_rating, and per-dimension breakdown.
     """
     conn = get_connection()
@@ -1862,7 +1862,8 @@ def compute_deal_score(listing_id, listing_type="sale"):
     try:
         row = conn.execute(
             f"SELECT id, lat, lon, price_per_sqm, price_amount, size_sqm, "
-            f"parish, neighborhood, rarity_score, rarity_factors "
+            f"parish, neighborhood, rarity_score, rarity_factors, "
+            f"condition, scraped_at, property_type, bedrooms "
             f"FROM {table} WHERE id=?",
             (listing_id,)
         ).fetchone()
@@ -1878,12 +1879,27 @@ def compute_deal_score(listing_id, listing_type="sale"):
     price_psm = row["price_per_sqm"]
 
     # ── 1. VALUE (discount-to-market: how far below estimated fair value) ──
-    comparison = get_radius_comparison(listing_id, listing_type, 500)
+    # Tiered comparables: prefer same property type, fall back to all types
+    prop_type = row["property_type"]
+    bedrooms = row["bedrooms"]
+    comparison = get_radius_comparison(listing_id, listing_type, radius_m,
+                                       filter_property_type=prop_type)
     comp_count = 0
     comp_stats = {}
+    comp_type_label = prop_type or "all"
     if "comparables" in comparison:
         comp_count = comparison["comparables"].get("count", 0)
         comp_stats = comparison["comparables"].get("stats", {})
+
+    # If fewer than 5 same-type comps, widen to all property types
+    if comp_count < 5:
+        comparison_all = get_radius_comparison(listing_id, listing_type, radius_m)
+        all_count = comparison_all.get("comparables", {}).get("count", 0)
+        if all_count > comp_count:
+            comparison = comparison_all
+            comp_count = all_count
+            comp_stats = comparison["comparables"].get("stats", {})
+            comp_type_label = "all types"
 
     # Primary signal: discount vs local median price/sqm (comparables)
     discount_pct = None
@@ -1918,13 +1934,14 @@ def compute_deal_score(listing_id, listing_type="sale"):
     value_score = discount_component * 0.7 + ine_component * 0.3
 
     if discount_pct is not None:
+        type_note = " [vs {}]".format(comp_type_label) if comp_type_label != "all types" else ""
         if discount_pct > 0:
-            value_detail = "{:.0f}% below local median ({}/m² vs {}){}".format(
-                discount_pct, int(price_psm), int(local_median), ine_detail
+            value_detail = "{:.0f}% below median ({}/m\u00b2 vs {}{}){}".format(
+                discount_pct, int(price_psm), int(local_median), type_note, ine_detail
             )
         else:
-            value_detail = "{:.0f}% above local median ({}/m² vs {}){}".format(
-                abs(discount_pct), int(price_psm), int(local_median), ine_detail
+            value_detail = "{:.0f}% above median ({}/m\u00b2 vs {}{}){}".format(
+                abs(discount_pct), int(price_psm), int(local_median), type_note, ine_detail
             )
     else:
         value_detail = "No nearby comparables" + ine_detail

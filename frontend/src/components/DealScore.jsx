@@ -101,7 +101,7 @@ function RadarChart({ dimensions }) {
   )
 }
 
-export default function DealScore({ listing, listingType = 'sale' }) {
+export default function DealScore({ listing, listingType = 'sale', radiusM = 500 }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -111,7 +111,7 @@ export default function DealScore({ listing, listingType = 'sale' }) {
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetchDealScore(listing.id, listingType)
+    fetchDealScore(listing.id, listingType, radiusM)
       .then(result => {
         if (!cancelled) {
           if (result.error) setError(result.error)
@@ -121,7 +121,7 @@ export default function DealScore({ listing, listingType = 'sale' }) {
       .catch(() => { if (!cancelled) setError('Failed to load') })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [listing?.id, listingType])
+  }, [listing?.id, listingType, radiusM])
 
   if (loading) {
     return (

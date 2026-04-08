@@ -98,8 +98,8 @@ export async function translateDescription(id, listingType = 'sale') {
   })
 }
 
-export async function fetchDealScore(id, listingType = 'sale') {
-  const params = new URLSearchParams({ listing_type: listingType })
+export async function fetchDealScore(id, listingType = 'sale', radiusM = 500) {
+  const params = new URLSearchParams({ listing_type: listingType, radius: radiusM })
   const res = await fetch(`${BASE}/listings/${id}/deal-score?${params}`)
   return res.json()
 }

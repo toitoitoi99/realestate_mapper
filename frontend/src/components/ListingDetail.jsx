@@ -54,6 +54,7 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
   const [crossListings, setCrossListings] = useState([])
   const [previousPrice, setPreviousPrice] = useState(null)
   const [nearbyProjects, setNearbyProjects] = useState(null)
+  const [radiusM, setRadiusM] = useState(500)
 
   useEffect(() => {
     if (lang !== 'en' || !listing.description) {
@@ -349,7 +350,7 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
 
           {/* Deal Score */}
           {listing.listing_type !== 'rent' && (
-            <DealScore listing={listing} listingType={listing.listing_type || 'sale'} />
+            <DealScore listing={listing} listingType={listing.listing_type || 'sale'} radiusM={radiusM} />
           )}
 
           {/* Price comparison across sites */}
@@ -382,7 +383,7 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
           )}
 
           {/* ============ PRICE COMPARISON (MOVED UP) ============ */}
-          <ListingComparison listing={listing} />
+          <ListingComparison listing={listing} radiusM={radiusM} onRadiusChange={setRadiusM} />
 
           {/* Property details */}
           {details.length > 0 && (
