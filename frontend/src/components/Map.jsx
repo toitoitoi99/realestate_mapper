@@ -215,6 +215,19 @@ export default function Map({
     })
   }, [selectedParishes, parishFeatures])
 
+  // Build visible parish features for point-in-polygon fallback
+  const visibleParishFeatures = useMemo(() => {
+    if (!showNeighborhoods || !parishFeatures?.length) return null
+    return parishFeatures.filter(f => {
+      const name = f.properties?.name
+      if (!name) return false
+      const group = parishToGroup?.[name]
+      if (!group || !visibleGroups[group]) return false
+      if (hiddenParishes?.has(name)) return false
+      return true
+    })
+  }, [showNeighborhoods, parishFeatures, parishToGroup, visibleGroups, hiddenParishes])
+
   const allWithCoords = (listings?.filter(l => l.lat && l.lon) ?? [])
 
   // When parishes are selected for comparison, use point-in-polygon (bypass isParishVisible)
@@ -223,6 +236,13 @@ export default function Map({
     withCoords = allWithCoords.filter(l =>
       selectedParishFeatures.some(f => isPointInFeature(l.lat, l.lon, f))
     )
+  } else if (showNeighborhoods && visibleParishFeatures?.length > 0) {
+    // Use parish name match first; for unknown neighborhoods, fall back to point-in-polygon
+    withCoords = allWithCoords.filter(l => {
+      if (isParishVisible(l.neighborhood)) return true
+      // Neighborhood name not in parishToGroup — check coords against visible parishes
+      return visibleParishFeatures.some(f => isPointInFeature(l.lat, l.lon, f))
+    })
   } else {
     withCoords = allWithCoords.filter(l => isParishVisible(l.neighborhood))
   }
