@@ -116,7 +116,7 @@ class ListingsHandler(BaseHandler):
             district=self.get_argument("district", None),
             city=self.get_argument("city", None),
             postal_code=self.get_argument("postal_code", None),
-            limit=self.get_int_arg("limit", 500),
+            limit=self.get_int_arg("limit", 10000),
             offset=self.get_int_arg("offset", 0),
         )
         self.write_json({"count": len(listings), "listings": listings})
