@@ -1877,16 +1877,25 @@ def compute_deal_score(listing_id, listing_type="sale"):
     lat, lon = row["lat"], row["lon"]
     price_psm = row["price_per_sqm"]
 
-    # ── 1. VALUE (price percentile + INE benchmark) ──
+    # ── 1. VALUE (discount-to-market: how far below estimated fair value) ──
     comparison = get_radius_comparison(listing_id, listing_type, 500)
-    percentile = None
     comp_count = 0
+    comp_stats = {}
     if "comparables" in comparison:
         comp_count = comparison["comparables"].get("count", 0)
-        percentile = comparison["comparables"].get("stats", {}).get("listing_percentile")
+        comp_stats = comparison["comparables"].get("stats", {})
 
-    value_from_percentile = (100.0 - percentile) if percentile is not None else 50.0
+    # Primary signal: discount vs local median price/sqm (comparables)
+    discount_pct = None
+    local_median = comp_stats.get("median_price_per_sqm")
+    if local_median and price_psm and local_median > 0:
+        discount_pct = ((local_median - price_psm) / local_median) * 100
+        # Score: -20% above = 0, +20% below = 100 (linear)
+        discount_component = max(0.0, min(100.0, (discount_pct + 20) / 40 * 100))
+    else:
+        discount_component = 50.0
 
+    # Secondary signal: INE municipal benchmark (macro check)
     ine_component = 50.0
     ine_detail = ""
     conn2 = get_connection()
@@ -1905,11 +1914,18 @@ def compute_deal_score(listing_id, listing_type="sale"):
         ine_component = max(0, min(100, (1 - (ine_diff_pct + 30) / 60) * 100))
         ine_detail = ", {:.0f}% vs INE median".format(ine_diff_pct)
 
-    value_score = value_from_percentile * 0.6 + ine_component * 0.4
-    if percentile is not None:
-        value_detail = "{}th pctl (cheaper than {:.0f}%){}".format(
-            int(percentile), 100 - percentile, ine_detail
-        )
+    # Blend: 70% local discount, 30% INE benchmark
+    value_score = discount_component * 0.7 + ine_component * 0.3
+
+    if discount_pct is not None:
+        if discount_pct > 0:
+            value_detail = "{:.0f}% below local median ({}/m² vs {}){}".format(
+                discount_pct, int(price_psm), int(local_median), ine_detail
+            )
+        else:
+            value_detail = "{:.0f}% above local median ({}/m² vs {}){}".format(
+                abs(discount_pct), int(price_psm), int(local_median), ine_detail
+            )
     else:
         value_detail = "No nearby comparables" + ine_detail
 
@@ -1958,29 +1974,123 @@ def compute_deal_score(listing_id, listing_type="sale"):
         except (json.JSONDecodeError, TypeError):
             pass
 
-    # ── 5. GROWTH (parish sold trend) ──
+    # ── 5. GROWTH (parish sold trend — 24-month lookback, min sample) ──
     growth_score = 50.0
     growth_detail = "No sold trend data"
     parish = row["parish"]
     if parish:
+        # Use 24-month lookback for more robust trend
         end_date = datetime.now().strftime("%Y-%m-%d")
-        start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+        start_date = (datetime.now() - timedelta(days=730)).strftime("%Y-%m-%d")
         trends = get_sold_trends(start_date, end_date)
         parish_trend = None
         for t in trends:
             if t["parish"] and parish.lower() in t["parish"].lower():
                 parish_trend = t
                 break
-        if parish_trend:
+        if parish_trend and parish_trend["count"] >= 6:
             pct = parish_trend["pct_change"]
             growth_score = max(0, min(100, (pct + 10) / 20 * 100))
-            growth_detail = "{:+.1f}% parish trend ({} txns)".format(pct, parish_trend["count"])
+            growth_detail = "{:+.1f}% parish trend ({} txns, 24mo)".format(pct, parish_trend["count"])
+        elif parish_trend and parish_trend["count"] < 6:
+            # Insufficient sample — dampen toward neutral
+            pct = parish_trend["pct_change"]
+            dampened = pct * (parish_trend["count"] / 6.0)
+            growth_score = max(0, min(100, (dampened + 10) / 20 * 100))
+            growth_detail = "{:+.1f}% trend (low confidence, {} txns)".format(pct, parish_trend["count"])
+        else:
+            # Fallback: use INE municipal-level quarterly data
+            conn_ine = get_connection()
+            try:
+                ine_rows = conn_ine.execute(
+                    "SELECT median_price_per_sqm, period_label FROM ine_stats "
+                    "WHERE (category='Total' OR category LIKE '%otal%') "
+                    "AND median_price_per_sqm IS NOT NULL "
+                    "ORDER BY period_label DESC LIMIT 4"
+                ).fetchall()
+            finally:
+                conn_ine.close()
+            if len(ine_rows) >= 2:
+                latest = ine_rows[0]["median_price_per_sqm"]
+                oldest = ine_rows[-1]["median_price_per_sqm"]
+                if oldest and oldest > 0:
+                    ine_pct = ((latest - oldest) / oldest) * 100
+                    growth_score = max(0, min(100, (ine_pct + 10) / 20 * 100))
+                    growth_detail = "{:+.1f}% INE municipal trend ({}>{})".format(
+                        ine_pct, ine_rows[-1]["period_label"], ine_rows[0]["period_label"]
+                    )
+
+    # ── 6. RISK (red flags — inverted: 100 = no risk, 0 = high risk) ──
+    risk_flags = []
+    risk_penalty = 0  # accumulates 0-100 of penalty
+
+    # 6a. Days on market — long time suggests overpricing or issues
+    scraped_at = row["scraped_at"]
+    days_on_market = None
+    if scraped_at:
+        try:
+            first_seen = datetime.fromisoformat(scraped_at.replace("Z", "+00:00"))
+            days_on_market = (datetime.now(first_seen.tzinfo) - first_seen).days
+        except (ValueError, TypeError):
+            try:
+                first_seen = datetime.strptime(scraped_at[:10], "%Y-%m-%d")
+                days_on_market = (datetime.now() - first_seen).days
+            except (ValueError, TypeError):
+                pass
+
+    if days_on_market is not None:
+        if days_on_market > 180:
+            risk_penalty += 30
+            risk_flags.append("{} days on market (stale)".format(days_on_market))
+        elif days_on_market > 90:
+            risk_penalty += 15
+            risk_flags.append("{} days on market".format(days_on_market))
+
+    # 6b. Price reductions — multiple cuts signal overpricing
+    history = comparison.get("history", [])
+    price_cuts = [h for h in history if h.get("field") == "price_amount"
+                  and h.get("old_value") and h.get("new_value")]
+    cut_count = 0
+    total_cut_pct = 0
+    for h in price_cuts:
+        try:
+            old_val = float(h["old_value"])
+            new_val = float(h["new_value"])
+            if new_val < old_val:
+                cut_count += 1
+                total_cut_pct += ((old_val - new_val) / old_val) * 100
+        except (ValueError, TypeError):
+            pass
+
+    if cut_count >= 3:
+        risk_penalty += 25
+        risk_flags.append("{} price cuts ({:.0f}% total reduction)".format(cut_count, total_cut_pct))
+    elif cut_count >= 1:
+        risk_penalty += 10
+        risk_flags.append("{} price cut(s) ({:.0f}% reduction)".format(cut_count, total_cut_pct))
+
+    # 6c. Overpriced vs comparables — significantly above local median
+    if discount_pct is not None and discount_pct < -15:
+        overprice = abs(discount_pct)
+        risk_penalty += min(30, overprice)
+        risk_flags.append("{:.0f}% above local median".format(overprice))
+
+    # 6d. Low comparable count — thin market means uncertain valuation
+    if comp_count < 5:
+        risk_penalty += 10
+        risk_flags.append("Few comparables ({})".format(comp_count))
+
+    risk_score = max(0.0, 100.0 - risk_penalty)
+    if risk_flags:
+        risk_detail = "; ".join(risk_flags)
+    else:
+        risk_detail = "No red flags detected"
 
     # ── Composite ──
     if listing_type == "sale":
-        weights = {"value": 30, "location": 25, "yield": 20, "scarcity": 15, "growth": 10}
+        weights = {"value": 25, "location": 20, "yield": 20, "scarcity": 10, "growth": 10, "risk": 15}
     else:
-        weights = {"value": 35, "location": 30, "yield": 0, "scarcity": 20, "growth": 15}
+        weights = {"value": 30, "location": 25, "yield": 0, "scarcity": 15, "growth": 15, "risk": 15}
 
     scores = {
         "value": value_score,
@@ -1988,6 +2098,7 @@ def compute_deal_score(listing_id, listing_type="sale"):
         "yield": yield_score,
         "scarcity": scarcity_score,
         "growth": growth_score,
+        "risk": risk_score,
     }
 
     total_weight = sum(weights.values())
@@ -1999,10 +2110,12 @@ def compute_deal_score(listing_id, listing_type="sale"):
         "yield": yield_detail,
         "scarcity": scarcity_detail,
         "growth": growth_detail,
+        "risk": risk_detail,
     }
 
+    dim_keys = ["value", "location", "yield", "scarcity", "growth", "risk"]
     dimensions = {}
-    for k in ["value", "location", "yield", "scarcity", "growth"]:
+    for k in dim_keys:
         s = round(scores[k], 1)
         dimensions[k] = {
             "score": s,

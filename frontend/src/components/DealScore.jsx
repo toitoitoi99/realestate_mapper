@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react'
 import { fetchDealScore } from '../api'
 
-const DIMENSIONS = ['value', 'location', 'yield', 'scarcity', 'growth']
-const LABELS = { value: 'Value', location: 'Location', yield: 'Yield', scarcity: 'Scarcity', growth: 'Growth' }
+const DIMENSIONS = ['value', 'location', 'yield', 'scarcity', 'growth', 'risk']
+const LABELS = { value: 'Value', location: 'Livability', yield: 'Yield', scarcity: 'Scarcity', growth: 'Growth', risk: 'Risk' }
 const DIM_COLORS = {
   value: '#22c55e',
   location: '#3b82f6',
   yield: '#f59e0b',
   scarcity: '#8b5cf6',
   growth: '#06b6d4',
+  risk: '#ef4444',
 }
 
 function ratingColor(rating) {
