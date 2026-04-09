@@ -194,6 +194,7 @@ export default function Map({
   selectedListing,
   showSoldTrends, soldTrendsData,
   selectedParishes,
+  onLookupResult,
 }) {
   const { t } = useLanguage()
   const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
@@ -387,7 +388,7 @@ export default function Map({
             />
           )}
 
-          <AddressSearch />
+          <AddressSearch onSelectListing={onSelectListing} onLookupResult={onLookupResult} />
         </LeafletContext.Provider>
       )}
 
