@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useMap } from 'react-leaflet'
 import { Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
@@ -30,6 +30,18 @@ export default function AddressSearch({ onSelectListing, onLookupResult }) {
   const [lookupState, setLookupState] = useState(null) // null | 'loading' | 'done' | 'error' | 'empty' | 'busy'
   const [lookupData, setLookupData] = useState(null)
   const debounceRef = useRef(null)
+  const containerRef = useRef(null)
+
+  // Close suggestions when clicking outside the search container
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setSuggestions([])
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   function handleChange(e) {
     const val = e.target.value
@@ -73,6 +85,7 @@ export default function AddressSearch({ onSelectListing, onLookupResult }) {
 
   async function handleLookup() {
     if (!result) return
+    setSuggestions([])
     setLookupState('loading')
     setLookupData(null)
     try {
@@ -108,6 +121,7 @@ export default function AddressSearch({ onSelectListing, onLookupResult }) {
 
       {/* Search box — positioned top-center of map */}
       <div
+        ref={containerRef}
         className="absolute top-3 left-1/2 z-[1000]"
         style={{ transform: 'translateX(-50%)', width: 360 }}
       >
@@ -117,6 +131,7 @@ export default function AddressSearch({ onSelectListing, onLookupResult }) {
             value={query}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onBlur={() => setTimeout(() => setSuggestions([]), 150)}
             placeholder="Search address in Lisbon…"
             className="w-full rounded-lg shadow-md border border-gray-200 bg-white px-4 py-2 pr-8 text-sm text-gray-800 placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-400"
           />
