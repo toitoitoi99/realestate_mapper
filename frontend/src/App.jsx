@@ -93,7 +93,8 @@ export default function App() {
       .then(d => {
         let all = d.listings ?? []
         if (!show_sold) all = all.filter(l => l.status === 'active' || !l.status)
-        if (sort_by === 'rarity') all = [...all].sort((a, b) => (b.rarity_score ?? 0) - (a.rarity_score ?? 0))
+        if (sort_by === 'rating') all = [...all].sort((a, b) => (b.deal_score ?? 0) - (a.deal_score ?? 0))
+        else if (sort_by === 'rarity') all = [...all].sort((a, b) => (b.rarity_score ?? 0) - (a.rarity_score ?? 0))
         else if (sort_by === 'price_asc') all = [...all].sort((a, b) => (a.price_amount ?? 0) - (b.price_amount ?? 0))
         else if (sort_by === 'price_desc') all = [...all].sort((a, b) => (b.price_amount ?? 0) - (a.price_amount ?? 0))
         else if (sort_by === 'psm_gross_asc') all = [...all].sort((a, b) => {
@@ -278,6 +279,13 @@ export default function App() {
           showSoldTrends={showSoldTrends}
           soldTrendsData={soldTrendsData}
           selectedParishes={selectedParishes}
+          onLookupResult={(newListings) => {
+            setListings(prev => {
+              const ids = new Set(prev.map(l => `${l.id}-${l.listing_type}`))
+              const toAdd = newListings.filter(l => !ids.has(`${l.id}-${l.listing_type}`))
+              return toAdd.length ? [...prev, ...toAdd] : prev
+            })
+          }}
         />
       </div>
     </div>

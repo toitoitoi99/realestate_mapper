@@ -383,6 +383,9 @@ def init_db():
         if "previous_listing_id" not in existing:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN previous_listing_id INTEGER")
             logger.info(f"[DB] Added previous_listing_id column to {tbl}")
+        if "deal_score" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN deal_score REAL")
+            logger.info(f"[DB] Added deal_score column to {tbl}")
     conn.commit()
 
     # -- Backfill hash_cross for existing rows ------------------------------------
@@ -733,9 +736,9 @@ def get_listings(
     else:
         # Union both tables using shared columns
         rows = conn.execute(
-            f"SELECT {_shared_cols}, rarity_score, rarity_factors, building_geojson, 'sale' as listing_type FROM sales {where} "
+            f"SELECT {_shared_cols}, rarity_score, rarity_factors, building_geojson, deal_score, 'sale' as listing_type FROM sales {where} "
             f"UNION ALL "
-            f"SELECT {_shared_cols}, NULL as rarity_score, NULL as rarity_factors, NULL as building_geojson, 'rent' as listing_type FROM rentals {where} "
+            f"SELECT {_shared_cols}, NULL as rarity_score, NULL as rarity_factors, NULL as building_geojson, deal_score, 'rent' as listing_type FROM rentals {where} "
             f"ORDER BY scraped_at DESC LIMIT ? OFFSET ?",
             params + params + [limit, offset]
         ).fetchall()
@@ -1034,6 +1037,51 @@ def get_address_matches(listing_id: int, listing_type: str = "sale") -> List[dic
     conn.close()
     matches = sorted(results.values(), key=lambda x: x.get("scraped_at", ""), reverse=True)
     return matches
+
+
+def find_nearby_listings(lat, lon, radius_m=100, address=None, listing_type=None):
+    # type: (float, float, int, Optional[str], Optional[str]) -> List[dict]
+    """Find listings near a coordinate, optionally filtered by address similarity."""
+    conn = get_connection()
+    dlat = radius_m / 111000.0
+    dlon = radius_m / 87000.0
+    norm_addr = _normalize_address(address)
+
+    tables = []
+    if listing_type == "rent":
+        tables = [("rentals", "rent")]
+    elif listing_type == "sale":
+        tables = [("sales", "sale")]
+    else:
+        tables = [("sales", "sale"), ("rentals", "rent")]
+
+    results = []
+    for tbl, lt in tables:
+        rows = conn.execute(
+            f"SELECT id, source, source_id, url, status, price_amount, price_per_sqm, "
+            f"size_sqm, rooms, bedrooms, property_type, condition, "
+            f"title, address, neighborhood, parish, lat, lon, scraped_at "
+            f"FROM {tbl} WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? "
+            f"AND status='active'",
+            (lat - dlat, lat + dlat, lon - dlon, lon + dlon)
+        ).fetchall()
+        for r in rows:
+            dist = _haversine(lat, lon, r["lat"], r["lon"])
+            if dist > radius_m:
+                continue
+            if norm_addr:
+                r_norm = _normalize_address(r["address"])
+                sim = _address_similarity(norm_addr, r_norm) if r_norm else 0
+                if sim < 0.3:
+                    continue
+            d = dict(r)
+            d["listing_type"] = lt
+            d["distance_m"] = round(dist)
+            results.append(d)
+
+    conn.close()
+    results.sort(key=lambda x: x["distance_m"])
+    return results
 
 
 # ── Neighborhoods ─────────────────────────────────────────────────────────────
@@ -2148,6 +2196,56 @@ def compute_deal_score(listing_id, listing_type="sale", radius_m=500):
         "comparables_count": comp_count,
         "listing_type": listing_type,
     }
+
+
+def compute_all_deal_scores():
+    """Batch-compute and store deal_score for all active listings with coordinates."""
+    conn = get_connection()
+    try:
+        sales_rows = conn.execute(
+            "SELECT id FROM sales WHERE lat IS NOT NULL AND lon IS NOT NULL "
+            "AND (status='active' OR status IS NULL)"
+        ).fetchall()
+        rental_rows = conn.execute(
+            "SELECT id FROM rentals WHERE lat IS NOT NULL AND lon IS NOT NULL "
+            "AND (status='active' OR status IS NULL)"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    updated = 0
+    for row in sales_rows:
+        try:
+            result = compute_deal_score(row["id"], "sale", 500)
+            if "deal_score" in result:
+                c = get_connection()
+                try:
+                    c.execute("UPDATE sales SET deal_score=? WHERE id=?",
+                              (result["deal_score"], row["id"]))
+                    c.commit()
+                    updated += 1
+                finally:
+                    c.close()
+        except Exception as e:
+            logger.debug("Deal score failed for sale %s: %s", row["id"], e)
+
+    for row in rental_rows:
+        try:
+            result = compute_deal_score(row["id"], "rent", 500)
+            if "deal_score" in result:
+                c = get_connection()
+                try:
+                    c.execute("UPDATE rentals SET deal_score=? WHERE id=?",
+                              (result["deal_score"], row["id"]))
+                    c.commit()
+                    updated += 1
+                finally:
+                    c.close()
+        except Exception as e:
+            logger.debug("Deal score failed for rental %s: %s", row["id"], e)
+
+    logger.info("[DB] Computed deal scores for %d listings", updated)
+    return updated
 
 
 if __name__ == "__main__":

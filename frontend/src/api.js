@@ -128,3 +128,11 @@ export async function fetchAddressHistory(id, listingType = 'sale') {
   const params = new URLSearchParams({ listing_type: listingType })
   return api(`${BASE}/listings/${id}/address-history?${params}`)
 }
+
+export async function addressLookup(address, lat, lon, listingType = 'sale') {
+  return api(`${BASE}/address-lookup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ address, lat, lon, listing_type: listingType }),
+  })
+}
