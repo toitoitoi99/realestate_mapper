@@ -220,7 +220,7 @@ export default function App() {
           selectedNeighborhood={selectedNeighborhood}
           onClearNeighborhood={() => setSelectedNeighborhood(null)}
           selectedListing={selectedListing}
-          onSelectListing={setSelectedListing}
+          onSelectListing={(l) => { setSelectedListing(l); setHighlightedListing(l); }}
           highlightedListing={highlightedListing}
           onClearHighlight={() => setHighlightedListing(null)}
           sidebarTab={sidebarTab}

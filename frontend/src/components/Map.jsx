@@ -296,8 +296,12 @@ export default function Map({
             const isSold = l.status === 'sold'
             const isReserved = l.status === 'reserved'
 
+            const isSelected = selectedListing && selectedListing.id === l.id
+
             let markerColor
-            if (isSold || isReserved) {
+            if (isSelected) {
+              markerColor = { color: '#991b1b', fillColor: '#ef4444' }
+            } else if (isSold || isReserved) {
               markerColor = { color: '#92400e', fillColor: '#f59e0b' }
             } else if (isRent) {
               markerColor = { color: '#6b21a8', fillColor: '#a855f7' }
