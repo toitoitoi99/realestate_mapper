@@ -117,6 +117,7 @@ class ListingsHandler(BaseHandler):
             district=self.get_argument("district", None),
             city=self.get_argument("city", None),
             postal_code=self.get_argument("postal_code", None),
+            grant_eligible=self.get_argument("grant_eligible", None) == "true" or None,
             limit=self.get_int_arg("limit", 10000),
             offset=self.get_int_arg("offset", 0),
         )
@@ -163,6 +164,11 @@ class ListingDetailHandler(BaseHandler):
             if prev_row:
                 result["previous_price_amount"] = prev_row["price_amount"]
                 result["previous_price_per_sqm"] = prev_row["price_per_sqm"]
+
+        # Grant eligibility
+        grant = db.get_grant_details(result.get("city"), result.get("parish"))
+        result["grant_eligible"] = grant is not None
+        result["grant_details"] = grant
 
         self.write_json(result)
 
