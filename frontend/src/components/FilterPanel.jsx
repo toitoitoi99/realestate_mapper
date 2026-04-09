@@ -8,7 +8,6 @@ function getActiveChips(filters, t) {
   if (filters.max_price) chips.push({ key: 'max_price', label: `≤ €${Number(filters.max_price).toLocaleString('pt-PT')}` })
   if (filters.min_sqm) chips.push({ key: 'min_sqm', label: `≥ ${filters.min_sqm} m²` })
   if (filters.max_sqm) chips.push({ key: 'max_sqm', label: `≤ ${filters.max_sqm} m²` })
-  if (filters.rooms) chips.push({ key: 'rooms', label: `T${filters.rooms}${filters.rooms === '5' ? '+' : ''}` })
   if (filters.show_sold) chips.push({ key: 'show_sold', label: t.showSold, value: false })
   if (filters.min_price_per_sqm) chips.push({ key: 'min_price_per_sqm', label: `≥ €${Number(filters.min_price_per_sqm).toLocaleString('pt-PT')}/m²` })
   if (filters.max_price_per_sqm) chips.push({ key: 'max_price_per_sqm', label: `≤ €${Number(filters.max_price_per_sqm).toLocaleString('pt-PT')}/m²` })
@@ -133,21 +132,6 @@ export default function FilterPanel({ filters, setFilter, reset }) {
             {input('max_sqm', 'Max')}
           </div>
         </div>
-      </div>
-
-      {/* Section: Property basics */}
-      <div>
-        <label className="text-xs text-gray-500 mb-1 block">{t.rooms}</label>
-        <select
-          value={filters.rooms}
-          onChange={e => setFilter('rooms', e.target.value)}
-          className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-        >
-          <option value="">{t.any}</option>
-          {[0, 1, 2, 3, 4, 5].map(r => (
-            <option key={r} value={r}>T{r}{r === 5 ? '+' : ''}</option>
-          ))}
-        </select>
       </div>
 
       {/* Show sold toggle */}
