@@ -837,9 +837,9 @@ def _normalize_condition(raw) -> Optional[str]:
 def build_page_url(base_url: str, page_num: int) -> str:
     if page_num == 1:
         return base_url
-    # ERA uses ?pag=N query parameter for pagination
+    # ERA uses ?page=N query parameter for pagination
     sep = "&" if "?" in base_url else "?"
-    return f"{base_url}{sep}pag={page_num}"
+    return f"{base_url}{sep}page={page_num}"
 
 
 # ── Main scraper ──────────────────────────────────────────────────────────────
