@@ -5,6 +5,7 @@ import RarityBadge from './RarityBadge'
 import AmenityRating from './AmenityRating'
 import ListingComparison from './ListingComparison'
 import DealScore from './DealScore'
+import PropertyScore from './PropertyScore'
 import SourceLogo from './SourceLogo'
 
 function PriceDiff({ current, other }) {
@@ -408,6 +409,9 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
               ))}
             </div>
           )}
+
+          {/* Property Feature Score */}
+          <PropertyScore listing={listing} listingType={listing.listing_type || 'sale'} />
 
           {/* Amenity Rating */}
           <AmenityRating lat={listing.lat} lon={listing.lon} />
