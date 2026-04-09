@@ -118,6 +118,8 @@ class ListingsHandler(BaseHandler):
             city=self.get_argument("city", None),
             postal_code=self.get_argument("postal_code", None),
             grant_eligible=self.get_argument("grant_eligible", None) == "true" or None,
+            min_deal_score=self.get_float_arg("min_deal_score"),
+            min_rarity_score=self.get_float_arg("min_rarity_score"),
             limit=self.get_int_arg("limit", 10000),
             offset=self.get_int_arg("offset", 0),
         )

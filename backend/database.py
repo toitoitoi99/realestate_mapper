@@ -739,6 +739,8 @@ def get_listings(
     city: Optional[str] = None,
     postal_code: Optional[str] = None,
     grant_eligible: Optional[bool] = None,
+    min_deal_score: Optional[float] = None,
+    min_rarity_score: Optional[float] = None,
     limit: int = 500,
     offset: int = 0,
 ) -> List[dict]:
@@ -788,6 +790,10 @@ def get_listings(
         clauses.append("city=?"); params.append(city)
     if postal_code:
         clauses.append("postal_code=?"); params.append(postal_code)
+    if min_deal_score is not None:
+        clauses.append("deal_score>=?"); params.append(min_deal_score)
+    if min_rarity_score is not None:
+        clauses.append("rarity_score>=?"); params.append(min_rarity_score)
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
