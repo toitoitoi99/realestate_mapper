@@ -22,6 +22,73 @@ from models import Listing, Neighborhood, ScrapeRun
 logger = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).parent / "data" / "lisboa_realestate.db"
+LOW_DENSITY_PATH = Path(__file__).parent / "data" / "low_density_territories.json"
+
+# -- Grant eligibility: low-density territory lookup ---------------------------
+_low_density_municipalities = set()  # normalized city names
+_low_density_parishes = {}           # normalized municipality -> set of parish names
+_grant_programs = []
+
+def _normalize(s):
+    """Normalize a string for fuzzy matching: lowercase, strip accents."""
+    if not s:
+        return ""
+    s = s.lower().strip()
+    # Decompose unicode and strip combining marks (accents)
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return s
+
+def _load_low_density_territories():
+    global _low_density_municipalities, _low_density_parishes, _grant_programs
+    if _low_density_municipalities:
+        return  # already loaded
+    if not LOW_DENSITY_PATH.exists():
+        logger.warning("low_density_territories.json not found")
+        return
+    data = json.loads(LOW_DENSITY_PATH.read_text(encoding="utf-8"))
+    _grant_programs = data.get("programs", [])
+    # Group 1: all parishes in municipality are low-density
+    for district, municipalities in data.get("group_1_municipalities", {}).items():
+        if district.startswith("_"):
+            continue
+        for m in municipalities:
+            _low_density_municipalities.add(_normalize(m))
+    # Group 2: only specific parishes
+    for municipality, parishes in data.get("group_2_parishes", {}).items():
+        if municipality.startswith("_"):
+            continue
+        norm_mun = _normalize(municipality)
+        _low_density_parishes[norm_mun] = {_normalize(p) for p in parishes}
+
+def is_grant_eligible(city, parish):
+    """Check if a listing's city/parish falls in a low-density territory."""
+    _load_low_density_territories()
+    norm_city = _normalize(city)
+    norm_parish = _normalize(parish)
+    # Group 1: entire municipality is low-density
+    if norm_city in _low_density_municipalities:
+        return True
+    # Group 2: check specific parishes within partially-classified municipalities
+    if norm_city in _low_density_parishes:
+        eligible_parishes = _low_density_parishes[norm_city]
+        # Try exact match first, then substring match (parish names may be abbreviated)
+        if norm_parish in eligible_parishes:
+            return True
+        for ep in eligible_parishes:
+            if norm_parish and (norm_parish in ep or ep in norm_parish):
+                return True
+    return False
+
+def get_grant_details(city, parish):
+    """Return detailed grant program info for an eligible listing."""
+    _load_low_density_territories()
+    if not is_grant_eligible(city, parish):
+        return None
+    return {
+        "in_low_density": True,
+        "programs": _grant_programs,
+    }
 
 # -- Listing exclusion filters -------------------------------------------------
 # Keywords that indicate non-property listings (timeshares, hotel weeks, etc.)
@@ -665,6 +732,7 @@ def get_listings(
     district: Optional[str] = None,
     city: Optional[str] = None,
     postal_code: Optional[str] = None,
+    grant_eligible: Optional[bool] = None,
     limit: int = 500,
     offset: int = 0,
 ) -> List[dict]:
@@ -744,11 +812,15 @@ def get_listings(
         ).fetchall()
 
     conn.close()
+    _load_low_density_territories()
     result = []
     for r in rows:
         row = dict(r)
         if not row.get("status"):
             row["status"] = "active"
+        row["grant_eligible"] = is_grant_eligible(row.get("city"), row.get("parish"))
+        if grant_eligible and not row["grant_eligible"]:
+            continue
         result.append(row)
     return result
 

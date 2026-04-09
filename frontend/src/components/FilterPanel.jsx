@@ -22,6 +22,7 @@ function getActiveChips(filters, t) {
   if (filters.district) chips.push({ key: 'district', label: filters.district })
   if (filters.city) chips.push({ key: 'city', label: filters.city })
   if (filters.postal_code) chips.push({ key: 'postal_code', label: filters.postal_code })
+  if (filters.grant_eligible) chips.push({ key: 'grant_eligible', label: 'Grant eligible', value: '' })
   return chips
 }
 
@@ -179,6 +180,18 @@ export default function FilterPanel({ filters, setFilter, reset }) {
           </div>
         </div>
       )}
+
+      {/* Grant eligible toggle */}
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={!!filters.grant_eligible}
+          onChange={e => setFilter('grant_eligible', e.target.checked || '')}
+          className="rounded border-gray-300 text-emerald-500 focus:ring-emerald-400"
+        />
+        <span className="text-xs text-gray-600">Grant eligible only</span>
+        <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block ml-auto" />
+      </label>
 
       {/* Deal Score percentile slider */}
       {filters.listing_type !== 'rent' && (
