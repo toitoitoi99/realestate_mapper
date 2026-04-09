@@ -1041,10 +1041,14 @@ def get_address_matches(listing_id: int, listing_type: str = "sale") -> List[dic
 
 def find_nearby_listings(lat, lon, radius_m=100, address=None, listing_type=None):
     # type: (float, float, int, Optional[str], Optional[str]) -> List[dict]
-    """Find listings near a coordinate, optionally filtered by address similarity."""
+    """Find listings near a coordinate, optionally filtered by address similarity.
+
+    Uses a two-pass strategy: first searches within radius_m, then if an address
+    is provided and no results found, does a wider search (up to 1km) requiring
+    high address similarity. This handles cases where geocoded coordinates point
+    to one part of a long street but listings are on another part.
+    """
     conn = get_connection()
-    dlat = radius_m / 111000.0
-    dlon = radius_m / 87000.0
     norm_addr = _normalize_address(address)
 
     tables = []
@@ -1055,13 +1059,20 @@ def find_nearby_listings(lat, lon, radius_m=100, address=None, listing_type=None
     else:
         tables = [("sales", "sale"), ("rentals", "rent")]
 
+    select_cols = (
+        "id, source, source_id, url, status, price_amount, price_per_sqm, "
+        "size_sqm, rooms, bedrooms, property_type, condition, "
+        "title, address, neighborhood, parish, lat, lon, scraped_at"
+    )
+
+    # Pass 1: proximity search within requested radius
+    dlat = radius_m / 111000.0
+    dlon = radius_m / 87000.0
     results = []
     for tbl, lt in tables:
         rows = conn.execute(
-            f"SELECT id, source, source_id, url, status, price_amount, price_per_sqm, "
-            f"size_sqm, rooms, bedrooms, property_type, condition, "
-            f"title, address, neighborhood, parish, lat, lon, scraped_at "
-            f"FROM {tbl} WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? "
+            f"SELECT {select_cols} FROM {tbl} "
+            f"WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? "
             f"AND status='active'",
             (lat - dlat, lat + dlat, lon - dlon, lon + dlon)
         ).fetchall()
@@ -1078,6 +1089,37 @@ def find_nearby_listings(lat, lon, radius_m=100, address=None, listing_type=None
             d["listing_type"] = lt
             d["distance_m"] = round(dist)
             results.append(d)
+
+    # Pass 2: if no results and we have an address, widen to 1km but require
+    # high address similarity (>=0.5). Handles long streets where the geocoded
+    # point is far from the actual listing.
+    if not results and norm_addr:
+        wide_radius = 1000
+        dlat_w = wide_radius / 111000.0
+        dlon_w = wide_radius / 87000.0
+        seen_ids = set()
+        for tbl, lt in tables:
+            rows = conn.execute(
+                f"SELECT {select_cols} FROM {tbl} "
+                f"WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? "
+                f"AND status='active'",
+                (lat - dlat_w, lat + dlat_w, lon - dlon_w, lon + dlon_w)
+            ).fetchall()
+            for r in rows:
+                if r["id"] in seen_ids:
+                    continue
+                r_norm = _normalize_address(r["address"])
+                sim = _address_similarity(norm_addr, r_norm) if r_norm else 0
+                if sim < 0.5:
+                    continue
+                dist = _haversine(lat, lon, r["lat"], r["lon"])
+                if dist > wide_radius:
+                    continue
+                seen_ids.add(r["id"])
+                d = dict(r)
+                d["listing_type"] = lt
+                d["distance_m"] = round(dist)
+                results.append(d)
 
     conn.close()
     results.sort(key=lambda x: x["distance_m"])
