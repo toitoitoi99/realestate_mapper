@@ -142,6 +142,11 @@ export default function App() {
     }
   }, [])
 
+  const handleSelectListing = useCallback((listing) => {
+    setSelectedListing(listing)
+    if (listing) setHighlightedListing(listing)
+  }, [])
+
   // Compute deal-score percentile threshold and apply it
   const scoreFilteredListings = useMemo(() => {
     const pct = filters.min_score_pct
@@ -220,7 +225,7 @@ export default function App() {
           selectedNeighborhood={selectedNeighborhood}
           onClearNeighborhood={() => setSelectedNeighborhood(null)}
           selectedListing={selectedListing}
-          onSelectListing={setSelectedListing}
+          onSelectListing={handleSelectListing}
           highlightedListing={highlightedListing}
           onClearHighlight={() => setHighlightedListing(null)}
           sidebarTab={sidebarTab}
