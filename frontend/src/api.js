@@ -10,7 +10,12 @@ async function api(url, opts) {
         await new Promise(r => setTimeout(r, 1000 * (i + 1)))
         continue
       }
-      throw new Error(`API ${res.status}: ${url}`)
+      let msg = `API ${res.status}: ${url}`
+      try {
+        const body = await res.json()
+        if (body.error) msg = body.error
+      } catch (_) {}
+      throw new Error(msg)
     } catch (err) {
       if (err.message?.startsWith('API ')) throw err
       if (i < maxRetries - 1) {
