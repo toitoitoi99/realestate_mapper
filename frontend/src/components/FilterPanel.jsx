@@ -17,6 +17,7 @@ function getActiveChips(filters, t) {
   if (filters.floor) chips.push({ key: 'floor', label: `${t.floor}: ${filters.floor}` })
   if (filters.property_type) chips.push({ key: 'property_type', label: filters.property_type })
   if (filters.condition) chips.push({ key: 'condition', label: filters.condition })
+  if (filters.min_score_pct > 0) chips.push({ key: 'min_score_pct', label: `Top ${100 - filters.min_score_pct}%`, value: 0 })
   if (filters.parish) chips.push({ key: 'parish', label: filters.parish })
   if (filters.district) chips.push({ key: 'district', label: filters.district })
   if (filters.city) chips.push({ key: 'city', label: filters.city })
@@ -175,6 +176,28 @@ export default function FilterPanel({ filters, setFilter, reset }) {
               onChange={e => setFilter('sold_before', e.target.value)}
               className="flex-1 border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-amber-400"
             />
+          </div>
+        </div>
+      )}
+
+      {/* Deal Score percentile slider */}
+      {filters.listing_type !== 'rent' && (
+        <div className="bg-gray-50 rounded-lg p-3 -mx-1">
+          <label className="text-xs text-gray-500 mb-2 block">{t.dealScore}</label>
+          <input
+            type="range"
+            min="0"
+            max="90"
+            step="5"
+            value={filters.min_score_pct}
+            onChange={e => setFilter('min_score_pct', Number(e.target.value))}
+            className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
+          />
+          <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+            <span>{t.dealScoreAll}</span>
+            <span className="font-medium text-blue-600">
+              {filters.min_score_pct === 0 ? t.dealScoreAll : t.dealScoreTop(100 - filters.min_score_pct)}
+            </span>
           </div>
         </div>
       )}

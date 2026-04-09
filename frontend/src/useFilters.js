@@ -24,6 +24,7 @@ const DEFAULT_FILTERS = {
   district: '',
   city: '',
   postal_code: '',
+  min_score_pct: 0,
 }
 
 export function useFilters() {

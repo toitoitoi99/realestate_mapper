@@ -85,7 +85,7 @@ export default function App() {
   useEffect(() => {
     setLoading(true)
     // show_sold and sort_by are UI-only — don't send them to the API
-    const { show_sold, sort_by, listing_type, ...apiFilters } = filters
+    const { show_sold, sort_by, listing_type, min_score_pct, ...apiFilters } = filters
     // 'all' means no listing_type filter (backend unions both tables)
     if (listing_type && listing_type !== 'all') apiFilters.listing_type = listing_type
     if (selectedNeighborhood) apiFilters.neighborhood = selectedNeighborhood
@@ -141,15 +141,32 @@ export default function App() {
     }
   }, [])
 
+  // Compute deal-score percentile threshold and apply it
+  const scoreFilteredListings = useMemo(() => {
+    const pct = filters.min_score_pct
+    if (!pct || pct <= 0) return listings
+    // Collect all rarity scores from scored listings
+    const scores = listings
+      .map(l => l.rarity_score)
+      .filter(s => s != null && s > 0)
+      .sort((a, b) => a - b)
+    if (scores.length === 0) return listings
+    // pct=90 means "show top 10%" → threshold at the 90th percentile value
+    const idx = Math.min(Math.floor(scores.length * pct / 100), scores.length - 1)
+    const threshold = scores[idx]
+    return listings.filter(l => l.rarity_score != null && l.rarity_score >= threshold)
+  }, [listings, filters.min_score_pct])
+
   const filteredListings = useMemo(() => {
-    if (!showNeighborhoods) return listings
+    const base = scoreFilteredListings
+    if (!showNeighborhoods) return base
 
     // If parishes selected for comparison, show only those
     if (selectedParishes?.size > 0) {
-      return listings.filter(l => l.neighborhood && selectedParishes.has(l.neighborhood))
+      return base.filter(l => l.neighborhood && selectedParishes.has(l.neighborhood))
     }
 
-    return listings.filter(l => {
+    return base.filter(l => {
       if (!l.neighborhood) return true
       const group = parishToGroup?.[l.neighborhood]
       if (!group) return true           // unknown parish → keep visible
@@ -157,7 +174,7 @@ export default function App() {
       if (hiddenParishes.has(l.neighborhood)) return false
       return true
     })
-  }, [listings, showNeighborhoods, hiddenParishes, parishToGroup, visibleGroups, selectedParishes])
+  }, [scoreFilteredListings, showNeighborhoods, hiddenParishes, parishToGroup, visibleGroups, selectedParishes])
 
   const toggleGroup = useCallback((key) => {
     setVisibleGroups(prev => ({ ...prev, [key]: !prev[key] }))
@@ -241,7 +258,7 @@ export default function App() {
           areaConfig={areas[currentArea]}
           baseMap={baseMap}
           onChangeBaseMap={setBaseMap}
-          listings={listings}
+          listings={filteredListings}
           neighborhoods={neighborhoods}
           onSelectNeighborhood={handleSelectNeighborhood}
           selectedNeighborhood={selectedNeighborhood}
