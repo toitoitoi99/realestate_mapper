@@ -586,6 +586,19 @@ def extract_listing_from_next_data(page_props: dict) -> dict:
                     images.append(url)
     images = [u for u in images if u and u.startswith("http")][:MAX_IMAGES]
 
+    # Structured feature chips from __NEXT_DATA__
+    chips = []
+    for key in ("features", "characteristics", "extras", "amenities", "tags", "attributes"):
+        raw = ad.get(key)
+        if isinstance(raw, list):
+            for item in raw:
+                if isinstance(item, str):
+                    chips.append(item.strip())
+                elif isinstance(item, dict):
+                    label = item.get("label") or item.get("name") or item.get("text") or item.get("value")
+                    if label:
+                        chips.append(str(label).strip())
+
     return {
         "price": price,
         "size": size,
@@ -607,6 +620,7 @@ def extract_listing_from_next_data(page_props: dict) -> dict:
         "lon": lon,
         "images": images,
         "description": description,
+        "feature_chips": [c for c in chips if c] or None,
     }
 
 
@@ -785,6 +799,11 @@ def extract_from_dom(page: Page) -> dict:
     result["description"] = data.get("description")
     result["address"] = data.get("address")
 
+    # Preserve raw feature strings as chips for downstream property_score scoring
+    raw_chips = [str(f).strip() for f in (data.get("features") or []) if f and str(f).strip()]
+    if raw_chips:
+        result["feature_chips"] = raw_chips
+
     # Parse features for additional data
     for feat in (data.get("features") or []):
         feat_lower = feat.lower()
@@ -871,6 +890,19 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
 
     price_per_sqm = round(price / size, 2) if price and size and size > 0 else None
 
+    # Merge chips from __NEXT_DATA__ and DOM, dedupe case-insensitively
+    merged_chips = []
+    seen_chip_keys = set()
+    for source_chips in (nd.get("feature_chips") or [], dom.get("feature_chips") or []):
+        for c in source_chips:
+            if not c:
+                continue
+            k = str(c).strip().lower()
+            if not k or k in seen_chip_keys:
+                continue
+            seen_chip_keys.add(k)
+            merged_chips.append(str(c).strip())
+
     return Listing(
         source="remax",
         source_id=source_id,
@@ -899,6 +931,7 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
         images=json.dumps(images) if images else None,
         hash_dedupe=_hash(address, city, price, size),
         description=nd.get("description") or dom.get("description"),
+        feature_chips=json.dumps(merged_chips) if merged_chips else None,
         scraped_at=datetime.utcnow(),
     )
 

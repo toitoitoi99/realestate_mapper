@@ -459,6 +459,9 @@ def init_db():
         if "property_features" not in existing:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN property_features TEXT")
             logger.info(f"[DB] Added property_features column to {tbl}")
+        if "feature_chips" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN feature_chips TEXT")
+            logger.info(f"[DB] Added feature_chips column to {tbl}")
     conn.commit()
 
     # -- Backfill hash_cross for existing rows ------------------------------------
@@ -670,7 +673,7 @@ def upsert_listing(listing: Listing) -> tuple:
                         property_type=?, condition=?, title=?, address=?, postal_code=?,
                         neighborhood=?, parish=?, district=?, city=?, lat=?, lon=?,
                         images=?, hash_dedupe=?, hash_cross=?, hash_location=?,
-                        missing_since=NULL, description=?, scraped_at=?
+                        missing_since=NULL, description=?, feature_chips=?, scraped_at=?
                     WHERE source=? AND source_id=?
                 """, (
                     listing.url, listing.status,
@@ -681,7 +684,7 @@ def upsert_listing(listing: Listing) -> tuple:
                     listing.postal_code, listing.neighborhood, listing.parish,
                     listing.district, listing.city, listing.lat, listing.lon,
                     listing.images, listing.hash_dedupe, listing.hash_cross, hl,
-                    listing.description,
+                    listing.description, listing.feature_chips,
                     ts, listing.source, listing.source_id
                 ))
             return row["id"], False
@@ -696,8 +699,8 @@ def upsert_listing(listing: Listing) -> tuple:
                         bathrooms, floor, property_type, condition, title,
                         address, postal_code, neighborhood, parish, district,
                         city, lat, lon, images, hash_dedupe, hash_cross,
-                        hash_location, previous_listing_id, description, scraped_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        hash_location, previous_listing_id, description, feature_chips, scraped_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     listing.source, listing.source_id, listing.url,
                     listing.status,
@@ -708,7 +711,7 @@ def upsert_listing(listing: Listing) -> tuple:
                     listing.postal_code, listing.neighborhood, listing.parish,
                     listing.district, listing.city, listing.lat, listing.lon,
                     listing.images, listing.hash_dedupe, listing.hash_cross,
-                    hl, prev_id, listing.description, ts
+                    hl, prev_id, listing.description, listing.feature_chips, ts
                 ))
             return cur.lastrowid, True
     finally:
@@ -2419,12 +2422,20 @@ def _normalize_text(text):
     return text.lower()
 
 
+_NEGATION_RE = re.compile(r"\b(sem|n[aã]o\s+(tem|possui|dispõe|dispoe)|inexistente|no)\b", re.IGNORECASE)
+
+
 def extract_property_features(description, title=None, property_type=None, condition=None,
-                               bathrooms=None, floor=None):
+                               bathrooms=None, floor=None, feature_chips=None):
     """Extract features from listing text and structured fields.
 
     Returns (score, features_dict) where features_dict maps feature_key → True/False
     and score is 0-100.
+
+    `feature_chips` is an optional list of short structured strings from the source
+    site (e.g. ["Varanda", "Elevador", "Ar condicionado"]). Chips are matched per-
+    chip so negated chips ("Sem elevador") can override positive matches, and
+    chip matches are tried independently of the marketing-blob description.
     """
     text = " ".join(filter(None, [title or "", description or ""]))
     text_lower = text.lower()
@@ -2436,9 +2447,32 @@ def extract_property_features(description, title=None, property_type=None, condi
     title_lower = (title or "").lower()
     is_house = any(k in type_lower for k in _house_kw) or any(k in title_lower for k in _house_kw)
 
+    # Normalize chips → list of lowercased strings; classify each as positive/negative
+    pos_chips: list = []
+    neg_chips: list = []
+    if feature_chips:
+        for raw in feature_chips:
+            if not raw:
+                continue
+            c = str(raw).strip().lower()
+            if not c:
+                continue
+            if _NEGATION_RE.search(c):
+                neg_chips.append(c)
+            else:
+                pos_chips.append(c)
+
     detected = {}
     for key, patterns, apt_w, house_w in _FEATURE_PATTERNS:
+        # Match against free-text description/title
         found = any(p.search(text_lower) for p in patterns)
+        # Match against positive chips (structured data wins over negated description text)
+        if not found and pos_chips:
+            found = any(p.search(chip) for chip in pos_chips for p in patterns)
+        # Explicit negation in chips overrides any positive hit
+        if found and neg_chips:
+            if any(p.search(chip) for chip in neg_chips for p in patterns):
+                found = False
         detected[key] = found
 
     # Bonus: condition field says "new" → count as renovated if not already
@@ -2491,7 +2525,7 @@ def compute_property_score(listing_id, listing_type="sale"):
     table = _table_for(listing_type)
     conn = get_connection()
     row = conn.execute(
-        f"SELECT id, description, title, property_type, condition, bathrooms, floor "
+        f"SELECT id, description, title, property_type, condition, bathrooms, floor, feature_chips "
         f"FROM {table} WHERE id=?", (listing_id,)
     ).fetchone()
     conn.close()
@@ -2502,8 +2536,19 @@ def compute_property_score(listing_id, listing_type="sale"):
     desc = row["description"] or ""
     title = row["title"] or ""
 
-    # Skip if no description text to analyze
-    if len(desc.strip()) < 20 and len(title.strip()) < 5:
+    # Parse structured feature chips if present
+    chips = None
+    raw_chips = row["feature_chips"]
+    if raw_chips:
+        try:
+            parsed = json.loads(raw_chips)
+            if isinstance(parsed, list):
+                chips = [str(c) for c in parsed if c]
+        except (json.JSONDecodeError, TypeError):
+            chips = None
+
+    # Skip only if we have no text AND no chips to analyze
+    if len(desc.strip()) < 20 and len(title.strip()) < 5 and not chips:
         return {
             "property_score": None,
             "property_rating": None,
@@ -2513,7 +2558,7 @@ def compute_property_score(listing_id, listing_type="sale"):
 
     score, features = extract_property_features(
         desc, title, row["property_type"], row["condition"],
-        row["bathrooms"], row["floor"]
+        row["bathrooms"], row["floor"], feature_chips=chips
     )
 
     _house_kw = ("house", "moradia", "villa", "vivenda", "quinta", "moradia independente",

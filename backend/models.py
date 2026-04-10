@@ -79,6 +79,7 @@ class Listing:
 
     # Metadata
     description: Optional[str] = None
+    feature_chips: Optional[str] = None   # JSON array of structured feature chips from source site
     scraped_at: datetime = field(default_factory=datetime.utcnow)
 
     # DB primary key (set after insert)
@@ -118,6 +119,7 @@ class Listing:
             "missing_since": self.missing_since,
             "previous_listing_id": self.previous_listing_id,
             "description": self.description,
+            "feature_chips": self.feature_chips,
             "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
         }
 
