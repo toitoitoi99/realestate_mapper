@@ -5,6 +5,7 @@ import RarityBadge from './RarityBadge'
 import AmenityRating from './AmenityRating'
 import ListingComparison from './ListingComparison'
 import DealScore from './DealScore'
+import PropertyScore from './PropertyScore'
 import SourceLogo from './SourceLogo'
 
 function PriceDiff({ current, other }) {
@@ -257,7 +258,7 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
           {/* Title + Price + Days on market */}
           <div>
             {(isSold || isReserved) && (
-              <span className="inline-block text-xs font-semibold text-red-700 bg-red-50 px-2 py-0.5 rounded mb-1 uppercase tracking-wide">
+              <span className="inline-block text-xs font-semibold text-gray-800 bg-gray-100 px-2 py-0.5 rounded mb-1 uppercase tracking-wide">
                 {isSold ? t.sold : t.reserved}
               </span>
             )}
@@ -408,6 +409,9 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
               ))}
             </div>
           )}
+
+          {/* Property Feature Score */}
+          <PropertyScore listing={listing} listingType={listing.listing_type || 'sale'} />
 
           {/* Amenity Rating */}
           <AmenityRating lat={listing.lat} lon={listing.lon} />

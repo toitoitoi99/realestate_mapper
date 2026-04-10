@@ -117,6 +117,9 @@ class ListingsHandler(BaseHandler):
             district=self.get_argument("district", None),
             city=self.get_argument("city", None),
             postal_code=self.get_argument("postal_code", None),
+            grant_eligible=self.get_argument("grant_eligible", None) == "true" or None,
+            min_deal_score=self.get_float_arg("min_deal_score"),
+            min_rarity_score=self.get_float_arg("min_rarity_score"),
             limit=self.get_int_arg("limit", 10000),
             offset=self.get_int_arg("offset", 0),
         )
@@ -163,6 +166,11 @@ class ListingDetailHandler(BaseHandler):
             if prev_row:
                 result["previous_price_amount"] = prev_row["price_amount"]
                 result["previous_price_per_sqm"] = prev_row["price_per_sqm"]
+
+        # Grant eligibility
+        grant = db.get_grant_details(result.get("city"), result.get("parish"))
+        result["grant_eligible"] = grant is not None
+        result["grant_details"] = grant
 
         self.write_json(result)
 
@@ -580,6 +588,17 @@ class DealScoreHandler(BaseHandler):
         self.write_json(result)
 
 
+class PropertyScoreHandler(BaseHandler):
+    """GET /api/listings/:id/property-score"""
+
+    async def get(self, listing_id):
+        listing_type = self.get_argument("listing_type", "sale")
+        result = await tornado.ioloop.IOLoop.current().run_in_executor(
+            _executor, db.compute_property_score, int(listing_id), listing_type
+        )
+        self.write_json(result)
+
+
 class AddressHistoryHandler(BaseHandler):
     """GET /api/listings/:id/address-history"""
 
@@ -896,6 +915,7 @@ def make_app() -> tornado.web.Application:
         [
             (r"/api/listings",              ListingsHandler),
             (r"/api/listings/(\d+)/deal-score",       DealScoreHandler),
+            (r"/api/listings/(\d+)/property-score",  PropertyScoreHandler),
             (r"/api/listings/(\d+)/compare",         ComparisonHandler),
             (r"/api/listings/(\d+)/address-history",  AddressHistoryHandler),
             (r"/api/listings/(\d+)",        ListingDetailHandler),

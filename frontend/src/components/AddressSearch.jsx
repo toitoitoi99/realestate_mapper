@@ -29,6 +29,7 @@ export default function AddressSearch({ onSelectListing, onLookupResult }) {
   const [loading, setLoading] = useState(false)
   const [lookupState, setLookupState] = useState(null) // null | 'loading' | 'done' | 'error' | 'empty' | 'busy'
   const [lookupData, setLookupData] = useState(null)
+  const [lookupError, setLookupError] = useState(null)
   const debounceRef = useRef(null)
   const containerRef = useRef(null)
 
@@ -106,6 +107,7 @@ export default function AddressSearch({ onSelectListing, onLookupResult }) {
         setLookupState('busy')
       } else {
         setLookupState('error')
+        setLookupError(err.message || 'Search failed')
       }
     }
   }
@@ -204,7 +206,7 @@ export default function AddressSearch({ onSelectListing, onLookupResult }) {
 
         {lookupState === 'error' && (
           <div className="mt-1 bg-red-50 border border-red-200 rounded-lg shadow px-4 py-2 text-sm text-red-800">
-            Search failed. Check that the scraper session is set up.
+            {lookupError || 'Search failed'}
           </div>
         )}
       </div>

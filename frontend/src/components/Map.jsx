@@ -296,9 +296,13 @@ export default function Map({
             const isSold = l.status === 'sold'
             const isReserved = l.status === 'reserved'
 
+            const isSelected = selectedListing && selectedListing.id === l.id
+
             let markerColor
-            if (isSold || isReserved) {
+            if (isSelected) {
               markerColor = { color: '#991b1b', fillColor: '#ef4444' }
+            } else if (isSold || isReserved) {
+              markerColor = { color: '#000000', fillColor: '#1f2937' }
             } else if (isRent) {
               markerColor = { color: '#6b21a8', fillColor: '#a855f7' }
             } else {
@@ -309,7 +313,7 @@ export default function Map({
               <Popup>
                 <div className="text-sm">
                   {(isSold || isReserved) && (
-                    <span className="text-xs font-semibold text-red-600 uppercase tracking-wide">
+                    <span className="text-xs font-semibold text-gray-800 uppercase tracking-wide">
                       {isSold ? `${t.sold} · ` : `${t.reserved} · `}
                     </span>
                   )}

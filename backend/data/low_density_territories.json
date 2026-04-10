@@ -1,0 +1,70 @@
+{
+  "source": "CIC Deliberação n.º 31/2023/PL (22 September 2023)",
+  "description": "Official low-density territories for Portugal 2030 EU funding programs",
+  "programs": [
+    {
+      "id": "crescer_turismo",
+      "name": "Crescer com o Turismo",
+      "base_rate": 60,
+      "low_density_bonus": 20,
+      "max_rate": 80,
+      "max_amount": 400000,
+      "use": "tourism",
+      "description": "Non-reimbursable grant for rural tourism property rehabilitation"
+    },
+    {
+      "id": "base_territorial",
+      "name": "Incentivos de Base Territorial",
+      "base_rate": 50,
+      "low_density_bonus": 10,
+      "max_rate": 60,
+      "max_amount": null,
+      "use": "general",
+      "description": "Non-reimbursable grant for construction/remodeling in low-density areas"
+    }
+  ],
+  "group_1_municipalities": {
+    "_doc": "All parishes in these municipalities are classified as low-density",
+    "Aveiro": ["Arouca", "Sever do Vouga"],
+    "Beja": ["Aljustrel", "Almodôvar", "Alvito", "Barrancos", "Beja", "Castro Verde", "Cuba", "Ferreira do Alentejo", "Mértola", "Moura", "Odemira", "Ourique", "Serpa", "Vidigueira"],
+    "Braga": ["Cabeceiras de Basto", "Celorico de Basto", "Fafe", "Póvoa de Lanhoso", "Terras de Bouro", "Vieira do Minho", "Vila Verde"],
+    "Bragança": ["Alfândega da Fé", "Bragança", "Carrazeda de Ansiães", "Freixo de Espada à Cinta", "Macedo de Cavaleiros", "Miranda do Douro", "Mirandela", "Mogadouro", "Torre de Moncorvo", "Vila Flor", "Vimioso", "Vinhais"],
+    "Castelo Branco": ["Belmonte", "Castelo Branco", "Covilhã", "Fundão", "Idanha-a-Nova", "Oleiros", "Penamacor", "Proença-a-Nova", "Sertã", "Vila de Rei", "Vila Velha de Ródão"],
+    "Coimbra": ["Arganil", "Góis", "Lousã", "Miranda do Corvo", "Oliveira do Hospital", "Pampilhosa da Serra", "Penacova", "Penela", "Soure", "Tábua", "Vila Nova de Poiares"],
+    "Évora": ["Alandroal", "Arraiolos", "Borba", "Estremoz", "Évora", "Montemor-o-Novo", "Mora", "Mourão", "Portel", "Redondo", "Reguengos de Monsaraz", "Vendas Novas", "Viana do Alentejo", "Vila Viçosa"],
+    "Faro": ["Alcoutim", "Aljezur", "Castro Marim", "Monchique", "Vila do Bispo"],
+    "Guarda": ["Aguiar da Beira", "Almeida", "Celorico da Beira", "Figueira de Castelo Rodrigo", "Fornos de Algodres", "Gouveia", "Guarda", "Manteigas", "Mêda", "Pinhel", "Sabugal", "Seia", "Trancoso", "Vila Nova de Foz Côa"],
+    "Leiria": ["Alvaiázere", "Ansião", "Castanheira de Pera", "Figueiró dos Vinhos", "Pedrógão Grande"],
+    "Portalegre": ["Alter do Chão", "Arronches", "Avis", "Campo Maior", "Castelo de Vide", "Crato", "Elvas", "Fronteira", "Gavião", "Marvão", "Monforte", "Nisa", "Ponte de Sor", "Portalegre", "Sousel"],
+    "Porto": ["Baião"],
+    "Santarém": ["Abrantes", "Chamusca", "Constância", "Coruche", "Ferreira do Zêzere", "Mação", "Sardoal", "Vila Nova da Barquinha"],
+    "Setúbal": ["Alcácer do Sal", "Grândola", "Santiago do Cacém"],
+    "Viana do Castelo": ["Arcos de Valdevez", "Melgaço", "Monção", "Paredes de Coura", "Ponte da Barca", "Vila Nova de Cerveira"],
+    "Vila Real": ["Alijó", "Boticas", "Chaves", "Mesão Frio", "Mondim de Basto", "Montalegre", "Murça", "Peso da Régua", "Ribeira de Pena", "Sabrosa", "Santa Marta de Penaguião", "Valpaços", "Vila Pouca de Aguiar", "Vila Real"],
+    "Viseu": ["Armamar", "Carregal do Sal", "Castro Daire", "Cinfães", "Lamego", "Mangualde", "Moimenta da Beira", "Mortágua", "Nelas", "Oliveira de Frades", "Penalva do Castelo", "Penedono", "Resende", "Santa Comba Dão", "São João da Pesqueira", "São Pedro do Sul", "Sátão", "Sernancelhe", "Tabuaço", "Tarouca", "Tondela", "Vila Nova de Paiva", "Vouzela"]
+  },
+  "group_2_parishes": {
+    "_doc": "Only specific parishes in these municipalities are low-density",
+    "Águeda": ["Agadão", "Belazaima do Chão", "Castanheira do Vouga", "Préstimo e Macieira de Alcoba"],
+    "Castelo de Paiva": ["Real"],
+    "Vale de Cambra": ["Arões", "Junqueira de São Pedro", "Cepelos e Gatão", "Roge e Codal"],
+    "Amares": ["Bouro (Santa Marta)", "Caldelas", "Lago", "Rendufe"],
+    "Guimarães": ["Souto Santa Maria, Souto São Salvador e Gondomar"],
+    "Condeixa-a-Nova": ["Anobra", "Ega", "Furadouro", "Sebal e Belide", "Vila Seca"],
+    "Loulé": ["Alte", "Ameixial", "Salir", "Querença, Tôr e Benafim"],
+    "Silves": ["São Marcos da Serra"],
+    "Tavira": ["Cachopo", "Santa Catarina da Fonte do Bispo"],
+    "Pombal": ["Abiul", "Almagreira e Redinha", "Carriço", "Vila Cã"],
+    "Porto de Mós": ["Alvados e Alcaria", "Arrimal e Mendiga", "Pedreiras"],
+    "Amarante": ["Ansiães", "Candemil", "Gouveia (São Simão)", "Jazente", "Rebordelo", "Salvador do Monte", "Aboadela, Sanche e Várzea", "Bustelo, Carneiro e Carvalho de Rei", "Olo e Canadelo", "Vila Chã do Marão"],
+    "Marco de Canaveses": ["Várzea, Aliviada e Folhada"],
+    "Ourém": ["Formigais", "Freixianda, Ribeira do Fárrio e Formigais", "Rio de Couros e Casal dos Bernardos"],
+    "Santarém": ["Vale de Santarém"],
+    "Tomar": ["Além da Ribeira e Pedreira", "Casais e Alviobeira", "Olalhas", "Serra e Junceira"],
+    "Caminha": ["Arga de Baixo", "Arga de Cima", "Arga de São João", "Dem"],
+    "Ponte de Lima": ["Anais e Calheiros", "Ardegão, Freixo e Mato", "Associação de Freguesias do Vale do Neiva", "Bárrio e Cepões", "Beiral do Lima", "Boalhosa", "Brandara", "Cabaços e Fojo Lobal", "Cabração e Moreira do Lima", "Calheiros", "Estorãos", "Facha", "Fornelos e Queijada", "Friastelas", "Gemieira", "Gondufe", "Labruja", "Labrujó, Rendufe e Vilar do Monte", "Navió e Vitorino dos Piães", "Serdedelo", "Vilar das Almas"],
+    "Valença": ["Boivão", "Cerdal", "Fontoura", "Friestas", "Ganfei", "Gondomil e Sanfins", "São Julião e Silva", "Verdoejo"],
+    "Viana do Castelo": ["Amonde", "Cardielos e Serreleis", "Montaria", "Mujães", "Nogueira, Meixedo e Vilar de Murteda", "Outeiro", "Perre", "Santa Maria Maior e Monserrate e Meadela", "Subportela, Deocriste e Portela Susã", "Vila Franca", "Vila Mou"],
+    "Viseu": ["Abraveses e Orgens", "Barreiros e Cepões", "Boa Aldeia, Farminhão e Torredeita", "Bodiosa", "Cavernães", "Couto de Baixo e Couto de Cima", "Fragosela", "Mundão", "Povolide", "Repeses e São Salvador", "Ribafeita", "Rio de Loba", "São Cipriano e Vil de Souto", "São João de Lourosa", "São Pedro de France", "Silgueiros", "Vil de Souto e Ranhados"]
+  }
+}

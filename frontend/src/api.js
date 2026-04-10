@@ -10,7 +10,12 @@ async function api(url, opts) {
         await new Promise(r => setTimeout(r, 1000 * (i + 1)))
         continue
       }
-      throw new Error(`API ${res.status}: ${url}`)
+      let msg = `API ${res.status}: ${url}`
+      try {
+        const body = await res.json()
+        if (body.error) msg = body.error
+      } catch (_) {}
+      throw new Error(msg)
     } catch (err) {
       if (err.message?.startsWith('API ')) throw err
       if (i < maxRetries - 1) {
@@ -127,6 +132,11 @@ export async function fetchNearbyProjects(lat, lon, radiusM = 500) {
 export async function fetchAddressHistory(id, listingType = 'sale') {
   const params = new URLSearchParams({ listing_type: listingType })
   return api(`${BASE}/listings/${id}/address-history?${params}`)
+}
+
+export async function fetchPropertyScore(id, listingType = 'sale') {
+  const params = new URLSearchParams({ listing_type: listingType })
+  return api(`${BASE}/listings/${id}/property-score?${params}`)
 }
 
 export async function addressLookup(address, lat, lon, listingType = 'sale') {

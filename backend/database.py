@@ -22,6 +22,73 @@ from models import Listing, Neighborhood, ScrapeRun
 logger = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).parent / "data" / "lisboa_realestate.db"
+LOW_DENSITY_PATH = Path(__file__).parent / "data" / "low_density_territories.json"
+
+# -- Grant eligibility: low-density territory lookup ---------------------------
+_low_density_municipalities = set()  # normalized city names
+_low_density_parishes = {}           # normalized municipality -> set of parish names
+_grant_programs = []
+
+def _normalize(s):
+    """Normalize a string for fuzzy matching: lowercase, strip accents."""
+    if not s:
+        return ""
+    s = s.lower().strip()
+    # Decompose unicode and strip combining marks (accents)
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return s
+
+def _load_low_density_territories():
+    global _low_density_municipalities, _low_density_parishes, _grant_programs
+    if _low_density_municipalities:
+        return  # already loaded
+    if not LOW_DENSITY_PATH.exists():
+        logger.warning("low_density_territories.json not found")
+        return
+    data = json.loads(LOW_DENSITY_PATH.read_text(encoding="utf-8"))
+    _grant_programs = data.get("programs", [])
+    # Group 1: all parishes in municipality are low-density
+    for district, municipalities in data.get("group_1_municipalities", {}).items():
+        if district.startswith("_"):
+            continue
+        for m in municipalities:
+            _low_density_municipalities.add(_normalize(m))
+    # Group 2: only specific parishes
+    for municipality, parishes in data.get("group_2_parishes", {}).items():
+        if municipality.startswith("_"):
+            continue
+        norm_mun = _normalize(municipality)
+        _low_density_parishes[norm_mun] = {_normalize(p) for p in parishes}
+
+def is_grant_eligible(city, parish):
+    """Check if a listing's city/parish falls in a low-density territory."""
+    _load_low_density_territories()
+    norm_city = _normalize(city)
+    norm_parish = _normalize(parish)
+    # Group 1: entire municipality is low-density
+    if norm_city in _low_density_municipalities:
+        return True
+    # Group 2: check specific parishes within partially-classified municipalities
+    if norm_city in _low_density_parishes:
+        eligible_parishes = _low_density_parishes[norm_city]
+        # Try exact match first, then substring match (parish names may be abbreviated)
+        if norm_parish in eligible_parishes:
+            return True
+        for ep in eligible_parishes:
+            if norm_parish and (norm_parish in ep or ep in norm_parish):
+                return True
+    return False
+
+def get_grant_details(city, parish):
+    """Return detailed grant program info for an eligible listing."""
+    _load_low_density_territories()
+    if not is_grant_eligible(city, parish):
+        return None
+    return {
+        "in_low_density": True,
+        "programs": _grant_programs,
+    }
 
 # -- Listing exclusion filters -------------------------------------------------
 # Keywords that indicate non-property listings (timeshares, hotel weeks, etc.)
@@ -386,6 +453,12 @@ def init_db():
         if "deal_score" not in existing:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN deal_score REAL")
             logger.info(f"[DB] Added deal_score column to {tbl}")
+        if "property_score" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN property_score REAL")
+            logger.info(f"[DB] Added property_score column to {tbl}")
+        if "property_features" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN property_features TEXT")
+            logger.info(f"[DB] Added property_features column to {tbl}")
     conn.commit()
 
     # -- Backfill hash_cross for existing rows ------------------------------------
@@ -665,6 +738,9 @@ def get_listings(
     district: Optional[str] = None,
     city: Optional[str] = None,
     postal_code: Optional[str] = None,
+    grant_eligible: Optional[bool] = None,
+    min_deal_score: Optional[float] = None,
+    min_rarity_score: Optional[float] = None,
     limit: int = 500,
     offset: int = 0,
 ) -> List[dict]:
@@ -714,6 +790,10 @@ def get_listings(
         clauses.append("city=?"); params.append(city)
     if postal_code:
         clauses.append("postal_code=?"); params.append(postal_code)
+    if min_deal_score is not None:
+        clauses.append("deal_score>=?"); params.append(min_deal_score)
+    if min_rarity_score is not None:
+        clauses.append("rarity_score>=?"); params.append(min_rarity_score)
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
@@ -736,19 +816,23 @@ def get_listings(
     else:
         # Union both tables using shared columns
         rows = conn.execute(
-            f"SELECT {_shared_cols}, rarity_score, rarity_factors, building_geojson, deal_score, 'sale' as listing_type FROM sales {where} "
+            f"SELECT {_shared_cols}, rarity_score, rarity_factors, building_geojson, deal_score, property_score, property_features, 'sale' as listing_type FROM sales {where} "
             f"UNION ALL "
-            f"SELECT {_shared_cols}, NULL as rarity_score, NULL as rarity_factors, NULL as building_geojson, deal_score, 'rent' as listing_type FROM rentals {where} "
+            f"SELECT {_shared_cols}, NULL as rarity_score, NULL as rarity_factors, NULL as building_geojson, deal_score, property_score, property_features, 'rent' as listing_type FROM rentals {where} "
             f"ORDER BY scraped_at DESC LIMIT ? OFFSET ?",
             params + params + [limit, offset]
         ).fetchall()
 
     conn.close()
+    _load_low_density_territories()
     result = []
     for r in rows:
         row = dict(r)
         if not row.get("status"):
             row["status"] = "active"
+        row["grant_eligible"] = is_grant_eligible(row.get("city"), row.get("parish"))
+        if grant_eligible and not row["grant_eligible"]:
+            continue
         result.append(row)
     return result
 
@@ -2287,6 +2371,233 @@ def compute_all_deal_scores():
             logger.debug("Deal score failed for rental %s: %s", row["id"], e)
 
     logger.info("[DB] Computed deal scores for %d listings", updated)
+    return updated
+
+
+# ── Property Feature Score ──────────────────────────────────────────────────
+
+# Each feature: (key, patterns, apt_weight, house_weight)
+# Patterns are checked case-insensitively against description + title.
+# Use raw strings; accented chars handled via NFD normalization.
+_PROPERTY_FEATURES = [
+    ("outdoor_space", [r"\bvaranda\b", r"\bvarandas\b", r"\bmarquise\b", r"\bbalcony\b",
+                       r"\bterra[cç]o\b", r"\brooftop\b", r"\bterrace\b", r"\bterra[cç]os?\b"], 15, 10),
+    ("elevator",      [r"\belevador\b", r"\bascensor\b", r"\belevator\b", r"\blift\b"], 10, 0),
+    ("parking",       [r"\bgarage[ms]?\b", r"\bestacionamento\b", r"\blugar de garagem\b",
+                       r"\bparqueamento\b", r"\bparking\b", r"\bbox\b"], 10, 12),
+    ("storage",       [r"\barreca?da[çc][aã]o\b", r"\barrumos?\b", r"\bstorage\b"], 5, 3),
+    ("pool",          [r"\bpiscina\b", r"\bpool\b", r"\bswimming\b"], 8, 15),
+    ("garden",        [r"\bjardim\b", r"\bquintal\b", r"\blogradouro\b", r"\bgarden\b"], 3, 15),
+    ("view",          [r"\bvista rio\b", r"\bvista mar\b", r"\bvista cidade\b",
+                       r"\bpanor[aâ]mic[oa]\b", r"\briver view\b", r"\bsea view\b",
+                       r"\bvista desafogada\b", r"\bvista frontal\b"], 12, 12),
+    ("energy_a_b_c",  [r"\bclasse energ[eé]tica\s*[abc]\b", r"\bcertificado\s*[abc]\b",
+                       r"\benergy\s*(class|rating)\s*[abc]\b", r"\bclasse\s*[abc][+]?\b",
+                       r"energ[eé]tica[:\s]+[abc][+-]?\b",
+                       r"energ[eé]tico\s+classe\s+[abc]\b",
+                       r"efici[eê]ncia\s+energ[eé]tica\s+classe\s+[abc]\b"], 7, 8),
+    ("renovated",     [r"\bremodelad[oa]\b", r"\brenovad[oa]\b", r"\breconstru[ií]d[oa]\b",
+                       r"\brenovated\b", r"\brefurbished\b", r"\btotalmente novo\b"], 10, 10),
+    ("air_cond",      [r"\bar condicionado\b", r"\bclimatiza[çc][aã]o\b",
+                       r"\bair\s*condition", r"\bac\s*instalado\b"], 5, 5),
+    ("suite",         [r"\bsu[ií]te\b", r"\ben\s*suite\b", r"\bensuite\b"], 5, 5),
+]
+
+# Compiled regex for each feature
+_FEATURE_PATTERNS = [
+    (key, [re.compile(p, re.IGNORECASE) for p in pats], aw, hw)
+    for key, pats, aw, hw in _PROPERTY_FEATURES
+]
+
+
+def _normalize_text(text):
+    """Normalize accented characters for more robust matching."""
+    if not text:
+        return ""
+    # NFD decomposition then strip combining marks — gives us base characters
+    # but we also keep the original for accent-specific patterns
+    return text.lower()
+
+
+def extract_property_features(description, title=None, property_type=None, condition=None,
+                               bathrooms=None, floor=None):
+    """Extract features from listing text and structured fields.
+
+    Returns (score, features_dict) where features_dict maps feature_key → True/False
+    and score is 0-100.
+    """
+    text = " ".join(filter(None, [title or "", description or ""]))
+    text_lower = text.lower()
+
+    # Check both property_type field AND title for house indicators
+    _house_kw = ("house", "moradia", "villa", "vivenda", "quinta", "moradia independente",
+                 "moradia geminada", "moradia isolada")
+    type_lower = (property_type or "").lower()
+    title_lower = (title or "").lower()
+    is_house = any(k in type_lower for k in _house_kw) or any(k in title_lower for k in _house_kw)
+
+    detected = {}
+    for key, patterns, apt_w, house_w in _FEATURE_PATTERNS:
+        found = any(p.search(text_lower) for p in patterns)
+        detected[key] = found
+
+    # Bonus: condition field says "new" → count as renovated if not already
+    if condition and condition.lower() in ("new", "novo", "nova"):
+        detected["renovated"] = True
+
+    # Bonus: multiple bathrooms
+    detected["multi_bath"] = (bathrooms or 0) >= 2
+
+    # Bonus: high floor with elevator (apartments only)
+    high_floor = False
+    if floor and not is_house:
+        floor_str = str(floor).lower()
+        m = re.search(r'(\d+)', floor_str)
+        if m and int(m.group(1)) >= 3:
+            high_floor = True
+        if "último" in floor_str or "last" in floor_str or "ultimo" in floor_str:
+            high_floor = True
+    detected["high_floor_elevator"] = high_floor and detected.get("elevator", False)
+
+    # Compute score
+    # Weights for bonus features
+    bonus_weights_apt = {"multi_bath": 5, "high_floor_elevator": 5}
+    bonus_weights_house = {"multi_bath": 5, "high_floor_elevator": 0}
+
+    total_possible = 0
+    earned = 0
+    for key, _, apt_w, house_w in _FEATURE_PATTERNS:
+        w = house_w if is_house else apt_w
+        total_possible += w
+        if detected.get(key):
+            earned += w
+    # Add bonus weights
+    bw = bonus_weights_house if is_house else bonus_weights_apt
+    for bkey, bweight in bw.items():
+        total_possible += bweight
+        if detected.get(bkey):
+            earned += bweight
+
+    score = round((earned / total_possible) * 100, 1) if total_possible > 0 else 0
+
+    # Build features list (only detected ones)
+    features_found = [k for k, v in detected.items() if v]
+
+    return score, features_found
+
+
+def compute_property_score(listing_id, listing_type="sale"):
+    """Compute and return property feature score for a single listing."""
+    table = _table_for(listing_type)
+    conn = get_connection()
+    row = conn.execute(
+        f"SELECT id, description, title, property_type, condition, bathrooms, floor "
+        f"FROM {table} WHERE id=?", (listing_id,)
+    ).fetchone()
+    conn.close()
+
+    if not row:
+        return {"error": "Listing not found"}
+
+    desc = row["description"] or ""
+    title = row["title"] or ""
+
+    # Skip if no description text to analyze
+    if len(desc.strip()) < 20 and len(title.strip()) < 5:
+        return {
+            "property_score": None,
+            "property_rating": None,
+            "features": [],
+            "note": "Insufficient description text"
+        }
+
+    score, features = extract_property_features(
+        desc, title, row["property_type"], row["condition"],
+        row["bathrooms"], row["floor"]
+    )
+
+    _house_kw = ("house", "moradia", "villa", "vivenda", "quinta", "moradia independente",
+                 "moradia geminada", "moradia isolada")
+    type_lower = (row["property_type"] or "").lower()
+    title_lower = (row["title"] or "").lower()
+    is_house = any(k in type_lower for k in _house_kw) or any(k in title_lower for k in _house_kw)
+
+    rating = "A" if score >= 80 else "B" if score >= 60 else "C" if score >= 40 else "D"
+
+    # Feature details with labels and weights
+    feature_labels = {
+        "outdoor_space": "Outdoor space", "elevator": "Elevator",
+        "parking": "Parking", "storage": "Storage room", "pool": "Pool",
+        "garden": "Garden", "view": "View", "energy_a_b_c": "Energy A/B/C",
+        "renovated": "Renovated/New", "air_cond": "A/C", "suite": "Suite",
+        "multi_bath": "2+ Bathrooms", "high_floor_elevator": "High floor + elevator",
+    }
+    feature_details = []
+    for key, _, apt_w, house_w in _PROPERTY_FEATURES:
+        w = house_w if is_house else apt_w
+        if w == 0:
+            continue  # not applicable for this property type
+        feature_details.append({
+            "key": key,
+            "label": feature_labels.get(key, key),
+            "detected": key in features,
+            "weight": w,
+        })
+    # Add bonus features
+    bonus_map = [
+        ("multi_bath", 5 if not is_house else 5, 5),
+        ("high_floor_elevator", 5 if not is_house else 0, 0),
+    ]
+    for bkey, apt_bw, house_bw in bonus_map:
+        bw = house_bw if is_house else apt_bw
+        if bw == 0:
+            continue
+        feature_details.append({
+            "key": bkey,
+            "label": feature_labels.get(bkey, bkey),
+            "detected": bkey in features,
+            "weight": bw,
+        })
+
+    return {
+        "property_score": score,
+        "property_rating": rating,
+        "property_type_class": "house" if is_house else "apartment",
+        "features": feature_details,
+        "detected_count": len(features),
+        "total_features": len(feature_details),
+    }
+
+
+def compute_all_property_scores():
+    """Batch-compute and store property_score for all active listings."""
+    conn = get_connection()
+    updated = 0
+
+    for tbl, lt in [("sales", "sale"), ("rentals", "rent")]:
+        rows = conn.execute(
+            f"SELECT id FROM {tbl} WHERE status='active' AND description IS NOT NULL"
+        ).fetchall()
+        for row in rows:
+            try:
+                result = compute_property_score(row["id"], lt)
+                if result.get("property_score") is not None:
+                    features_json = json.dumps(result["features"])
+                    c = get_connection()
+                    try:
+                        c.execute(
+                            f"UPDATE {tbl} SET property_score=?, property_features=? WHERE id=?",
+                            (result["property_score"], features_json, row["id"])
+                        )
+                        c.commit()
+                        updated += 1
+                    finally:
+                        c.close()
+            except Exception as e:
+                logger.debug("Property score failed for %s %s: %s", tbl, row["id"], e)
+
+    conn.close()
+    logger.info("[DB] Computed property scores for %d listings", updated)
     return updated
 
 
