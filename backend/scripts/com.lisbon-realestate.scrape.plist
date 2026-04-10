@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.lisbon-realestate.scrape</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/tord/Claude_projects/lisbon-realestate/backend/scripts/scheduled_scrape.sh</string>
+    </array>
+
+    <!-- Runs daily at 03:17 local time. Off-minute chosen deliberately. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>17</integer>
+    </dict>
+
+    <!-- Raw launchd stdout/stderr for the wrapper script itself.
+         The scraper's own output goes to backend/data/scrape.log. -->
+    <key>StandardOutPath</key>
+    <string>/Users/tord/Claude_projects/lisbon-realestate/backend/data/launchd.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/tord/Claude_projects/lisbon-realestate/backend/data/launchd.err.log</string>
+
+    <!-- Don't fire immediately when loaded; only on schedule. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- If the Mac is asleep at 03:17, run as soon as it wakes. -->
+    <key>StartCalendarIntervalRunOnWake</key>
+    <true/>
+</dict>
+</plist>
