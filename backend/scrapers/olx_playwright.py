@@ -559,6 +559,20 @@ def extract_from_dom(page: Page) -> dict:
     result["title"] = data.get("title")
     result["description"] = data.get("description")
 
+    # Preserve raw params as feature chips for property_score scoring
+    raw_chips = []
+    for param in (data.get("params") or []):
+        lbl = (param.get("label") or "").strip()
+        val = (param.get("value") or "").strip()
+        if lbl and val:
+            raw_chips.append(f"{lbl}: {val}")
+        elif val:
+            raw_chips.append(val)
+        elif lbl:
+            raw_chips.append(lbl)
+    if raw_chips:
+        result["feature_chips"] = raw_chips
+
     # Parse params (area, rooms, condition, etc.)
     for param in (data.get("params") or []):
         label = (param.get("label") or "").lower()
@@ -734,6 +748,7 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
         images=json.dumps(images) if images else None,
         hash_dedupe=_hash(address, city, price, size),
         description=ld.get("description") or dom.get("description"),
+        feature_chips=json.dumps(dom.get("feature_chips")) if dom.get("feature_chips") else None,
         scraped_at=datetime.utcnow(),
     )
 

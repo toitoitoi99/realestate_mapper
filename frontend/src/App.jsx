@@ -94,7 +94,8 @@ export default function App() {
     fetchListings(apiFilters)
       .then(d => {
         let all = d.listings ?? []
-        if (!show_sold) all = all.filter(l => l.status === 'active' || !l.status)
+        if (show_sold === 'active' || !show_sold) all = all.filter(l => l.status === 'active' || !l.status)
+        else if (show_sold === 'sold') all = all.filter(l => l.status === 'sold' || l.status === 'reserved')
         if (sort_by === 'rating') all = [...all].sort((a, b) => (b.deal_score ?? 0) - (a.deal_score ?? 0))
         else if (sort_by === 'rarity') all = [...all].sort((a, b) => (b.rarity_score ?? 0) - (a.rarity_score ?? 0))
         else if (sort_by === 'price_asc') all = [...all].sort((a, b) => (a.price_amount ?? 0) - (b.price_amount ?? 0))
@@ -249,7 +250,10 @@ export default function App() {
           neighborhoods={neighborhoods}
           onSelectNeighborhood={handleSelectNeighborhood}
           selectedNeighborhood={selectedNeighborhood}
-          onSelectListing={setHighlightedListing}
+          onSelectListing={(l) => {
+            setHighlightedListing(l)
+            setSelectedListing(prev => prev ? l : prev)
+          }}
           selectedListing={highlightedListing}
           projects={projects}
           showProjects={showProjects}

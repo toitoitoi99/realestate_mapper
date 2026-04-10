@@ -403,6 +403,51 @@ def _collect_images(result: dict) -> list:
     return out[:MAX_IMAGES]
 
 
+# RE/MAX API boolean fields → Portuguese chip labels that match the
+# _PROPERTY_FEATURES regex patterns in database.py.
+# Only truthy booleans become positive chips; explicit `False` becomes a
+# negated chip so `parking: false` can override text matches.
+_BOOL_CHIP_LABELS = {
+    "parking":              ("Estacionamento", "Sem estacionamento"),
+    "garage":               ("Garagem", "Sem garagem"),
+    "elevator":              ("Elevador", "Sem elevador"),
+    "electricCarsCharging": ("Carregamento de carros elétricos", None),
+}
+
+
+def _collect_feature_chips(result: dict) -> list:
+    """Build a list of structured feature-chip strings from an API result.
+    Uses the boolean amenity fields RE/MAX exposes (parking, garage,
+    elevator, electricCarsCharging). Returns an empty list if none are set
+    — the description-based scoring in database.py handles everything
+    else via text matching on the Listing.description field."""
+    chips: list = []
+    for key, (positive, negative) in _BOOL_CHIP_LABELS.items():
+        v = result.get(key)
+        if v is True:
+            chips.append(positive)
+        elif v is False and negative:
+            chips.append(negative)
+
+    # Garage spots count — only add when the `garage` boolean is also set,
+    # otherwise the count refers to outdoor/shared parking spots (which we
+    # already captured above via `parking`)
+    if result.get("garage") is True:
+        garage_spots = result.get("garageSpots")
+        if isinstance(garage_spots, (int, float)) and garage_spots > 0:
+            chips.append(f"{int(garage_spots)} lugares de garagem")
+
+    # De-duplicate while preserving order
+    seen = set()
+    out = []
+    for c in chips:
+        k = c.lower()
+        if k not in seen:
+            seen.add(k)
+            out.append(c)
+    return out
+
+
 def build_listing_url(tags: str, title_code: str) -> str:
     return f"{BASE_URL}/pt/imoveis/{tags}/{title_code}"
 
@@ -488,6 +533,7 @@ def build_listing_from_api(result: dict, listing_type: str) -> Optional[Listing]
         title = " ".join(filter(None, [type_name, typology, "em", locale_part]))
 
     images = _collect_images(result)
+    feature_chips = _collect_feature_chips(result)
 
     price_per_sqm = round(price / size, 2) if price and size and size > 0 else None
 
@@ -521,6 +567,7 @@ def build_listing_from_api(result: dict, listing_type: str) -> Optional[Listing]
         images=json.dumps(images) if images else None,
         hash_dedupe=_hash(address, city, price, size),
         description=description,
+        feature_chips=json.dumps(feature_chips) if feature_chips else None,
         scraped_at=datetime.utcnow(),
     )
 

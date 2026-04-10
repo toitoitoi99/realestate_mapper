@@ -67,8 +67,8 @@ BLOCKED_RETRIES = 3
 BLOCKED_WAIT = 8
 
 # Delay between page visits (seconds)
-MIN_DELAY = 2.5
-MAX_DELAY = 5.5
+MIN_DELAY = 8.0
+MAX_DELAY = 15.0
 
 PROFILE_DIR = Path(__file__).parent.parent / "data" / "browser_profile_casa_sapo"
 
@@ -201,8 +201,9 @@ def _goto_with_retry(page: "Page", url: str, retries: int = BLOCKED_RETRIES) -> 
                         return True
                 if not _is_blocked(page):
                     return True
-            except Exception:
+            except Exception as e:
                 # Catch net::ERR_ABORTED etc. from reload during meta-refresh
+                log.warning(f"  Reload failed: {e}")
                 pass
         else:
             log.warning(f"  Blocked after {retries} attempts: {url}")
@@ -595,6 +596,23 @@ def extract_from_dom(page: Page) -> dict:
     result["title"] = data.get("title")
     result["description"] = data.get("description")
 
+    # Preserve raw feature chips + key-value pairs for property_score scoring
+    raw_chips = []
+    for f in (data.get("features") or []):
+        if f and str(f).strip():
+            raw_chips.append(str(f).strip())
+    kv_labels = data.get("kvLabels") or []
+    kv_values = data.get("kvValues") or []
+    for label, value in zip(kv_labels, kv_values):
+        lbl = (label or "").strip()
+        val = (value or "").strip()
+        if lbl and val:
+            raw_chips.append(f"{lbl}: {val}")
+        elif lbl:
+            raw_chips.append(lbl)
+    if raw_chips:
+        result["feature_chips"] = raw_chips
+
     # Parse features for area, rooms, floor, condition
     for feat in (data.get("features") or []):
         fl = feat.lower()
@@ -761,6 +779,7 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
         images=json.dumps(images) if images else None,
         hash_dedupe=_hash(address, city, price, size),
         description=ld.get("description") or dom.get("description"),
+        feature_chips=json.dumps(dom.get("feature_chips")) if dom.get("feature_chips") else None,
         scraped_at=datetime.utcnow(),
     )
 

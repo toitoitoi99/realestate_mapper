@@ -20,6 +20,10 @@ backend/data/realestate.db-wal
 backend/data/lis[*]realestate.db
 backend/data/browser_profile/
 backend/data/browser_profile_imovirtual/
+backend/data/browser_profile_era/
+backend/data/browser_profile_olx/
+backend/data/browser_profile_remax/
+backend/data/browser_profile_casa_sapo/
 
 # Keep the parish GeoJSON (downloaded once, checked in)
 !backend/data/lisbon_parishes.geojson

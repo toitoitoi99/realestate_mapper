@@ -459,6 +459,9 @@ def init_db():
         if "property_features" not in existing:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN property_features TEXT")
             logger.info(f"[DB] Added property_features column to {tbl}")
+        if "feature_chips" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN feature_chips TEXT")
+            logger.info(f"[DB] Added feature_chips column to {tbl}")
     conn.commit()
 
     # -- Backfill hash_cross for existing rows ------------------------------------
@@ -670,7 +673,7 @@ def upsert_listing(listing: Listing) -> tuple:
                         property_type=?, condition=?, title=?, address=?, postal_code=?,
                         neighborhood=?, parish=?, district=?, city=?, lat=?, lon=?,
                         images=?, hash_dedupe=?, hash_cross=?, hash_location=?,
-                        missing_since=NULL, description=?, scraped_at=?
+                        missing_since=NULL, description=?, feature_chips=?, scraped_at=?
                     WHERE source=? AND source_id=?
                 """, (
                     listing.url, listing.status,
@@ -681,7 +684,7 @@ def upsert_listing(listing: Listing) -> tuple:
                     listing.postal_code, listing.neighborhood, listing.parish,
                     listing.district, listing.city, listing.lat, listing.lon,
                     listing.images, listing.hash_dedupe, listing.hash_cross, hl,
-                    listing.description,
+                    listing.description, listing.feature_chips,
                     ts, listing.source, listing.source_id
                 ))
             return row["id"], False
@@ -696,8 +699,8 @@ def upsert_listing(listing: Listing) -> tuple:
                         bathrooms, floor, property_type, condition, title,
                         address, postal_code, neighborhood, parish, district,
                         city, lat, lon, images, hash_dedupe, hash_cross,
-                        hash_location, previous_listing_id, description, scraped_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        hash_location, previous_listing_id, description, feature_chips, scraped_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     listing.source, listing.source_id, listing.url,
                     listing.status,
@@ -708,7 +711,7 @@ def upsert_listing(listing: Listing) -> tuple:
                     listing.postal_code, listing.neighborhood, listing.parish,
                     listing.district, listing.city, listing.lat, listing.lon,
                     listing.images, listing.hash_dedupe, listing.hash_cross,
-                    hl, prev_id, listing.description, ts
+                    hl, prev_id, listing.description, listing.feature_chips, ts
                 ))
             return cur.lastrowid, True
     finally:
@@ -2378,29 +2381,31 @@ def compute_all_deal_scores():
 
 # Each feature: (key, patterns, apt_weight, house_weight)
 # Patterns are checked case-insensitively against description + title.
-# Use raw strings; accented chars handled via NFD normalization.
+# Scoring model: score = min(100, sum of detected feature weights).
+# Weights are absolute points (not percentages), calibrated so a well-equipped
+# listing reaches ~80-100 and a bare listing scores ~0-20.
 _PROPERTY_FEATURES = [
     ("outdoor_space", [r"\bvaranda\b", r"\bvarandas\b", r"\bmarquise\b", r"\bbalcony\b",
-                       r"\bterra[cç]o\b", r"\brooftop\b", r"\bterrace\b", r"\bterra[cç]os?\b"], 15, 10),
-    ("elevator",      [r"\belevador\b", r"\bascensor\b", r"\belevator\b", r"\blift\b"], 10, 0),
+                       r"\bterra[cç]o\b", r"\brooftop\b", r"\bterrace\b", r"\bterra[cç]os?\b"], 20, 12),
+    ("elevator",      [r"\belevador\b", r"\bascensor\b", r"\belevator\b", r"\blift\b"], 18, 0),
     ("parking",       [r"\bgarage[ms]?\b", r"\bestacionamento\b", r"\blugar de garagem\b",
-                       r"\bparqueamento\b", r"\bparking\b", r"\bbox\b"], 10, 12),
-    ("storage",       [r"\barreca?da[çc][aã]o\b", r"\barrumos?\b", r"\bstorage\b"], 5, 3),
-    ("pool",          [r"\bpiscina\b", r"\bpool\b", r"\bswimming\b"], 8, 15),
-    ("garden",        [r"\bjardim\b", r"\bquintal\b", r"\blogradouro\b", r"\bgarden\b"], 3, 15),
+                       r"\bparqueamento\b", r"\bparking\b", r"\bbox\b"], 18, 20),
     ("view",          [r"\bvista rio\b", r"\bvista mar\b", r"\bvista cidade\b",
                        r"\bpanor[aâ]mic[oa]\b", r"\briver view\b", r"\bsea view\b",
-                       r"\bvista desafogada\b", r"\bvista frontal\b"], 12, 12),
+                       r"\bvista desafogada\b", r"\bvista frontal\b"], 18, 18),
+    ("pool",          [r"\bpiscina\b", r"\bpool\b", r"\bswimming\b"], 12, 20),
+    ("air_cond",      [r"\bar condicionado\b", r"\bclimatiza[çc][aã]o\b",
+                       r"\bair\s*condition", r"\bac\s*instalado\b"], 12, 12),
+    ("garden",        [r"\bjardim\b", r"\bquintal\b", r"\blogradouro\b", r"\bgarden\b"], 8, 20),
+    ("renovated",     [r"\bremodelad[oa]\b", r"\brenovad[oa]\b", r"\breconstru[ií]d[oa]\b",
+                       r"\brenovated\b", r"\brefurbished\b", r"\btotalmente novo\b"], 5, 5),
     ("energy_a_b_c",  [r"\bclasse energ[eé]tica\s*[abc]\b", r"\bcertificado\s*[abc]\b",
                        r"\benergy\s*(class|rating)\s*[abc]\b", r"\bclasse\s*[abc][+]?\b",
                        r"energ[eé]tica[:\s]+[abc][+-]?\b",
                        r"energ[eé]tico\s+classe\s+[abc]\b",
-                       r"efici[eê]ncia\s+energ[eé]tica\s+classe\s+[abc]\b"], 7, 8),
-    ("renovated",     [r"\bremodelad[oa]\b", r"\brenovad[oa]\b", r"\breconstru[ií]d[oa]\b",
-                       r"\brenovated\b", r"\brefurbished\b", r"\btotalmente novo\b"], 10, 10),
-    ("air_cond",      [r"\bar condicionado\b", r"\bclimatiza[çc][aã]o\b",
-                       r"\bair\s*condition", r"\bac\s*instalado\b"], 5, 5),
-    ("suite",         [r"\bsu[ií]te\b", r"\ben\s*suite\b", r"\bensuite\b"], 5, 5),
+                       r"efici[eê]ncia\s+energ[eé]tica\s+classe\s+[abc]\b"], 5, 5),
+    ("storage",       [r"\barreca?da[çc][aã]o\b", r"\barrumos?\b", r"\bstorage\b"], 2, 2),
+    ("suite",         [r"\bsu[ií]te\b", r"\ben\s*suite\b", r"\bensuite\b"], 2, 2),
 ]
 
 # Compiled regex for each feature
@@ -2419,12 +2424,20 @@ def _normalize_text(text):
     return text.lower()
 
 
+_NEGATION_RE = re.compile(r"\b(sem|n[aã]o\s+(tem|possui|dispõe|dispoe)|inexistente|no)\b", re.IGNORECASE)
+
+
 def extract_property_features(description, title=None, property_type=None, condition=None,
-                               bathrooms=None, floor=None):
+                               bathrooms=None, floor=None, feature_chips=None):
     """Extract features from listing text and structured fields.
 
     Returns (score, features_dict) where features_dict maps feature_key → True/False
     and score is 0-100.
+
+    `feature_chips` is an optional list of short structured strings from the source
+    site (e.g. ["Varanda", "Elevador", "Ar condicionado"]). Chips are matched per-
+    chip so negated chips ("Sem elevador") can override positive matches, and
+    chip matches are tried independently of the marketing-blob description.
     """
     text = " ".join(filter(None, [title or "", description or ""]))
     text_lower = text.lower()
@@ -2436,9 +2449,32 @@ def extract_property_features(description, title=None, property_type=None, condi
     title_lower = (title or "").lower()
     is_house = any(k in type_lower for k in _house_kw) or any(k in title_lower for k in _house_kw)
 
+    # Normalize chips → list of lowercased strings; classify each as positive/negative
+    pos_chips: list = []
+    neg_chips: list = []
+    if feature_chips:
+        for raw in feature_chips:
+            if not raw:
+                continue
+            c = str(raw).strip().lower()
+            if not c:
+                continue
+            if _NEGATION_RE.search(c):
+                neg_chips.append(c)
+            else:
+                pos_chips.append(c)
+
     detected = {}
     for key, patterns, apt_w, house_w in _FEATURE_PATTERNS:
+        # Match against free-text description/title
         found = any(p.search(text_lower) for p in patterns)
+        # Match against positive chips (structured data wins over negated description text)
+        if not found and pos_chips:
+            found = any(p.search(chip) for chip in pos_chips for p in patterns)
+        # Explicit negation in chips overrides any positive hit
+        if found and neg_chips:
+            if any(p.search(chip) for chip in neg_chips for p in patterns):
+                found = False
         detected[key] = found
 
     # Bonus: condition field says "new" → count as renovated if not already
@@ -2459,26 +2495,23 @@ def extract_property_features(description, title=None, property_type=None, condi
             high_floor = True
     detected["high_floor_elevator"] = high_floor and detected.get("elevator", False)
 
-    # Compute score
-    # Weights for bonus features
-    bonus_weights_apt = {"multi_bath": 5, "high_floor_elevator": 5}
-    bonus_weights_house = {"multi_bath": 5, "high_floor_elevator": 0}
+    # Compute score as capped sum of absolute weights (not percentage of total).
+    # This rewards well-equipped listings instead of penalising ones where
+    # the description simply doesn't enumerate every possible feature.
+    bonus_weights_apt = {"multi_bath": 10, "high_floor_elevator": 8}
+    bonus_weights_house = {"multi_bath": 10, "high_floor_elevator": 0}
 
-    total_possible = 0
     earned = 0
     for key, _, apt_w, house_w in _FEATURE_PATTERNS:
         w = house_w if is_house else apt_w
-        total_possible += w
         if detected.get(key):
             earned += w
-    # Add bonus weights
     bw = bonus_weights_house if is_house else bonus_weights_apt
     for bkey, bweight in bw.items():
-        total_possible += bweight
         if detected.get(bkey):
             earned += bweight
 
-    score = round((earned / total_possible) * 100, 1) if total_possible > 0 else 0
+    score = min(100, round(earned, 1))
 
     # Build features list (only detected ones)
     features_found = [k for k, v in detected.items() if v]
@@ -2491,7 +2524,7 @@ def compute_property_score(listing_id, listing_type="sale"):
     table = _table_for(listing_type)
     conn = get_connection()
     row = conn.execute(
-        f"SELECT id, description, title, property_type, condition, bathrooms, floor "
+        f"SELECT id, description, title, property_type, condition, bathrooms, floor, feature_chips "
         f"FROM {table} WHERE id=?", (listing_id,)
     ).fetchone()
     conn.close()
@@ -2502,8 +2535,19 @@ def compute_property_score(listing_id, listing_type="sale"):
     desc = row["description"] or ""
     title = row["title"] or ""
 
-    # Skip if no description text to analyze
-    if len(desc.strip()) < 20 and len(title.strip()) < 5:
+    # Parse structured feature chips if present
+    chips = None
+    raw_chips = row["feature_chips"]
+    if raw_chips:
+        try:
+            parsed = json.loads(raw_chips)
+            if isinstance(parsed, list):
+                chips = [str(c) for c in parsed if c]
+        except (json.JSONDecodeError, TypeError):
+            chips = None
+
+    # Skip only if we have no text AND no chips to analyze
+    if len(desc.strip()) < 20 and len(title.strip()) < 5 and not chips:
         return {
             "property_score": None,
             "property_rating": None,
@@ -2513,7 +2557,7 @@ def compute_property_score(listing_id, listing_type="sale"):
 
     score, features = extract_property_features(
         desc, title, row["property_type"], row["condition"],
-        row["bathrooms"], row["floor"]
+        row["bathrooms"], row["floor"], feature_chips=chips
     )
 
     _house_kw = ("house", "moradia", "villa", "vivenda", "quinta", "moradia independente",
@@ -2545,8 +2589,8 @@ def compute_property_score(listing_id, listing_type="sale"):
         })
     # Add bonus features
     bonus_map = [
-        ("multi_bath", 5 if not is_house else 5, 5),
-        ("high_floor_elevator", 5 if not is_house else 0, 0),
+        ("multi_bath", 10, 10),
+        ("high_floor_elevator", 8, 0),
     ]
     for bkey, apt_bw, house_bw in bonus_map:
         bw = house_bw if is_house else apt_bw
