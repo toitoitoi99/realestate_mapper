@@ -595,6 +595,23 @@ def extract_from_dom(page: Page) -> dict:
     result["title"] = data.get("title")
     result["description"] = data.get("description")
 
+    # Preserve raw feature chips + key-value pairs for property_score scoring
+    raw_chips = []
+    for f in (data.get("features") or []):
+        if f and str(f).strip():
+            raw_chips.append(str(f).strip())
+    kv_labels = data.get("kvLabels") or []
+    kv_values = data.get("kvValues") or []
+    for label, value in zip(kv_labels, kv_values):
+        lbl = (label or "").strip()
+        val = (value or "").strip()
+        if lbl and val:
+            raw_chips.append(f"{lbl}: {val}")
+        elif lbl:
+            raw_chips.append(lbl)
+    if raw_chips:
+        result["feature_chips"] = raw_chips
+
     # Parse features for area, rooms, floor, condition
     for feat in (data.get("features") or []):
         fl = feat.lower()
@@ -761,6 +778,7 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
         images=json.dumps(images) if images else None,
         hash_dedupe=_hash(address, city, price, size),
         description=ld.get("description") or dom.get("description"),
+        feature_chips=json.dumps(dom.get("feature_chips")) if dom.get("feature_chips") else None,
         scraped_at=datetime.utcnow(),
     )
 
