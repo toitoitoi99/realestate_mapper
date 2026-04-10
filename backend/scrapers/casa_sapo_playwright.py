@@ -30,6 +30,7 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
+from urllib.parse import urlparse, parse_qs, unquote
 
 # Ensure backend root is on path when running directly
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -274,82 +275,119 @@ def extract_json_ld(page: Page) -> list:
     return results
 
 
+_RELEVANT_LD_TYPES = {
+    "RealEstateListing", "Product", "Residence", "Apartment", "House",
+    "SingleFamilyResidence", "Offer",
+}
+
+
+def _first_price(v) -> Optional[float]:
+    """Parse a price value that may be a string, number, or (as Casa Sapo does)
+    a single-element list of strings like ``['680.000 €']``."""
+    if isinstance(v, list):
+        v = v[0] if v else None
+    return _num(v)
+
+
 def extract_json_ld_listing(page: Page) -> dict:
-    """Extract listing data from JSON-LD schemas (Offer, Product, RealEstateListing)."""
+    """Extract listing data from JSON-LD schemas.
+
+    CASA SAPO emits an ``@type: "Offer"`` object whose ``availableAtOrFrom``
+    field carries the address and geo-coordinates. This function also still
+    supports the more standard RealEstateListing/Product/Apartment types for
+    robustness.
+    """
     items = extract_json_ld(page)
     result = {}
 
     for item in items:
         t = item.get("@type", "")
         types = t if isinstance(t, list) else [t]
+        if not any(tp in _RELEVANT_LD_TYPES for tp in types):
+            continue
 
-        # RealEstateListing or Product with real estate data
-        if any(tp in types for tp in ["RealEstateListing", "Product", "Residence",
-                                       "Apartment", "House", "SingleFamilyResidence"]):
-            # Price from offers
+        # Price — may be top-level, inside offers, or a list of strings w/ "€"
+        if not result.get("price"):
             offers = item.get("offers") or {}
             if isinstance(offers, list):
                 offers = offers[0] if offers else {}
-            price = _num(offers.get("price") or item.get("price"))
+            price = _first_price(
+                (offers.get("price") if isinstance(offers, dict) else None)
+                or item.get("price")
+            )
             if price:
                 result["price"] = price
 
-            # Description
-            desc = item.get("description")
-            if desc:
-                result["description"] = str(desc)[:1000]
+        # Description — prefer the first/longest across scripts
+        desc = item.get("description")
+        if desc and not result.get("description"):
+            # CASA SAPO injects "<br/>" tags inside descriptions
+            desc = re.sub(r"<br\s*/?>", "\n", str(desc))
+            result["description"] = desc[:1000]
 
-            # Name / title
-            name = item.get("name")
-            if name:
-                result["title"] = name
+        # Title / name
+        if item.get("name") and not result.get("title"):
+            result["title"] = str(item["name"])
 
-            # Images
-            images = item.get("image") or []
-            if isinstance(images, str):
-                images = [images]
-            elif isinstance(images, list):
-                images = [
-                    (i if isinstance(i, str) else i.get("url") or i.get("contentUrl"))
-                    for i in images if i
-                ]
-            result["images"] = [u for u in images if u and u.startswith("http")][:MAX_IMAGES]
+        # Images (may be a single string, an array, or ImageObject dicts)
+        images = item.get("image") or []
+        if isinstance(images, str):
+            images = [images]
+        elif isinstance(images, list):
+            images = [
+                (i if isinstance(i, str) else (i.get("url") or i.get("contentUrl")))
+                for i in images if i
+            ]
+        good_imgs = [u for u in images if u and isinstance(u, str) and u.startswith("http")]
+        if good_imgs and not result.get("images"):
+            result["images"] = good_imgs[:MAX_IMAGES]
 
-            # Floor size
-            floor_size = item.get("floorSize") or {}
-            if isinstance(floor_size, dict):
-                size = _num(floor_size.get("value"))
-                if size:
-                    result["size"] = size
+        # Floor size (rarely present on Casa Sapo but cheap to support)
+        floor_size = item.get("floorSize") or {}
+        if isinstance(floor_size, dict):
+            size = _num(floor_size.get("value"))
+            if size and not result.get("size"):
+                result["size"] = size
 
-            # Address
-            address_obj = item.get("address") or {}
-            if isinstance(address_obj, dict):
+        # Address can be at the top level, or nested under availableAtOrFrom.address
+        # CASA SAPO uses the nested Place form.
+        address_obj = item.get("address")
+        geo = item.get("geo")
+        available = item.get("availableAtOrFrom")
+        if isinstance(available, dict):
+            address_obj = address_obj or available.get("address")
+            geo = geo or available.get("geo")
+
+        if isinstance(address_obj, dict):
+            if not result.get("address") and address_obj.get("streetAddress"):
                 result["address"] = address_obj.get("streetAddress")
+            if not result.get("postal_code"):
                 result["postal_code"] = address_obj.get("postalCode")
+            # Casa Sapo puts city in addressLocality and the *neighborhood* in
+            # addressRegion — not a district. Use addressRegion as the
+            # neighborhood and keep the district empty so it falls back to
+            # "Lisboa" later.
+            if not result.get("city"):
                 result["city"] = address_obj.get("addressLocality")
-                result["district"] = address_obj.get("addressRegion")
+            if not result.get("neighborhood"):
+                result["neighborhood"] = address_obj.get("addressRegion")
 
-            # Geo coordinates
-            geo = item.get("geo") or {}
-            if isinstance(geo, dict):
-                result["lat"] = _coord(geo.get("latitude"))
-                result["lon"] = _coord(geo.get("longitude"))
+        if isinstance(geo, dict):
+            lat = _coord(geo.get("latitude"))
+            lon = _coord(geo.get("longitude"))
+            if lat is not None and not result.get("lat"):
+                result["lat"] = lat
+            if lon is not None and not result.get("lon"):
+                result["lon"] = lon
 
-            # Number of rooms/bedrooms
-            if item.get("numberOfRooms"):
-                result["rooms"] = _int(item["numberOfRooms"])
-                result["bedrooms"] = result["rooms"]
-            if item.get("numberOfBedrooms"):
-                result["bedrooms"] = _int(item["numberOfBedrooms"])
-            if item.get("numberOfBathroomsTotal"):
-                result["bathrooms"] = _int(item["numberOfBathroomsTotal"])
-
-        # Offer schema (standalone)
-        if "Offer" in types and not result.get("price"):
-            price = _num(item.get("price"))
-            if price:
-                result["price"] = price
+        # Rooms / bedrooms / bathrooms — generic fallbacks
+        if item.get("numberOfRooms") and not result.get("rooms"):
+            result["rooms"] = _int(item["numberOfRooms"])
+            result["bedrooms"] = result["rooms"]
+        if item.get("numberOfBedrooms") and not result.get("bedrooms"):
+            result["bedrooms"] = _int(item["numberOfBedrooms"])
+        if item.get("numberOfBathroomsTotal") and not result.get("bathrooms"):
+            result["bathrooms"] = _int(item["numberOfBathroomsTotal"])
 
     return result
 
@@ -357,67 +395,79 @@ def extract_json_ld_listing(page: Page) -> dict:
 # ── Search results: collect detail URLs ───────────────────────────────────────
 
 def extract_search_listings(page: Page) -> list:
-    """Extract listing URLs and preview prices from a search results page.
-    Returns list of dicts: {"url": str, "price": float|None}.
+    """Extract listing cards from a CASA SAPO search results page.
 
-    CASA SAPO uses server-rendered listing cards. We look for anchor links
-    that point to individual property pages."""
+    Returns list of dicts with:
+        url            — real detail URL (counter.aspx wrapper unwrapped)
+        source_id      — listing UUID (from onclick or from URL)
+        price          — preview price (float) or None
+        location       — breadcrumb-style location string from the card
+        property_type  — e.g. "Apartamento T4"
+        features_text  — raw "Recuperado  ·  107m²" card snippet
+    """
     try:
-        items = page.evaluate("""
+        items = page.evaluate(r"""
             () => {
                 const results = [];
                 const seen = new Set();
 
-                // CASA SAPO listing cards — try multiple selector patterns
-                // The site uses property cards with links to detail pages
-                const cards = document.querySelectorAll(
-                    '.property-list .property-info a[href], ' +
-                    '.searchResultProperty a[href], ' +
-                    'a[href*="/comprar-"][href*="-lisboa/"], ' +
-                    'a[href*="/arrendar-"][href*="-lisboa/"], ' +
-                    '.property a[href], ' +
-                    'article a[href], ' +
-                    '.result-item a[href]'
-                );
+                // Listing cards are <a class="property-info"> inside a
+                // .property-info-content wrapper. The wrapper also holds the
+                // sibling .property-price element.
+                const anchors = document.querySelectorAll('a.property-info[href]');
 
-                for (const a of cards) {
+                for (const a of anchors) {
                     const href = a.href;
-                    // Only detail pages — they contain a long numeric/alphanumeric ID
-                    // Skip search/category pages
                     if (!href || seen.has(href)) continue;
-                    if (href.includes('casa.sapo.pt') && href.match(/\\/[a-z]+-[a-z]+-[^/]+-[^/]+\\/[a-zA-Z0-9-]+$/)) {
-                        // Looks like a detail page URL
-                    } else if (href.match(/\\/detalhe\\//) || href.match(/[?&]id=/) || href.match(/\\/[0-9a-f]{20,}/)) {
-                        // Alternative URL patterns with ID
-                    } else {
-                        // Try to detect by structure: detail pages have specific path depth
-                        const path = new URL(href).pathname;
-                        const segments = path.split('/').filter(Boolean);
-                        // Detail pages typically have more segments than search pages
-                        if (segments.length < 3) continue;
-                    }
+
+                    // Skip obviously non-listing anchors (categories, footers…).
+                    // Listing anchors point to counter.aspx or directly to casa.sapo.pt
+                    // detail pages.
+                    const isCounter = href.includes('counter.aspx');
+                    const isDetail = /casa\.sapo\.pt\/(comprar|arrendar)-[^\/]+-.+\.html/.test(href);
+                    if (!isCounter && !isDetail) continue;
+
                     seen.add(href);
 
-                    // Try to grab the price from the card
-                    let priceText = null;
-                    const card = a.closest(
-                        '.property, article, .searchResultProperty, ' +
-                        '.result-item, .property-info, [class*="listing"], li'
-                    ) || a;
-                    const priceEl = card.querySelector(
-                        '.property-price, .price, [class*="price"], ' +
-                        '[class*="Price"], strong[class*="price"], ' +
-                        'span[class*="value"]'
-                    );
-                    if (priceEl) priceText = priceEl.textContent.trim();
+                    // Source ID from Search.setLastSearch('<uuid>')
+                    let sourceId = null;
+                    const onclick = a.getAttribute('onclick') || '';
+                    const oc = onclick.match(/setLastSearch\(\s*['"]([a-f0-9-]{16,})['"]/i);
+                    if (oc) sourceId = oc[1];
 
-                    results.push({ url: href, priceText: priceText });
+                    // Type / location / feature snippet from the card
+                    const typeEl = a.querySelector('.property-type');
+                    const locEl  = a.querySelector('.property-location');
+                    const featEl = a.querySelector('.property-features');
+
+                    // Price lives OUTSIDE the anchor, in the surrounding
+                    // .property-info-content wrapper.
+                    const wrapper = a.closest('.property-info-content')
+                                 || a.closest('[class*="property"]')
+                                 || a.parentElement;
+                    const priceEl = wrapper
+                        ? wrapper.querySelector('.property-price, [class*="price"]')
+                        : null;
+
+                    results.push({
+                        url: href,
+                        source_id: sourceId,
+                        priceText: priceEl ? priceEl.textContent.trim() : null,
+                        location: typeEl || locEl
+                            ? ((locEl && locEl.textContent.trim()) || null)
+                            : null,
+                        property_type: typeEl ? typeEl.textContent.trim() : null,
+                        features_text: featEl ? featEl.textContent.trim() : null,
+                    });
                 }
                 return results;
             }
         """)
-        # Parse prices
+        # Unwrap counter URLs and parse prices
         for item in items:
+            item["url"] = _unwrap_counter_url(item["url"])
+            if not item.get("source_id"):
+                item["source_id"] = _extract_source_id(item["url"])
             item["price"] = _num(item.pop("priceText", None))
         return items
     except Exception as e:
@@ -425,161 +475,143 @@ def extract_search_listings(page: Page) -> list:
         return []
 
 
-def _extract_source_id(url: str) -> str:
-    """Extract the CASA SAPO listing ID from URL.
+# CASA SAPO detail URL → embedded listing UUID
+#   /comprar-apartamento-t4-lisboa-alvalade-8227ac5a-0db8-11f1-9e61-060000000056.html
+_UUID_RE = re.compile(r"([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})")
 
-    CASA SAPO URLs look like:
-        /comprar-apartamento-t2-lisboa-arroios/XXXXXXXX
-        /comprar-apartamento-t3-.../abc123def456
 
-    The last path segment is typically the unique listing ID."""
+def _unwrap_counter_url(url: str) -> str:
+    """Casa Sapo wraps every listing link in a gespub.casa.sapo.pt/counter.aspx
+    tracker with the real URL in the `l=` query param. Unwrap it so navigation
+    hits the detail page directly (and bypasses the 'Site Offline' interstitial).
+    """
+    if not url or "counter.aspx" not in url:
+        return url
     try:
-        path = url.rstrip("/").split("?")[0]
-        segments = path.split("/")
-        if segments:
-            last = segments[-1]
-            # The last segment is the ID (alphanumeric, possibly with hyphens)
-            if last and len(last) >= 6:
-                return last
+        qs = parse_qs(urlparse(url).query)
+        raw = qs.get("l", [None])[0]
+        if not raw:
+            return url
+        # parse_qs returns the value already decoded once; if it still looks
+        # percent-encoded, decode again.
+        real = unquote(raw) if "%" in raw else raw
+        return real if real.startswith("http") else url
+    except Exception:
+        return url
+
+
+def _extract_source_id(url: str) -> str:
+    """Extract the CASA SAPO listing UUID from a detail URL.
+
+    Handles both direct casa.sapo.pt detail URLs and counter.aspx wrapper URLs.
+    Real detail URLs look like:
+        https://casa.sapo.pt/comprar-apartamento-t4-lisboa-alvalade-
+            8227ac5a-0db8-11f1-9e61-060000000056.html
+    where the 36-char UUID before `.html` is the unique listing ID.
+    """
+    real = _unwrap_counter_url(url)
+    # Try UUID match first (most reliable)
+    m = _UUID_RE.search(real)
+    if m:
+        return m.group(1)
+    # Fallback: strip query / fragment and use the last path segment
+    try:
+        path = real.split("?")[0].split("#")[0].rstrip("/")
+        last = path.split("/")[-1]
+        # Strip trailing .html
+        if last.endswith(".html"):
+            last = last[:-5]
+        # Avoid degenerate values like "counter.aspx"
+        if last and len(last) >= 8 and last not in ("counter.aspx", "counter"):
+            return last
     except Exception:
         pass
-    # Fallback: hash the URL
-    return hashlib.sha1(url.encode()).hexdigest()[:16]
+    return hashlib.sha1(real.encode()).hexdigest()[:16]
 
 
 # ── Detail page extraction from DOM ──────────────────────────────────────────
 
+def _parse_typology(text: str) -> Optional[int]:
+    """Extract the bedroom count from a typology string like ``T3`` or
+    ``Apartamento T4 +1``. Returns None if no ``T<digit>`` pattern is found.
+    Crucially this does NOT fall back to ``_int()``, which would pick up the
+    first number in the string (e.g. a price) when the typology is missing."""
+    if not text:
+        return None
+    m = re.search(r"\bT(\d+)\b", text)
+    return int(m.group(1)) if m else None
+
+
 def extract_from_dom(page: Page) -> dict:
     """Extract listing data from DOM elements on a CASA SAPO detail page.
 
-    CASA SAPO is server-rendered (eGO Real Estate platform) with no __NEXT_DATA__.
-    Data is in standard HTML elements: price, features list, description, gallery."""
+    CASA SAPO is server-rendered (eGO Real Estate platform). The detail page
+    uses ``.detail-*`` classes:
+        .detail-title-price-value   — price, e.g. "680.000 €"
+        .detail-title-location      — "Alvalade, Lisboa, Distrito de Lisboa"
+        .detail-main-features-item  — title/value pairs (Área útil, Estado, …)
+        .detail-features            — additional characteristics block
+        .detail-description-text    — long description
+    """
     result = {}
 
     try:
         data = page.evaluate(r"""
             () => {
                 const out = {};
+                const txt = (el) => el ? el.textContent.trim() : null;
 
-                // Title — typically h1 or prominent heading
-                const titleEl = document.querySelector(
-                    'h1, .property-title, [class*="title"] h1, ' +
-                    '.detail-title, .property-detail h1'
-                );
-                if (titleEl) out.title = titleEl.textContent.trim();
+                // Title
+                out.title = txt(document.querySelector('h1'));
 
-                // Price — prominent element
-                const priceEl = document.querySelector(
-                    '.property-price, .detail-price, [class*="price"] .value, ' +
-                    '[class*="Price"], .price, [class*="price"]:not(nav *), ' +
-                    'span[class*="price"], strong[class*="price"], ' +
-                    'h2[class*="price"], .property-value'
-                );
-                if (priceEl) out.priceText = priceEl.textContent.trim();
+                // Price
+                out.priceText = txt(document.querySelector(
+                    '.detail-title-price-value, .detail-fixed-navbar-price'
+                ));
 
-                // Features/characteristics — look for structured feature lists
-                const featureEls = document.querySelectorAll(
-                    '.property-features li, .detail-features li, ' +
-                    '.property-info li, [class*="feature"] li, ' +
-                    '.characteristics li, [class*="characteristic"] li, ' +
-                    '.property-details li, .detail-info li'
-                );
-                out.features = Array.from(featureEls).map(el => el.textContent.trim());
+                // Location line — "Neighborhood, City[, District]"
+                out.location = txt(document.querySelector('.detail-title-location'));
 
-                // Also look for labeled key-value pairs
-                const kvPairs = document.querySelectorAll(
-                    'dt, .label, [class*="label"]'
-                );
-                const kvValues = document.querySelectorAll(
-                    'dd, .value, [class*="value"]'
-                );
-                out.kvLabels = Array.from(kvPairs).map(el => el.textContent.trim());
-                out.kvValues = Array.from(kvValues).map(el => el.textContent.trim());
+                // Main features — title/value pairs in .detail-main-features-item
+                const mainFeatures = Array.from(
+                    document.querySelectorAll('.detail-main-features-item')
+                ).map(el => ({
+                    title: txt(el.querySelector('.detail-main-features-item-title')),
+                    value: txt(el.querySelector('.detail-main-features-item-value')),
+                }));
+                out.mainFeatures = mainFeatures;
+
+                // Extra characteristics block — free-form lines
+                const detailSection = document.querySelector('.detail-features');
+                out.detailFeaturesText = detailSection
+                    ? detailSection.textContent.replace(/\s+/g, ' ').trim().slice(0, 3000)
+                    : null;
 
                 // Description
-                const descEl = document.querySelector(
-                    '.property-description, .detail-description, ' +
-                    '[class*="description"] p, [class*="description"], ' +
-                    '.comment p, [class*="comment"] p'
-                );
-                if (descEl) out.description = descEl.textContent.trim().slice(0, 1000);
+                out.description = txt(document.querySelector(
+                    '.detail-description-text, .detail-description'
+                ));
+                if (out.description) out.description = out.description.slice(0, 1000);
 
-                // Address / location
-                const addrEl = document.querySelector(
-                    '.property-location, .detail-location, ' +
-                    '[class*="location"], .address, [class*="address"]'
-                );
-                if (addrEl) out.address = addrEl.textContent.trim();
-
-                // Breadcrumbs
-                const breadcrumbs = document.querySelectorAll(
-                    'nav.breadcrumb a, .breadcrumb a, [class*="breadcrumb"] a, ' +
-                    'ol.breadcrumb li a, ul.breadcrumb li a'
-                );
-                out.breadcrumbs = Array.from(breadcrumbs).map(a => a.textContent.trim());
-
-                // Images — gallery/carousel
+                // Images — gallery / carousel
                 const imgs = document.querySelectorAll(
-                    '.property-gallery img, .detail-gallery img, ' +
-                    '[class*="gallery"] img, [class*="carousel"] img, ' +
-                    '.property-photos img, [class*="slider"] img, ' +
-                    '.photo-gallery img, picture img'
+                    '.detail-main-gallery img, .property-gallery img, ' +
+                    '[class*="gallery"] img, [class*="swiper"] img, picture img'
                 );
-                out.images = Array.from(imgs)
-                    .map(i => i.src || i.dataset.src || i.getAttribute('data-lazy') || '')
-                    .filter(s => s.startsWith('http'));
-
-                // Coordinates — from map iframe, data attributes, or inline scripts
-                const mapEl = document.querySelector(
-                    '[data-lat], [data-latitude], iframe[src*="maps"], ' +
-                    '#map, .property-map, [class*="map"]'
-                );
-                if (mapEl) {
-                    const lat = mapEl.dataset.lat || mapEl.dataset.latitude ||
-                                mapEl.getAttribute('data-lat') || mapEl.getAttribute('data-latitude');
-                    const lon = mapEl.dataset.lon || mapEl.dataset.lng ||
-                                mapEl.dataset.longitude ||
-                                mapEl.getAttribute('data-lon') || mapEl.getAttribute('data-lng') ||
-                                mapEl.getAttribute('data-longitude');
-                    if (lat) out.lat = lat;
-                    if (lon) out.lon = lon;
-                }
-
-                // Try coordinates from inline scripts
-                if (!out.lat) {
-                    const scripts = document.querySelectorAll('script:not([src])');
-                    for (const s of scripts) {
-                        const t = s.textContent || '';
-                        // Look for lat/lng patterns in JS
-                        const latMatch = t.match(/[Ll]at(?:itude)?\s*[:=]\s*([-]?\d+\.\d+)/);
-                        const lonMatch = t.match(/[Ll](?:on|ng|ongitude)\s*[:=]\s*([-]?\d+\.\d+)/);
-                        if (latMatch && lonMatch) {
-                            out.lat = latMatch[1];
-                            out.lon = lonMatch[1];
-                            break;
-                        }
-                        // Google Maps center pattern
-                        const centerMatch = t.match(/center=([-\d.]+)%2C([-\d.]+)/);
-                        if (centerMatch) {
-                            out.lat = centerMatch[1];
-                            out.lon = centerMatch[2];
-                            break;
-                        }
-                        // LatLng constructor
-                        const latlngMatch = t.match(/LatLng\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)/);
-                        if (latlngMatch) {
-                            out.lat = latlngMatch[1];
-                            out.lon = latlngMatch[2];
-                            break;
-                        }
+                const seenSrc = new Set();
+                out.images = [];
+                for (const i of imgs) {
+                    const src = i.src || i.dataset.src || i.getAttribute('data-lazy') || '';
+                    if (src.startsWith('http') && !seenSrc.has(src)) {
+                        seenSrc.add(src);
+                        out.images.push(src);
                     }
                 }
 
-                // Try to find area/rooms/typology from any structured data on the page
-                const allText = document.body ? document.body.innerText : '';
-                // Look for typology T0-T9+
-                const typoMatch = allText.match(/\b(T\d\+?)\b/);
-                if (typoMatch) out.typology = typoMatch[1];
+                // Breadcrumbs (rarely present but useful fallback)
+                out.breadcrumbs = Array.from(document.querySelectorAll(
+                    '.breadcrumb a, [class*="breadcrumb"] a'
+                )).map(a => a.textContent.trim()).filter(t => t.length);
 
                 return out;
             }
@@ -588,148 +620,198 @@ def extract_from_dom(page: Page) -> dict:
         log.warning(f"  DOM extraction JS failed: {e}")
         return result
 
-    # Parse extracted data
     if data.get("priceText"):
         result["price"] = _num(data["priceText"])
 
-    result["title"] = data.get("title")
-    result["description"] = data.get("description")
-
-    # Parse features for area, rooms, floor, condition
-    for feat in (data.get("features") or []):
-        fl = feat.lower()
-        if "m²" in feat or "m2" in fl:
-            m = re.search(r"([\d.,]+)\s*m", feat)
-            if m:
-                val = _num(m.group(1))
-                if "brut" in fl:
-                    result["gross_area"] = val
-                    if not result.get("size"):
-                        result["size"] = val
-                elif "útil" in fl or "util" in fl:
-                    result["size"] = val
-                else:
-                    if not result.get("size"):
-                        result["size"] = val
-        elif re.match(r"T\d", feat.strip()):
-            rooms = _int(feat)
+    if data.get("title"):
+        result["title"] = data["title"]
+        # Pull typology straight from the H1, which reliably contains e.g.
+        # "Apartamento T4 para comprar em Lisboa"
+        rooms = _parse_typology(data["title"])
+        if rooms is not None:
             result["rooms"] = rooms
             result["bedrooms"] = rooms
-        elif "quarto" in fl:
-            rooms = _int(feat)
-            if rooms:
-                result["bedrooms"] = rooms
-                if not result.get("rooms"):
-                    result["rooms"] = rooms
-        elif "casa de banho" in fl or "wc" in fl:
-            result["bathrooms"] = _int(feat)
-        elif "andar" in fl or "piso" in fl:
-            m = re.search(r"(\d+)", feat)
-            if m:
-                result["floor"] = m.group(1)
-            elif "rés" in fl or "r/c" in fl:
-                result["floor"] = "0"
-        elif any(w in fl for w in ["renovado", "remodelado", "novo", "bom estado",
-                                    "usado", "para recuperar", "em construção"]):
-            result["condition"] = _normalize_condition(feat)
+        # Property type from title
+        tl = data["title"].lower()
+        for pt in ["apartamento", "moradia", "vivenda", "loft", "duplex",
+                   "penthouse", "estúdio", "loja", "terreno", "escritório",
+                   "garagem", "armazém", "prédio"]:
+            if pt in tl:
+                result["property_type"] = _normalize_property_type(pt)
+                break
 
-    # Parse key-value pairs
-    labels = data.get("kvLabels") or []
-    values = data.get("kvValues") or []
-    for label, value in zip(labels, values):
-        ll = label.lower()
-        if "área" in ll or "area" in ll:
-            if "brut" in ll:
-                result["gross_area"] = _num(value)
-            elif "útil" in ll or "util" in ll:
-                result["size"] = _num(value)
-            elif not result.get("size"):
-                result["size"] = _num(value)
-        elif "tipologia" in ll or "quarto" in ll:
-            rooms = _int(value)
+    if data.get("description"):
+        result["description"] = data["description"]
+
+    # Main features (Área útil / Área bruta / Estado / …)
+    for feat in (data.get("mainFeatures") or []):
+        title = (feat.get("title") or "").strip()
+        value = (feat.get("value") or "").strip()
+        if not title or not value:
+            continue
+        tl = title.lower()
+        vl = value.lower()
+
+        if "área" in tl or "area" in tl:
+            size = _num(value)
+            if size:
+                if "brut" in tl:
+                    result["gross_area"] = size
+                    if not result.get("size"):
+                        result["size"] = size
+                else:  # "útil" or bare "Área"
+                    result["size"] = size
+        elif "estado" in tl or "condi" in tl:
+            result["condition"] = _normalize_condition(value)
+        elif "tipologia" in tl:
+            rooms = _parse_typology(value) or _int(value)
             if rooms is not None:
                 result["rooms"] = rooms
                 result["bedrooms"] = rooms
-        elif "casa de banho" in ll or "wc" in ll:
-            result["bathrooms"] = _int(value)
-        elif "andar" in ll or "piso" in ll:
+        elif "andar" in tl or "piso" in tl:
             m = re.search(r"(\d+)", value)
             if m:
                 result["floor"] = m.group(1)
-            elif "rés" in value.lower() or "r/c" in value.lower():
+            elif "rés" in vl or "r/c" in vl:
                 result["floor"] = "0"
-        elif "estado" in ll or "condição" in ll or "condicao" in ll:
-            result["condition"] = _normalize_condition(value)
 
-    # Typology from page text
-    if not result.get("rooms") and data.get("typology"):
-        rooms = _int(data["typology"])
-        result["rooms"] = rooms
-        result["bedrooms"] = rooms
+    # Extra characteristics — scan once for bathroom / floor info
+    details_text = (data.get("detailFeaturesText") or "").lower()
+    if details_text:
+        if not result.get("bathrooms"):
+            m = re.search(r"casa\(?s?\)?\s*de\s*banho[:\s]*(\d+)", details_text)
+            if m:
+                result["bathrooms"] = int(m.group(1))
+        if not result.get("floor"):
+            m = re.search(r"andar[:\s]*(\d+)", details_text)
+            if m:
+                result["floor"] = m.group(1)
 
-    # Address
-    if data.get("address"):
-        result["address"] = data["address"]
+    # Location — "Neighborhood, City, District"
+    loc = data.get("location")
+    if loc:
+        parts = [p.strip() for p in loc.split(",") if p.strip()]
+        if parts:
+            result["neighborhood"] = parts[0]
+        if len(parts) >= 2:
+            result["city"] = parts[1]
+        if len(parts) >= 3:
+            result["district"] = parts[2]
 
-    # Location from breadcrumbs: typically [Home, District, City/Concelho, Freguesia, ...]
-    breadcrumbs = data.get("breadcrumbs") or []
-    if len(breadcrumbs) >= 3:
-        result["district"] = breadcrumbs[1] if len(breadcrumbs) > 1 else None
-        result["city"] = breadcrumbs[2] if len(breadcrumbs) > 2 else None
-        result["neighborhood"] = breadcrumbs[3] if len(breadcrumbs) > 3 else None
+    # Breadcrumb fallback
+    if not result.get("neighborhood"):
+        breadcrumbs = data.get("breadcrumbs") or []
+        if len(breadcrumbs) >= 3:
+            result["district"] = result.get("district") or breadcrumbs[1]
+            result["city"] = result.get("city") or breadcrumbs[2]
+            if len(breadcrumbs) > 3:
+                result["neighborhood"] = breadcrumbs[3]
 
-    # Coordinates
-    if data.get("lat"):
-        result["lat"] = _coord(data["lat"])
-    if data.get("lon"):
-        result["lon"] = _coord(data["lon"])
-
-    # Images
     if data.get("images"):
         result["images"] = data["images"][:MAX_IMAGES]
-
-    # Property type from title
-    title = (result.get("title") or "").lower()
-    for pt in ["apartamento", "moradia", "vivenda", "loja", "terreno",
-               "escritório", "garagem", "armazém", "prédio"]:
-        if pt in title:
-            result["property_type"] = _normalize_property_type(pt)
-            break
 
     return result
 
 
 # ── Detail page scraper ───────────────────────────────────────────────────────
 
-def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Optional[Listing]:
-    """Visit a listing detail page and return a Listing object."""
+def _parse_card_features(text: Optional[str]) -> dict:
+    """Parse a search-card feature string like "Recuperado  ·  107m²" into
+    a partial result dict."""
+    out: dict = {}
+    if not text:
+        return out
+    for part in re.split(r"[·•|]", text):
+        p = part.strip()
+        if not p:
+            continue
+        pl = p.lower()
+        if "m²" in p or "m2" in pl:
+            m = re.search(r"([\d.,]+)\s*m", p)
+            if m:
+                out["size"] = _num(m.group(1))
+        elif any(w in pl for w in ["renovado", "recuperado", "remodelado", "novo",
+                                    "bom estado", "usado", "para recuperar",
+                                    "em construção"]):
+            out["condition"] = _normalize_condition(p)
+    return out
+
+
+def scrape_detail_page(
+    page: Page,
+    url: str,
+    listing_type: str = 'sale',
+    hint: Optional[dict] = None,
+) -> Optional[Listing]:
+    """Visit a listing detail page and return a Listing object.
+
+    ``hint`` — optional dict of values already harvested from the search card
+    (``location``, ``property_type``, ``features_text``, ``price``,
+    ``source_id``). These fill in anything the detail-page extraction misses.
+    """
     from models import detect_listing_type
     listing_type = detect_listing_type(url, fallback=listing_type)
+    hint = hint or {}
 
-    source_id = _extract_source_id(url)
+    source_id = hint.get("source_id") or _extract_source_id(url)
 
-    # Try JSON-LD first (CASA SAPO often has Offer/Product schemas)
+    # Always try both JSON-LD and DOM — they cover different fields on Casa Sapo.
     ld = extract_json_ld_listing(page)
+    dom = extract_from_dom(page)
 
-    # DOM fallback if JSON-LD didn't yield a price
-    dom = extract_from_dom(page) if not ld.get("price") else {}
+    # Merge card hints (location, features, card price) into the result.
+    hint_loc_parts = []
+    if hint.get("location"):
+        hint_loc_parts = [p.strip() for p in hint["location"].split(",") if p.strip()]
+    card_feat = _parse_card_features(hint.get("features_text"))
 
-    # If JSON-LD had price but DOM might have more fields, still try DOM
-    if ld.get("price") and not ld.get("rooms"):
-        dom = extract_from_dom(page)
+    def pick(*vals):
+        for v in vals:
+            if v not in (None, ""):
+                return v
+        return None
 
-    price      = ld.get("price")      or dom.get("price")
-    size       = ld.get("size")       or dom.get("size")
-    gross_area = ld.get("gross_area") or dom.get("gross_area")
-    lat        = ld.get("lat")        or dom.get("lat")
-    lon        = ld.get("lon")        or dom.get("lon")
-    address    = ld.get("address")    or dom.get("address")
-    postal     = ld.get("postal_code") or dom.get("postal_code")
-    city       = ld.get("city")       or dom.get("city") or "Lisboa"
-    district   = ld.get("district")   or dom.get("district") or "Lisboa"
-    bedrooms   = ld.get("bedrooms")   or dom.get("bedrooms")
-    floor      = ld.get("floor")      or dom.get("floor")
-    images     = ld.get("images")     or dom.get("images") or []
+    price      = pick(ld.get("price"), dom.get("price"), hint.get("price"))
+    size       = pick(ld.get("size"), dom.get("size"), card_feat.get("size"))
+    gross_area = pick(ld.get("gross_area"), dom.get("gross_area"))
+    lat        = pick(ld.get("lat"), dom.get("lat"))
+    lon        = pick(ld.get("lon"), dom.get("lon"))
+    address    = pick(ld.get("address"), dom.get("address"))
+    postal     = pick(ld.get("postal_code"), dom.get("postal_code"))
+
+    neighborhood = pick(
+        dom.get("neighborhood"),
+        ld.get("neighborhood"),
+        hint_loc_parts[0] if hint_loc_parts else None,
+    )
+    city = pick(
+        dom.get("city"),
+        ld.get("city"),
+        hint_loc_parts[1] if len(hint_loc_parts) > 1 else None,
+        "Lisboa",
+    )
+    district = pick(
+        dom.get("district"),
+        ld.get("district"),
+        hint_loc_parts[2] if len(hint_loc_parts) > 2 else None,
+        "Lisboa",
+    )
+
+    rooms    = pick(ld.get("rooms"), dom.get("rooms"),
+                    _parse_typology(hint.get("property_type")))
+    bedrooms = pick(ld.get("bedrooms"), dom.get("bedrooms"), rooms)
+    bathrooms = pick(ld.get("bathrooms"), dom.get("bathrooms"))
+    floor     = pick(ld.get("floor"), dom.get("floor"))
+    condition = pick(
+        dom.get("condition"), ld.get("condition"), card_feat.get("condition")
+    )
+    property_type = pick(
+        dom.get("property_type"),
+        ld.get("property_type"),
+        _normalize_property_type(hint.get("property_type")) if hint.get("property_type") else None,
+    )
+    title = pick(dom.get("title"), ld.get("title"))
+    images = ld.get("images") or dom.get("images") or []
 
     price_per_sqm = round(price / size, 2) if price and size and size > 0 else None
 
@@ -743,16 +825,16 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
         price_per_sqm=price_per_sqm,
         size_sqm=size,
         gross_area_sqm=gross_area,
-        rooms=ld.get("rooms") or dom.get("rooms"),
+        rooms=rooms,
         bedrooms=bedrooms,
-        bathrooms=ld.get("bathrooms") or dom.get("bathrooms"),
+        bathrooms=bathrooms,
         floor=floor,
-        property_type=ld.get("property_type") or dom.get("property_type"),
-        condition=ld.get("condition") or dom.get("condition"),
-        title=ld.get("title") or dom.get("title"),
+        property_type=property_type,
+        condition=condition,
+        title=title,
         address=address,
         postal_code=postal,
-        neighborhood=ld.get("neighborhood") or dom.get("neighborhood"),
+        neighborhood=neighborhood,
         parish=None,
         district=district,
         city=city,
@@ -900,11 +982,12 @@ def run_scraper(
         log.info(f"Total listings collected from search: {len(all_search_items)}")
 
         # ── Filter: skip known listings whose price hasn't changed ────────────
-        urls_to_scrape = []
+        items_to_scrape = []
         seen_source_ids = set()
         price_changed = 0
         for item in all_search_items:
-            sid = _extract_source_id(item["url"])
+            sid = item.get("source_id") or _extract_source_id(item["url"])
+            item["source_id"] = sid
             if sid:
                 seen_source_ids.add(sid)
             if sid in known_listings:
@@ -914,26 +997,27 @@ def run_scraper(
                 if not new_price or not old_price or abs(new_price - old_price) > 1:
                     if new_price and old_price:
                         log.info(f"  Price changed for {sid}: {old_price} -> {new_price}")
-                    urls_to_scrape.append(item["url"])
+                    items_to_scrape.append(item)
                     price_changed += 1
                 else:
                     skipped_known += 1
             else:
-                urls_to_scrape.append(item["url"])
+                items_to_scrape.append(item)
 
         log.info(
             f"Skipping {skipped_known} unchanged listings, "
             f"{price_changed} price changes to update, "
-            f"{len(urls_to_scrape) - price_changed} new to scrape"
+            f"{len(items_to_scrape) - price_changed} new to scrape"
         )
 
         # ── Visit each detail page ────────────────────────────────────────────
-        for i, detail_url in enumerate(urls_to_scrape):
+        for i, item in enumerate(items_to_scrape):
             if total_pushed >= max_items:
                 log.info(f"Reached max_items={max_items}. Stopping.")
                 break
 
-            log.info(f"[{i+1}/{len(urls_to_scrape)}] {detail_url}")
+            detail_url = item["url"]  # already unwrapped by extract_search_listings
+            log.info(f"[{i+1}/{len(items_to_scrape)}] {detail_url}")
 
             try:
                 if not _goto_with_retry(page, detail_url):
@@ -944,13 +1028,16 @@ def run_scraper(
                 # Wait for content to be available
                 try:
                     page.wait_for_selector(
-                        "script[type='application/ld+json'], h1, .property-price",
+                        "script[type='application/ld+json'], h1, "
+                        ".detail-title-price-value",
                         timeout=8000
                     )
                 except PWTimeout:
                     pass
 
-                listing = scrape_detail_page(page, detail_url, listing_type=listing_type)
+                listing = scrape_detail_page(
+                    page, detail_url, listing_type=listing_type, hint=item
+                )
 
                 if listing is None or listing.price_amount is None:
                     log.warning(f"  No price extracted — skipping")
