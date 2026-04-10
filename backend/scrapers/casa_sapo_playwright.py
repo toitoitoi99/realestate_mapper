@@ -68,8 +68,8 @@ BLOCKED_RETRIES = 3
 BLOCKED_WAIT = 8
 
 # Delay between page visits (seconds)
-MIN_DELAY = 2.5
-MAX_DELAY = 5.5
+MIN_DELAY = 8.0
+MAX_DELAY = 15.0
 
 PROFILE_DIR = Path(__file__).parent.parent / "data" / "browser_profile_casa_sapo"
 
@@ -202,8 +202,9 @@ def _goto_with_retry(page: "Page", url: str, retries: int = BLOCKED_RETRIES) -> 
                         return True
                 if not _is_blocked(page):
                     return True
-            except Exception:
+            except Exception as e:
                 # Catch net::ERR_ABORTED etc. from reload during meta-refresh
+                log.warning(f"  Reload failed: {e}")
                 pass
         else:
             log.warning(f"  Blocked after {retries} attempts: {url}")
@@ -623,6 +624,24 @@ def extract_from_dom(page: Page) -> dict:
     if data.get("priceText"):
         result["price"] = _num(data["priceText"])
 
+    # Preserve raw feature chips (title/value pairs from .detail-main-features-item
+    # plus the free-form .detail-features block) for property_score scoring.
+    raw_chips = []
+    for feat in (data.get("mainFeatures") or []):
+        title = (feat.get("title") or "").strip()
+        value = (feat.get("value") or "").strip()
+        if title and value:
+            raw_chips.append(f"{title}: {value}")
+        elif title:
+            raw_chips.append(title)
+        elif value:
+            raw_chips.append(value)
+    details_text_raw = (data.get("detailFeaturesText") or "").strip()
+    if details_text_raw:
+        raw_chips.append(details_text_raw)
+    if raw_chips:
+        result["feature_chips"] = raw_chips
+
     if data.get("title"):
         result["title"] = data["title"]
         # Pull typology straight from the H1, which reliably contains e.g.
@@ -843,6 +862,7 @@ def scrape_detail_page(
         images=json.dumps(images) if images else None,
         hash_dedupe=_hash(address, city, price, size),
         description=ld.get("description") or dom.get("description"),
+        feature_chips=json.dumps(dom.get("feature_chips")) if dom.get("feature_chips") else None,
         scraped_at=datetime.utcnow(),
     )
 

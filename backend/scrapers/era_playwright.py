@@ -221,6 +221,124 @@ def accept_cookies(page: Page):
             continue
 
 
+# ── API-first Listing builder ─────────────────────────────────────────────────
+
+def _pt_decimal(v) -> Optional[float]:
+    """Parse an era.pt API decimal string like '38,75354' → 38.75354."""
+    if v is None:
+        return None
+    try:
+        return float(str(v).replace(",", "."))
+    except (ValueError, TypeError):
+        return None
+
+
+def _build_listing_from_api(prop: dict) -> Optional[Listing]:
+    """Build a Listing directly from a /API/ServicesModule/Property/Search entry.
+
+    The ERA Property/Search JSON is rich enough that we can fully populate a
+    Listing without visiting the detail page. Fields that aren't in the API
+    (description, condition) are left as None — they can be hydrated later by
+    a separate, opt-in detail-page pass.
+    """
+    if not isinstance(prop, dict):
+        return None
+
+    detail_url = prop.get("DetailUrl")
+    if not detail_url:
+        return None
+
+    # Prefer the dealer-visible reference (matches the trailing slug on the
+    # DetailUrl). Fall back to the numeric internal Id.
+    source_id = prop.get("Reference") or str(prop.get("Id") or "").strip()
+    if not source_id:
+        # Last resort: derive a stable id from the URL path
+        source_id = _extract_source_id(detail_url)
+
+    # BusinessType drives sale vs rent; trust the API over the caller hint.
+    bt = prop.get("BusinessType") or []
+    bt_id = None
+    if bt and isinstance(bt, list) and isinstance(bt[0], dict):
+        bt_id = bt[0].get("Id")
+    listing_type = "rent" if bt_id == 2 else "sale"
+
+    # Price object depends on whether it's sale or rent
+    if listing_type == "sale":
+        price_obj = prop.get("SellPrice") or {}
+    else:
+        price_obj = prop.get("RentPrice") or {}
+    price = _num((price_obj or {}).get("Value"))
+
+    size = _num(prop.get("NetArea"))
+    gross = _num(prop.get("ListingArea"))
+
+    lat = _pt_decimal(prop.get("Lat"))
+    lon = _pt_decimal(prop.get("Lng"))
+    # Bound-check
+    if lat is not None and not (-90 <= lat <= 90):
+        lat = None
+    if lon is not None and not (-180 <= lon <= 180):
+        lon = None
+
+    address = prop.get("Localization") or None
+    neighborhood = None
+    city = "Lisboa"
+    if address:
+        parts = [p.strip() for p in address.split(",") if p.strip()]
+        if parts:
+            neighborhood = parts[0] or None
+        if len(parts) >= 2:
+            city = parts[-1] or city
+
+    images = []
+    for g in (prop.get("Gallery") or [])[:MAX_IMAGES]:
+        if isinstance(g, dict):
+            u = g.get("Url")
+            if u:
+                images.append(u)
+
+    status = "sold" if prop.get("IsSold") else "active"
+
+    price_per_sqm = round(price / size, 2) if price and size and size > 0 else None
+
+    title = prop.get("Title") or None
+    floor = prop.get("Floor") or None
+    # Prefer PropertySubType.Name ("Apartamento", "Moradia", "Duplex", ...)
+    sub = prop.get("PropertySubType") or {}
+    prop_type_raw = (sub or {}).get("Name") or prop.get("PropertyType")
+
+    return Listing(
+        source="era",
+        source_id=str(source_id),
+        url=detail_url,
+        listing_type=listing_type,
+        status=status,
+        price_amount=price,
+        price_per_sqm=price_per_sqm,
+        size_sqm=size,
+        gross_area_sqm=gross,
+        rooms=_int(prop.get("Rooms")),
+        bedrooms=None,
+        bathrooms=_int(prop.get("Wcs")),
+        floor=str(floor) if floor else None,
+        property_type=_normalize_property_type(prop_type_raw),
+        condition=None,
+        title=title,
+        address=address,
+        postal_code=None,
+        neighborhood=neighborhood,
+        parish=None,
+        district="Lisboa",
+        city=city,
+        lat=lat,
+        lon=lon,
+        images=json.dumps(images) if images else None,
+        hash_dedupe=_hash(address, city, price, size),
+        description=None,
+        scraped_at=datetime.utcnow(),
+    )
+
+
 # ── JSON-LD extraction ────────────────────────────────────────────────────────
 
 def extract_json_ld(page: Page) -> dict:
@@ -640,6 +758,22 @@ def extract_from_dom(page: Page) -> dict:
             elif not result.get("gross_area") and val != result.get("size"):
                 result["gross_area"] = val
 
+    # Preserve raw chips + key-value pairs for property_score scoring
+    raw_chips = []
+    for f in (data.get("features") or []):
+        if f and str(f).strip():
+            raw_chips.append(str(f).strip())
+    kv_texts = data.get("kvTexts") or []
+    for i in range(0, len(kv_texts) - 1, 2):
+        k = (kv_texts[i] or "").strip()
+        v = (kv_texts[i + 1] or "").strip() if i + 1 < len(kv_texts) else ""
+        if k and v:
+            raw_chips.append(f"{k}: {v}")
+        elif k:
+            raw_chips.append(k)
+    if raw_chips:
+        result["feature_chips"] = raw_chips
+
     # Parse features list
     for feat in (data.get("features") or []):
         fl = feat.lower()
@@ -802,6 +936,7 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
         images=json.dumps(images) if images else None,
         hash_dedupe=_hash(address, city, price, size),
         description=ld.get("description") or dom.get("description"),
+        feature_chips=json.dumps(dom.get("feature_chips")) if dom.get("feature_chips") else None,
         scraped_at=datetime.utcnow(),
     )
 
@@ -907,120 +1042,215 @@ def run_scraper(
         _polite_delay()
 
         # ── Collect listings from search pages ─────────────────────────────
-        all_search_items = []  # type: list
-        seen_urls = set()  # type: set
+        #
+        # era.pt is a React SPA. `?pag=N` in the URL is IGNORED — every value
+        # renders page 1. Instead, pagination is driven by clicking the
+        # `Seguinte` button inside `div.pagination`, which fires a POST to
+        # /API/ServicesModule/Property/Search with {"page": N, ...}. We
+        # intercept that response and build full `Listing` objects straight
+        # from the JSON — no detail-page scraping needed. This is both fast
+        # and avoids the bogus DOM price-parsing that plagued earlier runs.
+        all_listings = []  # type: list[Listing]
+        seen_source_ids_api = set()  # dedupe by source_id across pages
         blocked_count = 0
 
-        for page_num in range(1, max_pages + 1):
-            page_url = build_page_url(search_url, page_num)
-            log.info(f"Search page {page_num}: {page_url}")
+        captured_props = []  # type: list[dict]  (raw PropertyList entries from API)
+        total_pages_from_api = {"value": None}  # mutable container for closure
 
-            if not _goto_with_retry(page, page_url):
-                blocked_count += 1
-                if blocked_count >= 3:
-                    log.warning("Blocked 3 search pages — session may be expired. Run --setup.")
-                break
-
-            search_items = extract_search_listings(page)
-            log.info(f"  Found {len(search_items)} listings on page {page_num}")
-
-            if not search_items:
-                break  # end of results
-
-            for item in search_items:
-                if item["url"] not in seen_urls:
-                    seen_urls.add(item["url"])
-                    all_search_items.append(item)
-
-            if len(all_search_items) >= max_items * 2:
-                log.info(f"Collected enough URLs ({len(all_search_items)}). Moving to detail scraping.")
-                break
-
-            _polite_delay()
-
-        log.info(f"Total listings collected from search: {len(all_search_items)}")
-
-        # ── Filter: skip known listings whose price hasn't changed ────────────
-        urls_to_scrape = []
-        seen_source_ids = set()
-        price_changed = 0
-        for item in all_search_items:
-            sid = _extract_source_id(item["url"])
-            if sid:
-                seen_source_ids.add(sid)
-            if sid in known_listings:
-                old_price = known_listings[sid]
-                new_price = item.get("price")
-                # Re-scrape if price changed (or if we couldn't read the preview price)
-                if not new_price or not old_price or abs(new_price - old_price) > 1:
-                    if new_price and old_price:
-                        log.info(f"  Price changed for {sid}: {old_price} -> {new_price}")
-                    urls_to_scrape.append(item["url"])
-                    price_changed += 1
-                else:
-                    skipped_known += 1
-            else:
-                urls_to_scrape.append(item["url"])
-
-        log.info(
-            f"Skipping {skipped_known} unchanged listings, "
-            f"{price_changed} price changes to update, "
-            f"{len(urls_to_scrape) - price_changed} new to scrape"
-        )
-
-        # ── Visit each detail page ────────────────────────────────────────────
-        for i, detail_url in enumerate(urls_to_scrape):
-            if total_pushed >= max_items:
-                log.info(f"Reached max_items={max_items}. Stopping.")
-                break
-
-            log.info(f"[{i+1}/{len(urls_to_scrape)}] {detail_url}")
-
+        def _on_search_response(resp):
             try:
-                if not _goto_with_retry(page, detail_url):
-                    log.warning(f"  Blocked on detail page — skipping")
-                    error_count += 1
+                if resp.request.method != "POST":
+                    return
+                if "Property/Search" not in resp.url:
+                    return
+                body = resp.json()
+            except Exception:
+                return
+            try:
+                if total_pages_from_api["value"] is None:
+                    tp = body.get("TotalPages")
+                    if isinstance(tp, int) and tp > 0:
+                        total_pages_from_api["value"] = tp
+                for prop in body.get("PropertyList") or []:
+                    if isinstance(prop, dict):
+                        captured_props.append(prop)
+            except Exception as e:
+                log.debug(f"  Property/Search parse error: {e}")
+
+        page.on("response", _on_search_response)
+
+        def _drain_captured():
+            """Convert any buffered PropertyList entries into Listings."""
+            added = 0
+            while captured_props:
+                prop = captured_props.pop(0)
+                listing = _build_listing_from_api(prop)
+                if listing is None or not listing.source_id:
+                    continue
+                if listing.source_id in seen_source_ids_api:
+                    continue
+                seen_source_ids_api.add(listing.source_id)
+                all_listings.append(listing)
+                added += 1
+            return added
+
+        log.info(f"Search page 1: {search_url}")
+        if not _goto_with_retry(page, search_url):
+            log.warning("Blocked on initial search page — session may be expired. Run --setup.")
+        else:
+            # Wait for React to render listings + the initial Property/Search
+            # XHR to complete. 5s is enough per our probe.
+            try:
+                page.wait_for_selector('a[href*="/imovel/"]', timeout=15000)
+            except PWTimeout:
+                log.warning("  Timeout waiting for listings to render on page 1")
+            page.wait_for_timeout(1500)
+
+            added = _drain_captured()
+            # If the API capture somehow missed page 1 entirely (shouldn't
+            # happen since the handler attaches before goto) we bail out —
+            # the DOM fallback can't give us rich-enough data for API-first
+            # mode and the price-extraction bug makes it unreliable anyway.
+            if added == 0:
+                log.warning(
+                    "  No Property/Search response captured on page 1 — "
+                    "session may be stale. Run --setup."
+                )
+            log.info(f"  Page 1: +{added} listings (total {len(all_listings)})")
+
+            # Figure out how many pages there are
+            total_pages = total_pages_from_api["value"]
+            if not total_pages:
+                try:
+                    total_pages = page.evaluate(
+                        "() => {"
+                        " const btns = Array.from(document.querySelectorAll('button.btn-page'));"
+                        " const nums = btns.map(b => parseInt(b.innerText.trim())).filter(Number.isFinite);"
+                        " return nums.length ? Math.max(...nums) : 1;"
+                        "}"
+                    )
+                except Exception:
+                    total_pages = 1
+            log.info(f"  Detected {total_pages} total pages of results")
+
+            # Click-based pagination for pages 2..N
+            effective_max = min(total_pages or max_pages, max_pages)
+            for page_num in range(2, effective_max + 1):
+                if len(all_listings) >= max_items:
+                    log.info(
+                        f"Collected enough listings ({len(all_listings)} >= "
+                        f"max_items={max_items}). Stopping pagination."
+                    )
+                    break
+
+                try:
+                    # Scroll pagination into view so the button is clickable
+                    page.evaluate(
+                        "() => {"
+                        " const nav = document.querySelector('div.pagination');"
+                        " if (nav) nav.scrollIntoView({block: 'center'});"
+                        "}"
+                    )
+                    page.wait_for_timeout(300)
+
+                    first_before = page.evaluate(
+                        "() => {"
+                        " const a = document.querySelector('a[href*=\"/imovel/\"]');"
+                        " return a ? a.getAttribute('href') : '';"
+                        "}"
+                    ) or ""
+
+                    log.info(f"Search page {page_num}: clicking 'Seguinte'")
+                    page.locator("div.pagination button.btn-next").first.click(timeout=10000)
+
+                    # Wait until the first rendered listing URL changes
+                    page.wait_for_function(
+                        """(before) => {
+                            const a = document.querySelector('a[href*="/imovel/"]');
+                            return a && a.getAttribute('href') !== before;
+                        }""",
+                        arg=first_before,
+                        timeout=15000,
+                    )
+                    # Give the response handler a moment to process the XHR
+                    page.wait_for_timeout(600)
+
+                    added = _drain_captured()
+                    log.info(
+                        f"  Page {page_num}: +{added} listings (total {len(all_listings)})"
+                    )
+
+                    if added == 0:
+                        # Either end of results or API capture failed — stop
+                        log.info("  No new items from API capture — stopping pagination.")
+                        break
+                except PWTimeout:
+                    log.warning(f"  Timeout advancing to page {page_num} — stopping pagination.")
+                    break
+                except Exception as e:
+                    log.warning(f"  Error advancing to page {page_num}: {e}")
+                    blocked_count += 1
+                    if blocked_count >= 3:
+                        log.warning("  Too many pagination errors — giving up.")
+                        break
                     continue
 
-                # Wait for content to render (ERA uses client-side rendering)
-                try:
-                    page.wait_for_selector(
-                        "h1, [class*='price' i], [class*='Price'], "
-                        "script[type='application/ld+json']",
-                        timeout=10000
-                    )
-                except PWTimeout:
-                    pass
+                _polite_delay()
 
-                listing = scrape_detail_page(page, detail_url, listing_type=listing_type)
+        # Detach the response handler — we have all the data we need in
+        # all_listings already.
+        try:
+            page.remove_listener("response", _on_search_response)
+        except Exception:
+            pass
 
-                if listing is None or listing.price_amount is None:
-                    log.warning(f"  No price extracted — skipping")
-                    error_count += 1
-                else:
-                    _, is_new = db.upsert_listing(listing)
-                    if is_new:
-                        new_count += 1
-                    else:
-                        updated_count += 1
-                    total_pushed += 1
-                    log.info(
-                        f"  OK {listing.neighborhood or 'unknown'} "
-                        f"T{listing.rooms} "
-                        f"EUR{listing.price_amount:,.0f} "
-                        f"({listing.size_sqm}m2)"
-                    )
-
-            except PWTimeout:
-                log.warning(f"  Timeout on detail page — skipping")
-                error_count += 1
-            except Exception as e:
-                log.warning(f"  Error: {e}")
-                error_count += 1
-
-            _polite_delay()
+        log.info(f"Total listings collected from search API: {len(all_listings)}")
 
         context.close()
+
+    # ── Upsert all captured listings (no detail-page round-trip needed) ───────
+    #
+    # Because /API/ServicesModule/Property/Search returns structured records
+    # with price/size/rooms/coords/etc. already populated, we can skip visiting
+    # the detail page entirely. This is ~30x faster than the old flow and
+    # sidesteps the DOM-based price-extraction bug that was corrupting rows.
+    seen_source_ids = set()
+    # Filter by the caller's requested listing_type so --type sale ignores
+    # any stray rental entries and vice-versa.
+    filtered = [li for li in all_listings if li.listing_type == listing_type]
+    log.info(
+        f"Upserting {len(filtered)} {listing_type} listings "
+        f"(skipped {len(all_listings) - len(filtered)} of the other type)"
+    )
+
+    for i, listing in enumerate(filtered):
+        if total_pushed >= max_items:
+            log.info(f"Reached max_items={max_items}. Stopping.")
+            break
+        sid = listing.source_id
+        if sid:
+            seen_source_ids.add(sid)
+        if listing.price_amount is None:
+            log.warning(f"  [{i+1}/{len(filtered)}] {sid}: no price in API — skipping")
+            error_count += 1
+            continue
+        try:
+            _, is_new = db.upsert_listing(listing)
+            if is_new:
+                new_count += 1
+            else:
+                updated_count += 1
+            total_pushed += 1
+            if (i + 1) % 25 == 0 or (i + 1) == len(filtered):
+                log.info(
+                    f"  [{i+1}/{len(filtered)}] OK {listing.neighborhood or 'unknown'} "
+                    f"T{listing.rooms} "
+                    f"EUR{listing.price_amount:,.0f} "
+                    f"({listing.size_sqm}m2)"
+                )
+        except Exception as e:
+            log.warning(f"  [{i+1}/{len(filtered)}] {sid}: upsert error: {e}")
+            error_count += 1
 
     # ── Detect missing listings ──────────────────────────────────────────────
     if len(known_listings) > 0 and len(seen_source_ids) < len(known_listings) * 0.5:

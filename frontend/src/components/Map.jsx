@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { TileLayer, CircleMarker, GeoJSON, Popup, useMap, useMapEvents } from 'react-leaflet'
 import { LeafletContext, createLeafletContext } from '@react-leaflet/core'
 import L from 'leaflet'
-import { useLanguage } from '../LanguageContext'
 import 'leaflet/dist/leaflet.css'
 import ProjectLayer from './ProjectLayer'
 import SecurityLayer from './SecurityLayer'
@@ -11,7 +10,7 @@ import MapLegend from './MapLegend'
 import AddressSearch from './AddressSearch'
 import SoldTrendsLayer from './SoldTrendsLayer'
 import { BASE_MAPS } from '../baseMaps'
-import RarityBadge from './RarityBadge'
+import ListingPopupCard from './ListingPopupCard'
 
 const DEFAULT_CENTRE = [38.68, -9.10]
 const DEFAULT_ZOOM = 10
@@ -196,9 +195,6 @@ export default function Map({
   selectedParishes,
   onLookupResult,
 }) {
-  const { t } = useLanguage()
-  const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
-
   const isParishVisible = (name) => {
     if (!showNeighborhoods || !name) return true
     const group = parishToGroup?.[name]
@@ -302,7 +298,7 @@ export default function Map({
             if (isSelected) {
               markerColor = { color: '#991b1b', fillColor: '#ef4444' }
             } else if (isSold || isReserved) {
-              markerColor = { color: '#92400e', fillColor: '#f59e0b' }
+              markerColor = { color: '#000000', fillColor: '#1f2937' }
             } else if (isRent) {
               markerColor = { color: '#6b21a8', fillColor: '#a855f7' }
             } else {
@@ -311,23 +307,7 @@ export default function Map({
 
             const popupContent = (
               <Popup>
-                <div className="text-sm">
-                  {(isSold || isReserved) && (
-                    <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
-                      {isSold ? `${t.sold} · ` : `${t.reserved} · `}
-                    </span>
-                  )}
-                  <b>€{fmt(l.price_amount)}{isRent ? '/mo' : ''}</b>
-                  {l.size_sqm && <> · {fmt(l.size_sqm)} m²</>}
-                  {l.rooms != null && <> · T{l.rooms}</>}<br />
-                  {l.neighborhood && <span className="text-gray-500">{l.neighborhood}</span>}
-                  <br />
-                  <RarityBadge score={l.rarity_score} factors={l.rarity_factors} compact />
-                  {l.rarity_score != null && ' '}
-                  <a href={l.url} target="_blank" rel="noopener noreferrer" className="text-blue-600">
-                    {t.viewListing}
-                  </a>
-                </div>
+                <ListingPopupCard listing={l} />
               </Popup>
             )
 
@@ -340,7 +320,7 @@ export default function Map({
                 <GeoJSON
                   key={`bldg-${l.id}`}
                   data={{ type: 'Feature', geometry: geojson, properties: {} }}
-                  style={() => ({ ...markerColor, fillOpacity: 0.35, weight: mapZoom >= 15 ? 3 : 2 })}
+                  style={() => ({ ...markerColor, fillOpacity: (isSold || isReserved) ? 0.5 : 0.35, weight: mapZoom >= 15 ? 3 : 2 })}
                   eventHandlers={{ click: handleClick }}
                 >
                   {popupContent}
@@ -354,7 +334,7 @@ export default function Map({
                 key={l.id}
                 center={[l.lat, l.lon]}
                 radius={mSize.radius}
-                pathOptions={{ ...markerColor, fillOpacity: 0.6, weight: mSize.weight }}
+                pathOptions={{ ...markerColor, fillOpacity: (isSold || isReserved) ? 0.85 : 0.6, weight: (isSold || isReserved) ? mSize.weight + 1 : mSize.weight }}
                 eventHandlers={{ click: handleClick }}
               >
                 {popupContent}

@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 
 const DEFAULT_FILTERS = {
   listing_type: 'sale',
-  show_sold: false,
+  show_sold: 'active',
   min_price: '',
   max_price: '',
   min_sqm: '',

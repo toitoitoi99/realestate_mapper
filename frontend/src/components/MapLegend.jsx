@@ -53,7 +53,7 @@ export default function MapLegend({ baseMap, onChangeBaseMap }) {
         <span className="text-gray-600">{t.forSale}</span>
         <span className="w-3 h-3 rounded-full shrink-0 ml-1" style={{ background: '#a855f7' }} />
         <span className="text-gray-600">{t.rentLabel}</span>
-        <span className="w-3 h-3 rounded-full shrink-0 ml-1" style={{ background: '#f59e0b' }} />
+        <span className="w-3 h-3 rounded-full shrink-0 ml-1" style={{ background: '#1f2937' }} />
         <span className="text-gray-600">{t.soldLabel}</span>
       </div>
 

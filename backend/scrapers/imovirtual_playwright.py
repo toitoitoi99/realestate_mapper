@@ -438,6 +438,40 @@ def extract_listing_from_next_data(page_props: dict) -> dict:
                     images.append(url)
     images = [u for u in images if u and u.startswith("http")][:MAX_IMAGES]
 
+    # Structured feature chips from __NEXT_DATA__
+    chips: list = []
+
+    def _append_chip(v):
+        if v is None:
+            return
+        if isinstance(v, bool):
+            return  # booleans collapse without context — skip
+        if isinstance(v, (str, int, float)):
+            s = str(v).strip()
+            if s:
+                chips.append(s)
+
+    # `target` is a dict of feature keys → value (e.g. Elevator: "y", Air_conditioning: "y")
+    target = find_deep(ad, ["target"]) or {}
+    if isinstance(target, dict):
+        for k, v in target.items():
+            # Positive string flags like "y" / "yes" → emit the key as a chip
+            if isinstance(v, str) and v.lower() in ("y", "yes", "sim", "true", "1"):
+                chips.append(str(k).replace("_", " "))
+            elif isinstance(v, list):
+                for item in v:
+                    _append_chip(item)
+    # Some imovirtual responses put amenities in `features`, `extras`, or `tags`
+    for key in ("features", "extras", "amenities", "tags", "characteristics"):
+        raw = ad.get(key)
+        if isinstance(raw, list):
+            for item in raw:
+                if isinstance(item, str):
+                    _append_chip(item)
+                elif isinstance(item, dict):
+                    label = item.get("label") or item.get("name") or item.get("text") or item.get("value")
+                    _append_chip(label)
+
     return {
         "price": price,
         "size": size,
@@ -459,6 +493,7 @@ def extract_listing_from_next_data(page_props: dict) -> dict:
         "lon": lon,
         "images": images,
         "description": description,
+        "feature_chips": [c for c in chips if c] or None,
     }
 
 
@@ -579,6 +614,37 @@ def extract_from_dom(page: Page) -> dict:
                     if (lon) out.lon = lon;
                 }
 
+                // Structured characteristic chips — every div with an aria-label
+                // and a sibling value div (imovirtual's "Características" section).
+                // Also pick up extras/media chips that render as list items.
+                const chipSet = new Set();
+                const chips = [];
+                const pushChip = (s) => {
+                    if (!s) return;
+                    const v = s.replace(/\s+/g, ' ').trim();
+                    if (!v || v.length > 120) return;
+                    const key = v.toLowerCase();
+                    if (chipSet.has(key)) return;
+                    chipSet.add(key);
+                    chips.push(v);
+                };
+                document.querySelectorAll('div[aria-label]').forEach(el => {
+                    const label = (el.getAttribute('aria-label') || '').trim();
+                    if (!label) return;
+                    const valueEl = el.querySelector(':scope > div:nth-of-type(2)');
+                    const value = valueEl ? valueEl.textContent.trim() : '';
+                    if (value) pushChip(label + ': ' + value);
+                });
+                document.querySelectorAll(
+                    '[data-cy="adPageAdFeaturesListItem"], ' +
+                    '[data-testid="ad-features-list-item"], ' +
+                    '[class*="Features"] li, ' +
+                    '[class*="features"] li, ' +
+                    '[data-cy*="feature"] li, ' +
+                    '[data-testid*="feature"] li'
+                ).forEach(el => pushChip(el.textContent));
+                out.chips = chips;
+
                 return out;
             }
         """)
@@ -632,6 +698,10 @@ def extract_from_dom(page: Page) -> dict:
     if data.get("images"):
         result["images"] = data["images"][:MAX_IMAGES]
 
+    raw_chips = [str(c).strip() for c in (data.get("chips") or []) if c and str(c).strip()]
+    if raw_chips:
+        result["feature_chips"] = raw_chips
+
     # Property type from title
     title = (result.get("title") or "").lower()
     for pt in ["apartamento", "moradia", "vivenda", "loja", "terreno",
@@ -676,6 +746,19 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
 
     price_per_sqm = round(price / size, 2) if price and size and size > 0 else None
 
+    # Merge chips from __NEXT_DATA__ and DOM, dedupe case-insensitively
+    merged_chips = []
+    seen_chip_keys = set()
+    for source_chips in (nd.get("feature_chips") or [], dom.get("feature_chips") or []):
+        for c in source_chips:
+            if not c:
+                continue
+            k = str(c).strip().lower()
+            if not k or k in seen_chip_keys:
+                continue
+            seen_chip_keys.add(k)
+            merged_chips.append(str(c).strip())
+
     return Listing(
         source="imovirtual",
         source_id=source_id,
@@ -705,6 +788,7 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
         hash_dedupe=_hash(address, city, price, size),
         hash_cross=_hash_cross(address, city, price, size),
         description=nd.get("description") or dom.get("description"),
+        feature_chips=json.dumps(merged_chips) if merged_chips else None,
         scraped_at=datetime.utcnow(),
     )
 
