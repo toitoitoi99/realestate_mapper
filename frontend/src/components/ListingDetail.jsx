@@ -257,7 +257,7 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
           {/* Title + Price + Days on market */}
           <div>
             {(isSold || isReserved) && (
-              <span className="inline-block text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded mb-1 uppercase tracking-wide">
+              <span className="inline-block text-xs font-semibold text-red-700 bg-red-50 px-2 py-0.5 rounded mb-1 uppercase tracking-wide">
                 {isSold ? t.sold : t.reserved}
               </span>
             )}

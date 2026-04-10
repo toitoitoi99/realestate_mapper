@@ -9,7 +9,7 @@ function getActiveChips(filters, t) {
   if (filters.min_sqm) chips.push({ key: 'min_sqm', label: `≥ ${filters.min_sqm} m²` })
   if (filters.max_sqm) chips.push({ key: 'max_sqm', label: `≤ ${filters.max_sqm} m²` })
   if (filters.rooms) chips.push({ key: 'rooms', label: `T${filters.rooms}${filters.rooms === '5' ? '+' : ''}` })
-  if (filters.show_sold) chips.push({ key: 'show_sold', label: t.showSold, value: false })
+  if (filters.show_sold !== 'active') chips.push({ key: 'show_sold', label: filters.show_sold === 'sold' ? t.soldOnly : t.bothStatus, value: 'active' })
   if (filters.min_price_per_sqm) chips.push({ key: 'min_price_per_sqm', label: `≥ €${Number(filters.min_price_per_sqm).toLocaleString('pt-PT')}/m²` })
   if (filters.max_price_per_sqm) chips.push({ key: 'max_price_per_sqm', label: `≤ €${Number(filters.max_price_per_sqm).toLocaleString('pt-PT')}/m²` })
   if (filters.bedrooms) chips.push({ key: 'bedrooms', label: `${filters.bedrooms} ${t.bedrooms}` })
@@ -148,19 +148,35 @@ export default function FilterPanel({ filters, setFilter, reset }) {
         </select>
       </div>
 
-      {/* Show sold toggle */}
-      <label className="flex items-center gap-2 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={filters.show_sold}
-          onChange={e => setFilter('show_sold', e.target.checked)}
-          className="rounded border-gray-300 text-amber-500 focus:ring-amber-400"
-        />
-        <span className="text-xs text-gray-600">{t.showSold}</span>
-        <span className="w-3 h-3 rounded-full bg-amber-400 inline-block ml-auto" />
-      </label>
+      {/* Status filter: Active / Sold / Both */}
+      <div>
+        <label className="text-xs text-gray-500 mb-1 block">{t.statusFilter}</label>
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+          {[
+            { value: 'active', label: t.activeOnly },
+            { value: 'sold',   label: t.soldOnly },
+            { value: 'both',   label: t.bothStatus },
+          ].map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => setFilter('show_sold', opt.value)}
+              className={`flex-1 text-xs py-1.5 font-medium transition-colors ${
+                filters.show_sold === opt.value
+                  ? opt.value === 'sold'
+                    ? 'bg-amber-500 text-white'
+                    : opt.value === 'both'
+                    ? 'bg-gray-700 text-white'
+                    : 'bg-blue-500 text-white'
+                  : 'bg-white text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-      {filters.show_sold && (
+      {(filters.show_sold === 'sold' || filters.show_sold === 'both') && (
         <div>
           <label className="text-xs text-gray-500 mb-1 block">{t.soldDateRange}</label>
           <div className="flex gap-2">

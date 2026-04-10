@@ -298,7 +298,7 @@ export default function Map({
 
             let markerColor
             if (isSold || isReserved) {
-              markerColor = { color: '#92400e', fillColor: '#f59e0b' }
+              markerColor = { color: '#991b1b', fillColor: '#ef4444' }
             } else if (isRent) {
               markerColor = { color: '#6b21a8', fillColor: '#a855f7' }
             } else {
@@ -309,7 +309,7 @@ export default function Map({
               <Popup>
                 <div className="text-sm">
                   {(isSold || isReserved) && (
-                    <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+                    <span className="text-xs font-semibold text-red-600 uppercase tracking-wide">
                       {isSold ? `${t.sold} · ` : `${t.reserved} · `}
                     </span>
                   )}
@@ -336,7 +336,7 @@ export default function Map({
                 <GeoJSON
                   key={`bldg-${l.id}`}
                   data={{ type: 'Feature', geometry: geojson, properties: {} }}
-                  style={() => ({ ...markerColor, fillOpacity: 0.35, weight: mapZoom >= 15 ? 3 : 2 })}
+                  style={() => ({ ...markerColor, fillOpacity: (isSold || isReserved) ? 0.5 : 0.35, weight: mapZoom >= 15 ? 3 : 2 })}
                   eventHandlers={{ click: handleClick }}
                 >
                   {popupContent}
@@ -350,7 +350,7 @@ export default function Map({
                 key={l.id}
                 center={[l.lat, l.lon]}
                 radius={mSize.radius}
-                pathOptions={{ ...markerColor, fillOpacity: 0.6, weight: mSize.weight }}
+                pathOptions={{ ...markerColor, fillOpacity: (isSold || isReserved) ? 0.85 : 0.6, weight: (isSold || isReserved) ? mSize.weight + 1 : mSize.weight }}
                 eventHandlers={{ click: handleClick }}
               >
                 {popupContent}
