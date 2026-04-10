@@ -640,6 +640,22 @@ def extract_from_dom(page: Page) -> dict:
             elif not result.get("gross_area") and val != result.get("size"):
                 result["gross_area"] = val
 
+    # Preserve raw chips + key-value pairs for property_score scoring
+    raw_chips = []
+    for f in (data.get("features") or []):
+        if f and str(f).strip():
+            raw_chips.append(str(f).strip())
+    kv_texts = data.get("kvTexts") or []
+    for i in range(0, len(kv_texts) - 1, 2):
+        k = (kv_texts[i] or "").strip()
+        v = (kv_texts[i + 1] or "").strip() if i + 1 < len(kv_texts) else ""
+        if k and v:
+            raw_chips.append(f"{k}: {v}")
+        elif k:
+            raw_chips.append(k)
+    if raw_chips:
+        result["feature_chips"] = raw_chips
+
     # Parse features list
     for feat in (data.get("features") or []):
         fl = feat.lower()
@@ -802,6 +818,7 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
         images=json.dumps(images) if images else None,
         hash_dedupe=_hash(address, city, price, size),
         description=ld.get("description") or dom.get("description"),
+        feature_chips=json.dumps(dom.get("feature_chips")) if dom.get("feature_chips") else None,
         scraped_at=datetime.utcnow(),
     )
 
