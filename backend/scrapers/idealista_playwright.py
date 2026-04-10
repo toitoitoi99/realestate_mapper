@@ -69,8 +69,8 @@ DATADOME_RETRIES   = 3      # retries per URL when DataDome is detected
 DATADOME_WAIT      = 8      # seconds to wait before retrying after DataDome
 
 # Delay between page visits (seconds) — be polite
-MIN_DELAY = 2.5
-MAX_DELAY = 5.5
+MIN_DELAY = 10.0
+MAX_DELAY = 20.0
 
 # ── Lisbon neighborhood slugs for per-neighborhood scraping ──────────────────
 # Idealista uses these as URL segments: /comprar-casas/lisboa/{slug}/
@@ -735,6 +735,189 @@ def extract_detail_urls(page: Page) -> list[str]:
         return []
 
 
+def extract_listings_from_search_page(page: Page, listing_type: str = 'sale',
+                                       neighborhood_slug: Optional[str] = None) -> list:
+    """Extract listing data directly from search result cards.
+
+    Parses the DOM article cards on Idealista search pages to get
+    price, size, rooms, address, thumbnail, and URL — without visiting
+    each detail page.  Returns a list of dicts with extracted fields.
+    """
+    try:
+        cards = page.evaluate("""
+            () => {
+                const results = [];
+                // Idealista uses <article> elements for listing cards
+                const articles = document.querySelectorAll(
+                    'article.item, article[data-adid], .item-multimedia-container'
+                );
+
+                // Fallback: try the item-info containers directly
+                const containers = articles.length > 0 ? articles
+                    : document.querySelectorAll('.item, [class*="item-info"]');
+
+                containers.forEach(card => {
+                    const item = {};
+
+                    // URL + source_id
+                    const link = card.querySelector('a[href*="/imovel/"]') ||
+                                 card.closest('[data-adid]')?.querySelector('a[href]');
+                    if (!link) return;
+                    item.url = link.href;
+                    const idMatch = item.url.match(/\\/imovel\\/(\\d+)/);
+                    item.source_id = idMatch ? idMatch[1] : null;
+                    if (!item.source_id) return;
+
+                    // Price
+                    const priceEl = card.querySelector(
+                        '.item-price, .price-row, [class*="item-price"], .price'
+                    );
+                    if (priceEl) {
+                        const priceText = priceEl.textContent.replace(/[^\\d.,]/g, '');
+                        // Handle Portuguese formatting: 250.000 → 250000
+                        item.price_text = priceText;
+                    }
+
+                    // Size (m²)
+                    const detailEls = card.querySelectorAll(
+                        '.item-detail span, .item-detail-char span, [class*="item-detail"] span'
+                    );
+                    detailEls.forEach(el => {
+                        const text = el.textContent.trim();
+                        if (text.includes('m²') || text.includes('m\u00B2')) {
+                            item.size_text = text.replace(/[^\\d.,]/g, '');
+                        }
+                    });
+
+                    // Rooms (T0, T1, T2, etc.)
+                    const allText = card.textContent || '';
+                    const roomMatch = allText.match(/\\bT(\\d+)\\b/);
+                    if (roomMatch) item.rooms = parseInt(roomMatch[1]);
+
+                    // Title / address
+                    const titleEl = card.querySelector(
+                        '.item-link, a[class*="item-link"], .item-description-title'
+                    );
+                    if (titleEl) item.title = titleEl.textContent.trim();
+
+                    // Neighborhood / location subtitle
+                    const locEl = card.querySelector(
+                        '.item-detail-subtitle, [class*="item-detail"] .item-description'
+                    );
+                    if (locEl) item.location_text = locEl.textContent.trim();
+
+                    // Description snippet
+                    const descEl = card.querySelector(
+                        '.item-description p, .ellipsis, [class*="item-description"] p'
+                    );
+                    if (descEl) item.description = descEl.textContent.trim();
+
+                    // Thumbnail image
+                    const img = card.querySelector('img[src*="img"], img[data-src]');
+                    if (img) item.thumbnail = img.src || img.dataset.src;
+
+                    // Floor
+                    const floorMatch = allText.match(
+                        /(?:planta|andar|piso|floor)\\s*(\\d+|baixo|r\\/c)/i
+                    );
+                    if (floorMatch) item.floor = floorMatch[1];
+
+                    results.push(item);
+                });
+
+                return results;
+            }
+        """)
+    except Exception as e:
+        log.warning(f"  Failed to extract search cards: {e}")
+        cards = []
+
+    # Also try __NEXT_DATA__ on search pages — may contain full listing data
+    if not cards:
+        try:
+            nd = extract_next_data(page)
+            page_props = find_deep(nd, ["props", "pageProps"], ["pageProps"]) or {}
+            # Search pages may have listings under elementList, adList, etc.
+            elements = (
+                page_props.get("elementList") or
+                page_props.get("adList") or
+                page_props.get("listItems") or
+                page_props.get("items") or
+                find_deep(page_props, ["searchResult", "elementList"],
+                          ["searchResult", "items"],
+                          ["result", "items"]) or
+                []
+            )
+            for el in elements:
+                if not isinstance(el, dict):
+                    continue
+                url = el.get("url") or el.get("detailUrl") or ""
+                if "/imovel/" not in url and el.get("propertyCode"):
+                    url = f"{BASE_URL}/imovel/{el['propertyCode']}/"
+                id_match = re.search(r"/imovel/(\d+)", url)
+                if not id_match:
+                    continue
+                cards.append({
+                    "source_id": id_match.group(1),
+                    "url": url if url.startswith("http") else BASE_URL + url,
+                    "price_text": str(el.get("price") or el.get("priceInfo", {}).get("amount") or ""),
+                    "size_text": str(el.get("size") or el.get("floorSpace") or el.get("area") or ""),
+                    "rooms": _int(el.get("rooms") or el.get("typology")),
+                    "title": el.get("title") or el.get("suggestedText") or el.get("address"),
+                    "location_text": el.get("neighborhood") or el.get("address"),
+                    "description": (el.get("description") or "")[:500],
+                    "thumbnail": el.get("thumbnail") or (el.get("multimedia", {}) or {}).get("images", [{}])[0].get("url") if isinstance(el.get("multimedia"), dict) else None,
+                })
+        except Exception as e:
+            log.debug(f"  __NEXT_DATA__ search extraction failed: {e}")
+
+    # Parse extracted card data into structured dicts
+    parsed = []
+    for card in cards:
+        if not card.get("source_id"):
+            continue
+
+        price = _num(card.get("price_text"))
+        size = _num(card.get("size_text"))
+        rooms = card.get("rooms")
+        if isinstance(rooms, str):
+            rooms = _int(rooms)
+
+        # Determine neighborhood from the URL slug or location text
+        neighborhood = None
+        if neighborhood_slug:
+            # Map slug to human-readable: "campo-de-ourique" → "Campo de Ourique"
+            neighborhood = neighborhood_slug.replace("-", " ").title()
+        loc_text = card.get("location_text") or ""
+        if loc_text and not neighborhood:
+            neighborhood = loc_text.split(",")[0].strip()
+
+        title = card.get("title")
+        # Use title as address if it looks like one
+        address = title if title and not title.startswith("http") else None
+
+        url = card.get("url", "")
+        if url and not url.startswith("http"):
+            url = BASE_URL + url
+
+        parsed.append({
+            "source_id": card["source_id"],
+            "url": url,
+            "price": price,
+            "size": size,
+            "rooms": rooms,
+            "title": title,
+            "address": address,
+            "neighborhood": neighborhood,
+            "description": card.get("description"),
+            "thumbnail": card.get("thumbnail"),
+            "floor": card.get("floor"),
+            "listing_type": listing_type,
+        })
+
+    return parsed
+
+
 # ── Pagination ────────────────────────────────────────────────────────────────
 
 def build_page_url(base_url: str, page_num: int) -> str:
@@ -834,7 +1017,16 @@ def run_scraper(
     headless: bool = True,
     cookies_file: Optional[str] = None,
     listing_type: str = 'sale',
+    detail_batch: int = 0,
 ):
+    """Scrape Idealista listings.
+
+    Phase 1: Browse search pages and extract listing data from cards.
+             This creates "search-only" listings (no detail page visit).
+    Phase 2: Optionally enrich listings by visiting detail pages.
+             Controlled by --detail-batch N (0 = skip detail pages).
+             Uses adaptive backoff: pause on blocks, stop after repeated failures.
+    """
     if not _PLAYWRIGHT_AVAILABLE:
         print("Playwright is not installed.")
         print("Run: pip install playwright && playwright install chromium")
@@ -845,6 +1037,7 @@ def run_scraper(
     new_count = updated_count = error_count = 0
     skipped_known = 0
     total_pushed = 0
+    detail_enriched = 0
 
     # Load already-scraped source_ids so we can skip them
     known_ids = _load_known_source_ids(listing_type)
@@ -899,11 +1092,19 @@ def run_scraper(
         accept_cookies(page)
         _polite_delay()
 
-        # ── Collect detail URLs from all search pages ─────────────────────────
-        all_detail_urls: list[str] = []
+        # ══════════════════════════════════════════════════════════════════════
+        # PHASE 1: Extract listings from search page cards (no detail visits)
+        # ══════════════════════════════════════════════════════════════════════
+        all_search_listings = []   # dicts from search card extraction
+        all_detail_urls = []       # URLs for phase 2 enrichment
+        seen_source_ids = set()
         datadome_blocked = 0
 
         for search_idx, s_url in enumerate(search_urls):
+            # Extract neighborhood slug for location tagging
+            slug_match = re.search(r"/(?:comprar|arrendar)-casas/lisboa/([^/?]+)", s_url)
+            neighborhood_slug = slug_match.group(1) if slug_match else None
+
             for page_num in range(1, max_pages + 1):
                 page_url = build_page_url(s_url, page_num)
                 log.info(f"Search [{search_idx+1}/{len(search_urls)}] page {page_num}: {page_url}")
@@ -914,93 +1115,179 @@ def run_scraper(
                         log.warning("DataDome blocked 3 search pages — session may be expired. Run --setup.")
                     break
 
-                detail_urls = extract_detail_urls(page)
-                log.info(f"  Found {len(detail_urls)} listings on page {page_num}")
+                # Extract listing data from search cards
+                card_listings = extract_listings_from_search_page(
+                    page, listing_type=listing_type,
+                    neighborhood_slug=neighborhood_slug,
+                )
 
-                if not detail_urls:
+                # Also get detail URLs (for phase 2 and for counting)
+                detail_urls = extract_detail_urls(page)
+                page_count = max(len(card_listings), len(detail_urls))
+                log.info(f"  Found {page_count} listings on page {page_num}"
+                         f" ({len(card_listings)} with card data)")
+
+                if page_count == 0:
                     break  # end of results for this search URL
+
+                # Collect search-extracted listings
+                for card in card_listings:
+                    sid = card.get("source_id")
+                    if sid:
+                        seen_source_ids.add(sid)
+                    if sid and sid not in known_ids:
+                        all_search_listings.append(card)
+                    elif sid and sid in known_ids:
+                        seen_source_ids.add(sid)
+                        skipped_known += 1
+
+                # Track all source_ids seen (even if no card data)
+                for url in detail_urls:
+                    id_match = re.search(r"/imovel/(\d+)", url)
+                    if id_match:
+                        seen_source_ids.add(id_match.group(1))
 
                 all_detail_urls.extend(u for u in detail_urls if u not in all_detail_urls)
 
-                if len(all_detail_urls) >= max_items * 2:
-                    log.info(f"Collected enough URLs ({len(all_detail_urls)}). Moving to detail scraping.")
+                if len(all_search_listings) >= max_items:
+                    log.info(f"Collected {len(all_search_listings)} new listings. Moving on.")
                     break
 
                 _polite_delay()
 
-        log.info(f"Total detail URLs collected: {len(all_detail_urls)}")
+        log.info(f"Phase 1 complete: {len(all_search_listings)} new listings from search cards")
 
-        # ── Filter out already-known listings ─────────────────────────────────
-        new_urls = []
-        seen_source_ids = set()
-        for url in all_detail_urls:
-            id_match = re.search(r"/imovel/(\d+)", url)
-            source_id = id_match.group(1) if id_match else None
-            if source_id:
-                seen_source_ids.add(source_id)
-            if source_id and source_id in known_ids:
-                skipped_known += 1
-            else:
-                new_urls.append(url)
-
-        log.info(f"Skipping {skipped_known} already-known listings, {len(new_urls)} new to scrape")
-
-        # ── Visit each detail page ────────────────────────────────────────────
-        consecutive_blocks = 0
-        for i, detail_url in enumerate(new_urls):
-            if total_pushed >= max_items:
-                log.info(f"Reached max_items={max_items}. Stopping.")
-                break
-
-            log.info(f"[{i+1}/{len(new_urls)}] {detail_url}")
-
+        # ── Upsert search-only listings ───────────────────────────────────────
+        for card in all_search_listings:
             try:
-                if not _goto_with_retry(page, detail_url):
-                    log.warning(f"  DataDome blocked detail page — skipping")
+                price = card.get("price")
+                size = card.get("size")
+                price_per_sqm = round(price / size, 2) if price and size and size > 0 else None
+                images_json = json.dumps([card["thumbnail"]]) if card.get("thumbnail") else None
+
+                listing = Listing(
+                    source="idealista",
+                    source_id=card["source_id"],
+                    url=card["url"],
+                    listing_type=listing_type,
+                    status="active",
+                    price_amount=price,
+                    price_per_sqm=price_per_sqm,
+                    size_sqm=size,
+                    rooms=card.get("rooms"),
+                    bedrooms=card.get("rooms"),  # best guess from typology
+                    floor=card.get("floor"),
+                    property_type="apartment",   # default for Lisboa search
+                    title=card.get("title"),
+                    address=card.get("address"),
+                    neighborhood=card.get("neighborhood"),
+                    city="Lisboa",
+                    district="Lisboa",
+                    images=images_json,
+                    description=card.get("description"),
+                )
+
+                if listing.price_amount is None:
                     error_count += 1
-                    consecutive_blocks += 1
-                    if consecutive_blocks >= 5:
-                        log.error("DataDome blocked 5 consecutive detail pages — session expired. Run --setup.")
-                        break
                     continue
-                consecutive_blocks = 0
 
-                # Wait for __NEXT_DATA__ or JSON-LD to be available
-                try:
-                    page.wait_for_selector(
-                        "#__NEXT_DATA__, script[type='application/ld+json']",
-                        timeout=8000
-                    )
-                except PWTimeout:
-                    pass
-
-                listing = scrape_detail_page(page, detail_url, listing_type=listing_type)
-
-                if listing is None or listing.price_amount is None:
-                    log.warning(f"  No price extracted — skipping")
-                    error_count += 1
+                _, is_new = db.upsert_listing(listing)
+                if is_new:
+                    new_count += 1
                 else:
-                    _, is_new = db.upsert_listing(listing)
-                    if is_new:
-                        new_count += 1
-                    else:
-                        updated_count += 1
-                    total_pushed += 1
-                    log.info(
-                        f"  ✓ {listing.neighborhood or 'unknown'} "
-                        f"T{listing.rooms} "
-                        f"€{listing.price_amount:,.0f} "
-                        f"({listing.size_sqm}m²)"
-                    )
-
-            except PWTimeout:
-                log.warning(f"  Timeout on detail page — skipping")
-                error_count += 1
+                    updated_count += 1
+                total_pushed += 1
+                log.info(
+                    f"  ✓ {listing.neighborhood or 'unknown'} "
+                    f"T{listing.rooms or '?'} "
+                    f"€{listing.price_amount:,.0f} "
+                    f"({listing.size_sqm or '?'}m²)"
+                    f" [search]"
+                )
             except Exception as e:
-                log.exception(f"  Error processing {detail_url}: {e}")
+                log.warning(f"  Error upserting search listing {card.get('source_id')}: {e}")
                 error_count += 1
 
-            _polite_delay()
+        # ══════════════════════════════════════════════════════════════════════
+        # PHASE 2: Enrich with detail pages (optional, batched)
+        # ══════════════════════════════════════════════════════════════════════
+        if detail_batch > 0:
+            log.info(f"Phase 2: enriching up to {detail_batch} listings via detail pages")
+
+            # Filter to new URLs not yet in DB (or with incomplete data)
+            enrich_urls = []
+            for url in all_detail_urls:
+                id_match = re.search(r"/imovel/(\d+)", url)
+                source_id = id_match.group(1) if id_match else None
+                if source_id and source_id not in known_ids:
+                    enrich_urls.append(url)
+                if len(enrich_urls) >= detail_batch:
+                    break
+
+            log.info(f"  {len(enrich_urls)} detail pages to visit")
+
+            consecutive_blocks = 0
+            backoff_level = 0  # 0=normal, 1=cautious, 2=very cautious
+
+            for i, detail_url in enumerate(enrich_urls):
+                log.info(f"  [{i+1}/{len(enrich_urls)}] {detail_url}")
+
+                try:
+                    if not _goto_with_retry(page, detail_url):
+                        log.warning(f"    DataDome blocked — skipping")
+                        error_count += 1
+                        consecutive_blocks += 1
+
+                        # Adaptive backoff
+                        if consecutive_blocks >= 5:
+                            log.error("    5 consecutive blocks — stopping detail enrichment.")
+                            break
+                        elif consecutive_blocks >= 3:
+                            if backoff_level < 2:
+                                backoff_level += 1
+                                pause = [0, 120, 300][backoff_level]
+                                log.info(f"    Backing off: pausing {pause}s (level {backoff_level})")
+                                time.sleep(pause)
+                        continue
+
+                    consecutive_blocks = 0
+
+                    try:
+                        page.wait_for_selector(
+                            "#__NEXT_DATA__, script[type='application/ld+json']",
+                            timeout=8000
+                        )
+                    except PWTimeout:
+                        pass
+
+                    listing = scrape_detail_page(page, detail_url, listing_type=listing_type)
+
+                    if listing is None or listing.price_amount is None:
+                        log.warning(f"    No price extracted — skipping")
+                        error_count += 1
+                    else:
+                        _, is_new = db.upsert_listing(listing)
+                        detail_enriched += 1
+                        if is_new:
+                            new_count += 1
+                        log.info(
+                            f"    ✓ {listing.neighborhood or 'unknown'} "
+                            f"T{listing.rooms} "
+                            f"€{listing.price_amount:,.0f} "
+                            f"({listing.size_sqm}m²)"
+                            f" [detail]"
+                        )
+
+                except PWTimeout:
+                    log.warning(f"    Timeout on detail page — skipping")
+                    error_count += 1
+                except Exception as e:
+                    log.exception(f"    Error processing {detail_url}: {e}")
+                    error_count += 1
+
+                # Longer delays for detail pages (they trigger more scrutiny)
+                delay = random.uniform(MIN_DELAY * 1.5, MAX_DELAY * 2)
+                time.sleep(delay)
 
         context.close()
 
@@ -1031,6 +1318,7 @@ def run_scraper(
     print(f"  Listings scraped : {total_pushed}")
     print(f"  New              : {new_count}")
     print(f"  Updated          : {updated_count}")
+    print(f"  Detail-enriched  : {detail_enriched}")
     print(f"  Skipped (known)  : {skipped_known}")
     print(f"  Errors           : {error_count}")
 
@@ -1048,7 +1336,11 @@ if __name__ == "__main__":
     parser.add_argument("--max-items", type=int, default=DEFAULT_MAX_ITEMS,
                         help=f"Max listings to scrape (default: {DEFAULT_MAX_ITEMS})")
     parser.add_argument("--no-headless", action="store_true",
-                        help="Show the browser window (useful for debugging)")
+                        help="Show the browser window (default for scraping — use --headless to override)")
+    parser.add_argument("--headless", action="store_true",
+                        help="Run in headless mode (not recommended — DataDome detects headless)")
+    parser.add_argument("--detail-batch", type=int, default=0,
+                        help="Number of detail pages to visit for enrichment (default: 0 = search-only)")
     parser.add_argument("--setup", action="store_true",
                         help="Open browser for manual challenge solving, then exit (run once before scraping)")
     args = parser.parse_args()
@@ -1086,10 +1378,18 @@ if __name__ == "__main__":
             search_url = RENTAL_SEARCH
         else:
             search_url = DEFAULT_SEARCH
+        # Default to headed mode (DataDome blocks headless).
+        # Use --headless to override (e.g., on a VPS with Xvfb).
+        if args.headless:
+            use_headless = True
+        else:
+            use_headless = False  # headed by default
+
         run_scraper(
             search_url=search_url,
             max_pages=args.max_pages,
             max_items=args.max_items,
-            headless=not args.no_headless,
+            headless=use_headless,
             listing_type=listing_type,
+            detail_batch=args.detail_batch,
         )

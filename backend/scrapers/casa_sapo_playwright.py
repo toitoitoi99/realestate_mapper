@@ -67,8 +67,8 @@ BLOCKED_RETRIES = 3
 BLOCKED_WAIT = 8
 
 # Delay between page visits (seconds)
-MIN_DELAY = 2.5
-MAX_DELAY = 5.5
+MIN_DELAY = 8.0
+MAX_DELAY = 15.0
 
 PROFILE_DIR = Path(__file__).parent.parent / "data" / "browser_profile_casa_sapo"
 
@@ -174,7 +174,8 @@ def _goto_with_retry(page: "Page", url: str, retries: int = BLOCKED_RETRIES) -> 
                 page.wait_for_timeout(2000)
                 if not _is_blocked(page):
                     return True
-            except PWTimeout:
+            except (PWTimeout, Exception) as e:
+                log.warning(f"  Reload failed: {e}")
                 pass
         else:
             log.warning(f"  Blocked after {retries} attempts: {url}")
