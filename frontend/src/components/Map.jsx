@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { TileLayer, CircleMarker, GeoJSON, Popup, useMap, useMapEvents } from 'react-leaflet'
 import { LeafletContext, createLeafletContext } from '@react-leaflet/core'
 import L from 'leaflet'
-import { useLanguage } from '../LanguageContext'
 import 'leaflet/dist/leaflet.css'
 import ProjectLayer from './ProjectLayer'
 import SecurityLayer from './SecurityLayer'
@@ -11,7 +10,7 @@ import MapLegend from './MapLegend'
 import AddressSearch from './AddressSearch'
 import SoldTrendsLayer from './SoldTrendsLayer'
 import { BASE_MAPS } from '../baseMaps'
-import RarityBadge from './RarityBadge'
+import ListingPopupCard from './ListingPopupCard'
 
 const DEFAULT_CENTRE = [38.68, -9.10]
 const DEFAULT_ZOOM = 10
@@ -196,9 +195,6 @@ export default function Map({
   selectedParishes,
   onLookupResult,
 }) {
-  const { t } = useLanguage()
-  const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
-
   const isParishVisible = (name) => {
     if (!showNeighborhoods || !name) return true
     const group = parishToGroup?.[name]
@@ -311,23 +307,7 @@ export default function Map({
 
             const popupContent = (
               <Popup>
-                <div className="text-sm">
-                  {(isSold || isReserved) && (
-                    <span className="text-xs font-semibold text-gray-800 uppercase tracking-wide">
-                      {isSold ? `${t.sold} · ` : `${t.reserved} · `}
-                    </span>
-                  )}
-                  <b>€{fmt(l.price_amount)}{isRent ? '/mo' : ''}</b>
-                  {l.size_sqm && <> · {fmt(l.size_sqm)} m²</>}
-                  {l.rooms != null && <> · T{l.rooms}</>}<br />
-                  {l.neighborhood && <span className="text-gray-500">{l.neighborhood}</span>}
-                  <br />
-                  <RarityBadge score={l.rarity_score} factors={l.rarity_factors} compact />
-                  {l.rarity_score != null && ' '}
-                  <a href={l.url} target="_blank" rel="noopener noreferrer" className="text-blue-600">
-                    {t.viewListing}
-                  </a>
-                </div>
+                <ListingPopupCard listing={l} />
               </Popup>
             )
 
