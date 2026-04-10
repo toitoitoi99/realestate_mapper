@@ -1,6 +1,11 @@
 """
 remax_playwright.py — Standalone remax.pt scraper using Python Playwright.
 
+Uses RE/MAX's internal JSON API (/api/Listing/PaginatedMultiMatchSearch) which
+returns complete listing data per page without needing to visit detail pages.
+A browser context is used only to establish session cookies; the API requests
+themselves go through page.request.post.
+
 Setup (one-time):
     pip install playwright
     playwright install chromium
@@ -10,13 +15,6 @@ Run:
     python scrapers/remax_playwright.py                  # Headless scrape (after --setup)
     python scrapers/remax_playwright.py --max-pages 5    # Quick test run
     python scrapers/remax_playwright.py --type rent      # Scrape rentals
-
-The scraper will:
-    1. Open a headless Chrome browser with persistent profile
-    2. Paginate through RE/MAX search results for Lisboa
-    3. Visit each listing's detail page
-    4. Extract data from __NEXT_DATA__ JSON + DOM selectors fallback
-    5. Save each listing to SQLite and rebuild neighborhood stats when done
 """
 
 import re
@@ -27,6 +25,7 @@ import random
 import hashlib
 import logging
 import argparse
+import urllib.parse
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -58,51 +57,53 @@ log = logging.getLogger(__name__)
 # -- Config --------------------------------------------------------------------
 
 BASE_URL = "https://www.remax.pt"
-DEFAULT_SEARCH = "https://www.remax.pt/comprar?searchQueryState=%7B%22regionName%22%3A%22Lisboa%22%2C%22businessType%22%3A1%2C%22mediaTypes%22%3A%5B1%5D%7D"
-RENTAL_SEARCH = "https://www.remax.pt/arrendar?searchQueryState=%7B%22regionName%22%3A%22Lisboa%22%2C%22businessType%22%3A2%2C%22mediaTypes%22%3A%5B1%5D%7D"
-DEFAULT_MAX_PAGES = 60
+SEARCH_API = "https://www.remax.pt/api/Listing/PaginatedMultiMatchSearch"
+IMAGE_BASE = "https://i.maxwork.pt/l-feat/"
+
+DEFAULT_SEARCH_VALUE = "Lisboa"
+DEFAULT_PAGE_SIZE = 20
+DEFAULT_MAX_PAGES = 75      # 75 * 20 = 1500 items, matches old max_items default
 DEFAULT_MAX_ITEMS = 1500
 MAX_IMAGES = 15
-BLOCKED_RETRIES = 3
-BLOCKED_WAIT = 8
 
-# Delay between page visits (seconds)
-MIN_DELAY = 2.5
-MAX_DELAY = 5.5
+# Delay between API page fetches (seconds)
+MIN_DELAY = 1.0
+MAX_DELAY = 2.5
 
 PROFILE_DIR = Path(__file__).parent.parent / "data" / "browser_profile_remax"
 
 # -- Listing exclusion filters -------------------------------------------------
 # Exclude non-property listings: timeshares, garages, storage, parking, etc.
+# The API filter `listingClassID=1` already limits to residential, but we keep
+# these as belt-and-suspenders for edge cases.
 
-# URL path slugs that indicate non-property listings (RE/MAX uses slugs like
-# "venda-outros---habitacao-..." or "venda-garagem-...")
+# descriptionTags slugs that indicate non-property listings
 EXCLUDED_URL_SLUGS = [
-    "outros---habitac",   # "Outros - Habitação/Habitacional" — timeshares, hotel weeks
-    "garagem",            # garages / parking boxes
-    "armazem", "armazém", # warehouses / storage
-    "escritorio", "escritório",  # offices
-    "loja",               # shops / commercial
+    "outros---habitac",   # Timeshares, hotel weeks
+    "garagem",            # Garages / parking boxes
+    "armazem", "armazém", # Warehouses / storage
+    "escritorio", "escritório",  # Offices
+    "loja",               # Shops / commercial
 ]
 
 # Keywords in title or description that indicate non-property listings
 EXCLUDED_KEYWORDS = [
     "time sharing", "timesharing", "time-sharing", "timeshare",
     "semana ", "semana)",  # "semana 14" = week 14 (timeshare week)
-    "direito de habitação periódica",  # Portuguese legal term for timeshare
+    "direito de habitação periódica",
     "habitação periódica",
-    "multipropriedade",  # fractional ownership
+    "multipropriedade",
 ]
 
 
-def _is_excluded_url(url: str) -> bool:
-    """Check if a listing URL contains a slug indicating a non-property type."""
-    path = url.lower()
-    return any(slug in path for slug in EXCLUDED_URL_SLUGS)
+def _is_excluded_tags(tags: str) -> bool:
+    if not tags:
+        return False
+    t = tags.lower()
+    return any(slug in t for slug in EXCLUDED_URL_SLUGS)
 
 
 def _is_excluded_listing(listing: "Listing") -> bool:
-    """Check if a listing's title/description indicates a non-property (e.g. timeshare)."""
     text = " ".join(filter(None, [
         (listing.title or "").lower(),
         (listing.description or "").lower(),
@@ -113,26 +114,20 @@ def _is_excluded_listing(listing: "Listing") -> bool:
 # -- Utilities -----------------------------------------------------------------
 
 def _num(v) -> Optional[float]:
-    """Parse Portuguese-formatted number: '250.000' -> 250000.0
-    Handles thousands separators (dot) vs decimal separators (comma).
-    Only treats dot as thousands separator when the number has the pattern
-    of grouped digits (e.g. '250.000' or '1.234.567'), not standalone decimals.
-    """
+    """Parse a value as a float. Handles Portuguese thousands/decimal
+    separators and native numeric types."""
     if v is None:
         return None
+    if isinstance(v, (int, float)):
+        return float(v) if v != 0 else None
     try:
         s = str(v).strip()
-        # Strip currency symbols and whitespace but keep digits, dots, commas, minus
         s = re.sub(r"[^\d.,\-]", "", s)
         if not s:
             return None
-        # Portuguese thousands separator: dot used with groups of 3 digits
-        # e.g. "250.000" or "1.234.567" — must have digits before the dot too
         if re.match(r'^\d{1,3}(\.\d{3})+([,]\d+)?$', s):
-            # Definite thousands-separated format: remove dots, comma becomes decimal
             s = s.replace(".", "").replace(",", ".")
         else:
-            # Standard: comma is decimal separator
             s = s.replace(",", ".")
         n = float(s)
         return n if n != 0 else None
@@ -153,6 +148,8 @@ def _coord(v) -> Optional[float]:
 def _int(v) -> Optional[int]:
     if v is None:
         return None
+    if isinstance(v, int):
+        return v
     m = re.search(r"\d+", str(v))
     return int(m.group()) if m else None
 
@@ -169,59 +166,29 @@ def _polite_delay():
     time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
 
 
-# -- Blocked page detection ----------------------------------------------------
-
-def _is_blocked(page: "Page") -> bool:
-    """Check if we got a 403/WAF challenge page."""
-    try:
-        content = page.content()
-        if len(content) < 5000:
-            return True
-        # Cloudflare / generic WAF challenge indicators
-        if "cf-challenge" in content or "Just a moment" in content:
-            return True
-        # Access denied pages
-        if "Access Denied" in content and len(content) < 10000:
-            return True
-        return False
-    except Exception:
-        return False
-
-
-def _goto_with_retry(page: "Page", url: str, retries: int = BLOCKED_RETRIES) -> bool:
-    """Navigate to URL, retrying if blocked. Returns True if page loaded."""
-    for attempt in range(1, retries + 1):
-        try:
-            page.goto(url, timeout=30000, wait_until="domcontentloaded")
-            page.wait_for_timeout(2000)
-        except PWTimeout:
-            log.warning(f"  Timeout loading {url} (attempt {attempt}/{retries})")
-            if attempt < retries:
-                time.sleep(BLOCKED_WAIT)
-                continue
-            return False
-
-        if not _is_blocked(page):
-            return True
-
-        if attempt < retries:
-            log.info(f"  Blocked (attempt {attempt}/{retries}), waiting {BLOCKED_WAIT}s...")
-            time.sleep(BLOCKED_WAIT)
-            try:
-                page.reload(timeout=30000, wait_until="domcontentloaded")
-                page.wait_for_timeout(2000)
-                if not _is_blocked(page):
-                    return True
-            except PWTimeout:
-                pass
-        else:
-            log.warning(f"  Blocked after {retries} attempts: {url}")
-    return False
+def _extract_source_id(url: str) -> str:
+    """Extract the RE/MAX listing code from URL.
+    URLs look like /pt/imoveis/{slug}/{code} where code is e.g. 122911464-25.
+    The full code (including the -N suffix) is the unique identifier — the
+    numeric prefix alone is an office/group number and collides across
+    listings from the same office."""
+    # Full code with required -N suffix (this is RE/MAX's canonical format)
+    m = re.search(r'/(\d{6,10}-\d+)(?:\?|$|/)', url)
+    if m:
+        return m.group(1)
+    # Bare numeric ID as a fallback
+    m = re.search(r'/(\d{6,10})(?:\?|$|/)', url)
+    if m:
+        return m.group(1)
+    # Last-resort alphanumeric tail
+    m = re.search(r'/([a-zA-Z0-9\-]{8,})(?:\?|$)', url)
+    if m:
+        return m.group(1)
+    return hashlib.sha1(url.encode()).hexdigest()[:16]
 
 
 def _load_known_listings(listing_type: str = 'sale') -> dict:
-    """Load source_id -> price_amount for all remax listings in the DB.
-    Used to skip unchanged listings and detect price changes."""
+    """Load source_id -> price_amount for all remax listings in the DB."""
     table = "rentals" if listing_type == "rent" else "sales"
     try:
         conn = db.get_connection()
@@ -231,6 +198,39 @@ def _load_known_listings(listing_type: str = 'sale') -> dict:
         return {r[0]: r[1] for r in rows}
     except Exception:
         return {}
+
+
+# -- Normalisation helpers -----------------------------------------------------
+
+def _normalize_property_type(raw) -> str:
+    if not raw:
+        return "apartment"
+    s = str(raw).lower()
+    if any(w in s for w in ["moradia", "vivenda", "house", "villa"]):  return "house"
+    if "terreno" in s or "lote" in s:                                   return "land"
+    if any(w in s for w in ["est\u00fadio", "studio", "t0"]):          return "studio"
+    if "loft" in s:                                                     return "loft"
+    if "duplex" in s:                                                   return "duplex"
+    if any(w in s for w in ["penthouse", "cobertura"]):                 return "penthouse"
+    return "apartment"
+
+
+# Best-effort mapping for RE/MAX conservationStatusID. Numeric IDs aren't
+# publicly documented; values are derived from observed listings.
+_CONSERVATION_STATUS_MAP = {
+    1: "new",
+    2: "used",
+    3: "renovated",
+    4: "to_renovate",
+    5: "new",   # "Em construção"
+}
+
+
+def _map_condition(status_id) -> Optional[str]:
+    try:
+        return _CONSERVATION_STATUS_MAP.get(int(status_id))
+    except (ValueError, TypeError):
+        return None
 
 
 # -- Cookie banner -------------------------------------------------------------
@@ -259,725 +259,326 @@ def accept_cookies(page: Page):
                 return
         except PWTimeout:
             continue
+        except Exception:
+            continue
 
 
-# -- __NEXT_DATA__ extraction --------------------------------------------------
+# -- API client ----------------------------------------------------------------
 
-def extract_next_data(page: Page) -> dict:
-    """Pull the embedded Next.js JSON payload from the page."""
+def _build_filters(listing_type: str) -> list:
+    """Build the `filters` array for the PaginatedMultiMatchSearch API.
+    Mirrors what the RE/MAX website sends when filtering to residential
+    buy/rent listings."""
+    bt = 1 if listing_type == 'sale' else 2
+    return [
+        {
+            "field": "businessTypeID",
+            "operationType": "int",
+            "operator": "=",
+            "value": str(bt),
+            "label": "buy" if bt == 1 else "rent",
+        },
+        # Residential only (excludes commercial, garages, warehouses, etc.)
+        {
+            "field": "listingClassID",
+            "operationType": "int",
+            "operator": "=",
+            "value": "1",
+        },
+        {
+            "field": "isSpecialExclusive",
+            "operator": "=",
+            "operationType": "string",
+            "value": "false",
+        },
+    ]
+
+
+def fetch_search_page(
+    page: Page,
+    listing_type: str,
+    search_value: str,
+    page_number: int,
+    page_size: int = DEFAULT_PAGE_SIZE,
+) -> Optional[dict]:
+    """POST to /api/Listing/PaginatedMultiMatchSearch and return parsed JSON.
+    Uses the browser context's cookies so RE/MAX treats this as a real user."""
+    body = {
+        "filters": _build_filters(listing_type),
+        "pageNumber": page_number,
+        "pageSize": page_size,
+        "sort": ["-PublishDate"],
+        "searchValue": search_value,
+    }
+    referer = f"{BASE_URL}/pt/{'comprar' if listing_type == 'sale' else 'arrendar'}"
     try:
-        raw = page.evaluate("""
-            () => {
-                const el = document.getElementById('__NEXT_DATA__');
-                return el ? el.textContent : null;
-            }
-        """)
-        return json.loads(raw) if raw else {}
-    except Exception:
-        return {}
+        resp = page.request.post(
+            SEARCH_API,
+            data=json.dumps(body),
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "pt-PT,pt;q=0.9",
+                "Origin": BASE_URL,
+                "Referer": referer,
+            },
+            timeout=30000,
+        )
+    except Exception as e:
+        log.warning(f"API request failed: {e}")
+        return None
+
+    if resp.status != 200:
+        log.warning(f"API returned HTTP {resp.status}")
+        return None
+    try:
+        return resp.json()
+    except Exception as e:
+        log.warning(f"Failed to parse API JSON: {e}")
+        return None
 
 
-def find_deep(obj, *paths):
-    """Try multiple key paths in a nested dict; return first hit."""
-    for path in paths:
-        cur = obj
-        for key in path:
-            if not isinstance(cur, dict):
-                cur = None
-                break
-            cur = cur.get(key)
-        if cur is not None:
-            return cur
+# -- Listing builder -----------------------------------------------------------
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+
+
+def _pt_description(descriptions) -> Optional[str]:
+    """Pick the Portuguese description from the multi-language list and
+    strip HTML tags."""
+    if not isinstance(descriptions, list):
+        return None
+    for d in descriptions:
+        if not isinstance(d, dict):
+            continue
+        code = (d.get("languageCode") or "").upper()
+        if code == "PT":
+            raw = d.get("description")
+            if raw:
+                text = _HTML_TAG_RE.sub(" ", str(raw))
+                text = _WS_RE.sub(" ", text).strip()
+                return text[:1000] if text else None
     return None
 
 
-# -- Search results: collect detail URLs ---------------------------------------
+def _image_url(path_or_url: str) -> Optional[str]:
+    if not path_or_url or not isinstance(path_or_url, str):
+        return None
+    if path_or_url.startswith("http"):
+        return path_or_url
+    return IMAGE_BASE + path_or_url.lstrip("/")
 
-def extract_search_listings(page: Page) -> list:
-    """Extract listing URLs and preview prices from a search results page.
-    Returns list of dicts: {"url": str, "price": float|None}."""
 
-    # First try __NEXT_DATA__ for structured listing data
-    next_data = extract_next_data(page)
-    if next_data:
-        page_props = find_deep(next_data, ["props", "pageProps"], ["pageProps"]) or {}
-        # RE/MAX may store search results under various keys
-        listings_data = (
-            find_deep(page_props, ["listings"]) or
-            find_deep(page_props, ["searchResults", "listings"]) or
-            find_deep(page_props, ["results"]) or
-            find_deep(page_props, ["properties"]) or
-            find_deep(page_props, ["items"]) or
-            []
-        )
-        if isinstance(listings_data, list) and listings_data:
-            items = []
-            for item in listings_data:
-                if not isinstance(item, dict):
-                    continue
-                # Try to build URL from listing data
-                url = (
-                    item.get("url") or
-                    item.get("detailUrl") or
-                    item.get("link") or
-                    item.get("href")
+def _collect_images(result: dict) -> list:
+    images = []
+    raw = result.get("listingPictures") or []
+    if isinstance(raw, list):
+        for img in raw:
+            if isinstance(img, str):
+                u = _image_url(img)
+                if u:
+                    images.append(u)
+            elif isinstance(img, dict):
+                src = (
+                    img.get("url") or img.get("path") or img.get("src") or
+                    img.get("large") or img.get("medium") or img.get("original")
                 )
-                listing_id = (
-                    item.get("id") or
-                    item.get("listingId") or
-                    item.get("propertyId")
-                )
-                if not url and listing_id:
-                    url = f"{BASE_URL}/imoveis/{listing_id}"
-                if url and not url.startswith("http"):
-                    url = BASE_URL + url
-
-                price_val = _num(
-                    item.get("price") or
-                    find_deep(item, ["price", "value"]) or
-                    item.get("askingPrice")
-                )
-                if url:
-                    items.append({"url": url, "price": price_val})
-            if items:
-                return items
-
-    # Fallback: DOM extraction of listing cards
-    try:
-        items = page.evaluate("""
-            () => {
-                const results = [];
-                // RE/MAX listing cards — try multiple selector patterns
-                const cards = document.querySelectorAll(
-                    'a[href*="/imoveis/"], ' +
-                    'a[href*="/imovel/"], ' +
-                    'a[href*="/comprar-"], ' +
-                    'a[href*="/arrendar-"], ' +
-                    'article a[href*="remax.pt"], ' +
-                    '[data-testid="property-card"] a, ' +
-                    '.property-card a, ' +
-                    '.listing-card a'
-                );
-                const seen = new Set();
-                for (const a of cards) {
-                    const href = a.href;
-                    // Filter for detail page links (contain numeric ID or property slug)
-                    if (seen.has(href)) continue;
-                    if (!href.includes('/imoveis/') && !href.includes('/imovel/') &&
-                        !href.includes('/comprar-') && !href.includes('/arrendar-'))
-                        continue;
-                    // Skip pagination and filter links
-                    if (href.includes('page=') && !href.includes('/imoveis/'))
-                        continue;
-                    seen.add(href);
-
-                    // Try to grab the price from the card
-                    let priceText = null;
-                    const card = a.closest('article, li, div[class*="card"], div[class*="listing"]') || a;
-                    const priceEl = card.querySelector(
-                        '[class*="price"], [class*="Price"], ' +
-                        'span[class*="value"], strong[class*="price"], ' +
-                        '[data-testid="price"], .listing-price'
-                    );
-                    if (priceEl) priceText = priceEl.textContent.trim();
-
-                    results.push({ url: href, priceText: priceText });
-                }
-                return results;
-            }
-        """)
-        # Parse prices
-        for item in items:
-            item["price"] = _num(item.pop("priceText", None))
-        return items
-    except Exception:
-        return []
+                if src:
+                    u = _image_url(src)
+                    if u:
+                        images.append(u)
+    # Fall back to the main listing picture if the gallery is empty
+    if not images and result.get("listingPictureUrl"):
+        u = _image_url(result["listingPictureUrl"])
+        if u:
+            images.append(u)
+    # De-duplicate while preserving order
+    seen = set()
+    out = []
+    for u in images:
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out[:MAX_IMAGES]
 
 
-def _extract_source_id(url: str) -> str:
-    """Extract the RE/MAX listing ID from URL.
-    URLs may look like:
-      /imoveis/comprar-apartamento-t2-lisboa/12345678
-      /imovel/12345678
-      /listing/12345678
-    """
-    # Try to find a numeric ID (typically 6-10 digits) at the end of the URL path
-    m = re.search(r'/(\d{6,10})(?:\?|$|/)', url)
-    if m:
-        return m.group(1)
-    # Try alphanumeric ID after last slash
-    m = re.search(r'/([a-zA-Z0-9\-]{8,})(?:\?|$)', url)
-    if m:
-        return m.group(1)
-    # Fallback: hash the URL
-    return hashlib.sha1(url.encode()).hexdigest()[:16]
+# RE/MAX API boolean fields → Portuguese chip labels that match the
+# _PROPERTY_FEATURES regex patterns in database.py.
+# Only truthy booleans become positive chips; explicit `False` becomes a
+# negated chip so `parking: false` can override text matches.
+_BOOL_CHIP_LABELS = {
+    "parking":              ("Estacionamento", "Sem estacionamento"),
+    "garage":               ("Garagem", "Sem garagem"),
+    "elevator":              ("Elevador", "Sem elevador"),
+    "electricCarsCharging": ("Carregamento de carros elétricos", None),
+}
 
 
-# -- Detail page extraction from __NEXT_DATA__ --------------------------------
+def _collect_feature_chips(result: dict) -> list:
+    """Build a list of structured feature-chip strings from an API result.
+    Uses the boolean amenity fields RE/MAX exposes (parking, garage,
+    elevator, electricCarsCharging). Returns an empty list if none are set
+    — the description-based scoring in database.py handles everything
+    else via text matching on the Listing.description field."""
+    chips: list = []
+    for key, (positive, negative) in _BOOL_CHIP_LABELS.items():
+        v = result.get(key)
+        if v is True:
+            chips.append(positive)
+        elif v is False and negative:
+            chips.append(negative)
 
-def extract_listing_from_next_data(page_props: dict) -> dict:
-    """Extract listing fields from __NEXT_DATA__ pageProps."""
-    ad = (
-        find_deep(page_props, ["listing"]) or
-        find_deep(page_props, ["property"]) or
-        find_deep(page_props, ["ad"]) or
-        find_deep(page_props, ["adDetail"]) or
-        find_deep(page_props, ["propertyDetail"]) or
-        page_props
-    )
+    # Garage spots count — only add when the `garage` boolean is also set,
+    # otherwise the count refers to outdoor/shared parking spots (which we
+    # already captured above via `parking`)
+    if result.get("garage") is True:
+        garage_spots = result.get("garageSpots")
+        if isinstance(garage_spots, (int, float)) and garage_spots > 0:
+            chips.append(f"{int(garage_spots)} lugares de garagem")
 
-    # Price
-    price = _num(
-        find_deep(ad, ["price", "value"]) or
-        find_deep(ad, ["price", "amount"]) or
-        ad.get("price") or
-        ad.get("askingPrice") or
-        find_deep(ad, ["characteristics", "price"])
-    )
+    # De-duplicate while preserving order
+    seen = set()
+    out = []
+    for c in chips:
+        k = c.lower()
+        if k not in seen:
+            seen.add(k)
+            out.append(c)
+    return out
 
-    # Size
-    size = _num(
-        ad.get("usableArea") or
-        ad.get("livingArea") or
-        find_deep(ad, ["areas", "usable"]) or
-        find_deep(ad, ["areas", "living"]) or
-        find_deep(ad, ["characteristics", "area"]) or
-        ad.get("area") or ad.get("m2")
-    )
-    gross_area = _num(
-        ad.get("grossArea") or
-        ad.get("totalArea") or
-        find_deep(ad, ["areas", "gross"]) or
-        find_deep(ad, ["areas", "total"])
-    )
+
+def build_listing_url(tags: str, title_code: str) -> str:
+    return f"{BASE_URL}/pt/imoveis/{tags}/{title_code}"
+
+
+def build_listing_from_api(result: dict, listing_type: str) -> Optional[Listing]:
+    """Build a Listing directly from a PaginatedMultiMatchSearch result item.
+    Returns None if the item lacks the bare essentials (URL or price)."""
+    tags = result.get("descriptionTags")
+    title_code = result.get("listingTitle")
+    if not tags or not title_code:
+        return None
+
+    url = build_listing_url(tags, title_code)
+    source_id = _extract_source_id(url) or str(title_code)
+
+    price = _num(result.get("listingPrice"))
+    if not price:
+        return None
+
+    listing_type_raw = str(result.get("listingType") or "").lower()
+    is_land = "terreno" in listing_type_raw or "lote" in listing_type_raw
+
+    living = _num(result.get("livingArea"))
+    total = _num(result.get("totalArea"))
+    built = _num(result.get("builtArea"))
+
+    if is_land:
+        size = _num(result.get("lotSize")) or total or living
+    else:
+        size = living or total
+
+    # Gross area: prefer builtArea; fall back to totalArea if larger than size
+    gross_area = built
+    if not gross_area and total and size and total > size:
+        gross_area = total
     if gross_area and size and gross_area == size:
         gross_area = None
 
-    # Rooms (typology)
-    rooms_raw = (
-        ad.get("rooms") or
-        ad.get("typology") or
-        ad.get("rooms_num") or
-        find_deep(ad, ["characteristics", "rooms"]) or
-        find_deep(ad, ["characteristics", "typology"])
-    )
-    rooms = _int(rooms_raw)
+    bedrooms = _int(result.get("numberOfBedrooms"))
+    bathrooms = _int(result.get("numberOfBathrooms"))
+    # In the Portuguese typology system a "T2" = 2 bedrooms, so rooms==bedrooms
+    rooms = bedrooms if bedrooms is not None else _int(result.get("totalRooms"))
 
-    bedrooms = _int(
-        ad.get("bedrooms") or
-        ad.get("noOfBedrooms") or
-        find_deep(ad, ["characteristics", "bedrooms"])
-    ) or rooms
+    floor = None
+    floor_num = result.get("floorAsNumber")
+    if floor_num is not None:
+        floor = str(floor_num)
+    elif result.get("floorDescription"):
+        floor = str(result["floorDescription"])
 
-    bathrooms = _int(
-        ad.get("bathrooms") or
-        ad.get("noOfBathrooms") or
-        find_deep(ad, ["characteristics", "bathrooms"])
-    )
+    lat = _coord(result.get("latitude"))
+    lon = _coord(result.get("longitude"))
+    if (lat is None or lon is None) and isinstance(result.get("coordinates"), dict):
+        lat = lat if lat is not None else _coord(result["coordinates"].get("latitude"))
+        lon = lon if lon is not None else _coord(result["coordinates"].get("longitude"))
 
-    floor_raw = (
-        ad.get("floor") or
-        ad.get("floorNumber") or
-        find_deep(ad, ["characteristics", "floor"])
-    )
-    floor = str(floor_raw) if floor_raw is not None else None
+    address = result.get("address")
+    if address:
+        address = str(address).strip().rstrip(",").strip() or None
+    postal = result.get("zipCode")
 
-    condition = _normalize_condition(
-        ad.get("condition") or
-        ad.get("status") or
-        find_deep(ad, ["characteristics", "condition"])
-    )
-    property_type = _normalize_property_type(
-        ad.get("propertyType") or
-        ad.get("type") or
-        ad.get("typeName") or
-        find_deep(ad, ["characteristics", "propertyType"])
-    )
+    # Location hierarchy as reported by the API:
+    #   regionName1 = district (e.g. "Lisboa")
+    #   regionName2 = municipality / city (e.g. "Loures", "Sintra")
+    #   regionName3 = parish / freguesia (e.g. "Queluz e Belas")
+    #   localZone   = neighborhood / zone (e.g. "Benfica", "São João da Talha")
+    district = result.get("regionName1") or "Lisboa"
+    city = result.get("regionName2") or district
+    parish = result.get("regionName3")
+    neighborhood = result.get("localZone") or parish
 
-    # Location
-    title = ad.get("title") or ad.get("heading") or ad.get("subject")
-    description = ad.get("description")
-    if description:
-        description = str(description)[:1000]
+    property_type = _normalize_property_type(result.get("listingType"))
+    condition = _map_condition(result.get("conservationStatusID"))
 
-    location = find_deep(ad, ["location"]) or {}
-    address_obj = find_deep(ad, ["location", "address"]) or {}
+    description = _pt_description(result.get("descriptions"))
 
-    address = (
-        address_obj.get("street") or
-        address_obj.get("name") or
-        ad.get("address") or
-        ad.get("fullAddress")
-    )
+    # Title: API doesn't expose a clean human title, so synthesise one
+    title = result.get("newListingTitle") or result.get("previousListingTitle")
+    if not title:
+        type_name = result.get("listingType") or "Imóvel"
+        typology = f"T{bedrooms}" if bedrooms is not None else ""
+        locale_part = neighborhood or city or district or "Lisboa"
+        title = " ".join(filter(None, [type_name, typology, "em", locale_part]))
 
-    # Navigate location hierarchy
-    city_val = (
-        find_deep(location, ["address", "city"]) or
-        find_deep(location, ["city"]) or
-        ad.get("city") or
-        ad.get("municipality")
-    )
-    if isinstance(city_val, dict):
-        city_val = city_val.get("name")
-    city = str(city_val) if city_val else None
-
-    neighborhood_val = (
-        find_deep(location, ["address", "neighborhood"]) or
-        find_deep(location, ["neighborhood"]) or
-        ad.get("neighborhood") or
-        ad.get("zone")
-    )
-    if isinstance(neighborhood_val, dict):
-        neighborhood_val = neighborhood_val.get("name")
-    neighborhood = str(neighborhood_val) if neighborhood_val else None
-
-    parish_val = (
-        find_deep(location, ["address", "parish"]) or
-        find_deep(location, ["parish"]) or
-        ad.get("parish") or
-        ad.get("freguesia")
-    )
-    if isinstance(parish_val, dict):
-        parish_val = parish_val.get("name")
-    parish = str(parish_val) if parish_val else None
-
-    district_val = (
-        find_deep(location, ["address", "district"]) or
-        find_deep(location, ["district"]) or
-        ad.get("district") or
-        ad.get("region")
-    )
-    if isinstance(district_val, dict):
-        district_val = district_val.get("name")
-    district = str(district_val) if district_val else None
-
-    postal_code = (
-        address_obj.get("postalCode") or
-        ad.get("postalCode") or
-        ad.get("zipCode")
-    )
-
-    # Coordinates
-    coords = find_deep(ad, ["location", "coordinates"]) or find_deep(ad, ["coordinates"]) or {}
-    lat = _coord(coords.get("latitude") or ad.get("latitude") or ad.get("lat"))
-    lon = _coord(coords.get("longitude") or ad.get("longitude") or ad.get("lon") or ad.get("lng"))
-
-    # Try map data
-    if not lat:
-        map_data = find_deep(ad, ["location", "mapDetails"]) or find_deep(ad, ["map"]) or {}
-        lat = _coord(map_data.get("latitude") or map_data.get("lat"))
-        lon = _coord(map_data.get("longitude") or map_data.get("lon") or map_data.get("lng"))
-
-    # Images
-    images = []
-    imgs_raw = ad.get("images") or ad.get("photos") or ad.get("gallery") or ad.get("media") or []
-    if isinstance(imgs_raw, list):
-        for img in imgs_raw:
-            if isinstance(img, str):
-                images.append(img)
-            elif isinstance(img, dict):
-                url = (
-                    img.get("large") or img.get("medium") or
-                    img.get("url") or img.get("src") or
-                    img.get("link") or img.get("original") or
-                    img.get("imageUrl")
-                )
-                if url:
-                    images.append(url)
-    images = [u for u in images if u and u.startswith("http")][:MAX_IMAGES]
-
-    # Structured feature chips from __NEXT_DATA__
-    chips = []
-    for key in ("features", "characteristics", "extras", "amenities", "tags", "attributes"):
-        raw = ad.get(key)
-        if isinstance(raw, list):
-            for item in raw:
-                if isinstance(item, str):
-                    chips.append(item.strip())
-                elif isinstance(item, dict):
-                    label = item.get("label") or item.get("name") or item.get("text") or item.get("value")
-                    if label:
-                        chips.append(str(label).strip())
-
-    return {
-        "price": price,
-        "size": size,
-        "gross_area": gross_area,
-        "rooms": rooms,
-        "bedrooms": bedrooms,
-        "bathrooms": bathrooms,
-        "floor": floor,
-        "condition": condition,
-        "property_type": property_type,
-        "title": title,
-        "address": address,
-        "postal_code": postal_code,
-        "neighborhood": neighborhood,
-        "parish": parish,
-        "city": city,
-        "district": district,
-        "lat": lat,
-        "lon": lon,
-        "images": images,
-        "description": description,
-        "feature_chips": [c for c in chips if c] or None,
-    }
-
-
-# -- DOM-based extraction (fallback) ------------------------------------------
-
-def extract_from_dom(page: Page) -> dict:
-    """Extract listing data from DOM elements using common selectors."""
-    result = {}
-
-    try:
-        data = page.evaluate(r"""
-            () => {
-                const out = {};
-
-                // Title
-                const titleEl = document.querySelector(
-                    'h1[class*="title"], h1[data-testid="listing-title"], h1'
-                );
-                if (titleEl) out.title = titleEl.textContent.trim();
-
-                // Price — RE/MAX typically shows price in a prominent element
-                const priceEl = document.querySelector(
-                    '[class*="price" i] strong, ' +
-                    '[class*="price" i] span, ' +
-                    '[class*="Price"] strong, ' +
-                    '[class*="Price"] span, ' +
-                    '[data-testid="price"], ' +
-                    '.property-price, ' +
-                    '.listing-price'
-                );
-                if (priceEl) out.priceText = priceEl.textContent.trim();
-
-                // Features / characteristics — look for labeled value pairs
-                const featureItems = document.querySelectorAll(
-                    '[class*="feature"] li, ' +
-                    '[class*="characteristic"] li, ' +
-                    '[class*="detail"] li, ' +
-                    '.property-features li, ' +
-                    '.listing-features li'
-                );
-                out.features = Array.from(featureItems).map(li => li.textContent.trim());
-
-                // Area
-                const areaEl = document.querySelector(
-                    '[class*="area" i], [data-testid="area"]'
-                );
-                if (areaEl) out.area = areaEl.textContent.trim();
-
-                // Rooms/Typology — look for T0-T9+ pattern
-                const typoEl = document.querySelector(
-                    '[class*="typology" i], [class*="rooms" i], [data-testid="typology"]'
-                );
-                if (typoEl) out.typology = typoEl.textContent.trim();
-
-                // Bathrooms
-                const bathEl = document.querySelector(
-                    '[class*="bathroom" i], [data-testid="bathrooms"]'
-                );
-                if (bathEl) out.bathrooms = bathEl.textContent.trim();
-
-                // Condition
-                const condEl = document.querySelector(
-                    '[class*="condition" i], [class*="estado" i], [data-testid="condition"]'
-                );
-                if (condEl) out.condition = condEl.textContent.trim();
-
-                // Floor
-                const floorEl = document.querySelector(
-                    '[class*="floor" i], [class*="andar" i], [data-testid="floor"]'
-                );
-                if (floorEl) out.floor = floorEl.textContent.trim();
-
-                // Address / Location
-                const addrEl = document.querySelector(
-                    '[class*="address" i], [class*="location" i] span, ' +
-                    '[data-testid="address"], .property-location'
-                );
-                if (addrEl) out.address = addrEl.textContent.trim();
-
-                // Breadcrumbs for location hierarchy
-                const breadcrumbs = document.querySelectorAll(
-                    'nav[aria-label="breadcrumb"] a, ' +
-                    '[class*="breadcrumb"] a, ' +
-                    'ol[class*="breadcrumb"] a'
-                );
-                out.breadcrumbs = Array.from(breadcrumbs).map(a => a.textContent.trim());
-
-                // Description
-                const descEl = document.querySelector(
-                    '[class*="description" i] p, ' +
-                    '[class*="description" i] div, ' +
-                    '[data-testid="description"], ' +
-                    '.property-description p'
-                );
-                if (descEl) out.description = descEl.textContent.trim().slice(0, 1000);
-
-                // Images
-                const imgs = document.querySelectorAll(
-                    'picture img[src*="remax"], ' +
-                    'img[class*="gallery"], ' +
-                    'img[class*="photo"], ' +
-                    '[class*="gallery"] img, ' +
-                    '[class*="carousel"] img, ' +
-                    '[data-testid="gallery"] img'
-                );
-                out.images = Array.from(imgs)
-                    .map(i => i.src || i.dataset.src || '')
-                    .filter(s => s.startsWith('http'));
-
-                // Coordinates from map element or data attributes
-                const mapEl = document.querySelector(
-                    '[class*="map"], [data-testid="map"], ' +
-                    '#map, .property-map'
-                );
-                if (mapEl) {
-                    const lat = mapEl.dataset.lat || mapEl.getAttribute('data-lat') ||
-                                mapEl.dataset.latitude || mapEl.getAttribute('data-latitude');
-                    const lon = mapEl.dataset.lon || mapEl.getAttribute('data-lon') ||
-                                mapEl.dataset.lng || mapEl.getAttribute('data-lng') ||
-                                mapEl.dataset.longitude || mapEl.getAttribute('data-longitude');
-                    if (lat) out.lat = lat;
-                    if (lon) out.lon = lon;
-                }
-
-                // Try Google Maps static image URL for coordinates
-                if (!out.lat) {
-                    const staticMap = document.querySelector(
-                        'img[src*="maps.googleapis"], img[src*="maps.google"]'
-                    );
-                    if (staticMap) {
-                        const src = staticMap.getAttribute('src') || '';
-                        const coordMatch = src.match(/center=([\d.-]+)[,%20]+([\d.-]+)/);
-                        if (coordMatch) {
-                            out.lat = coordMatch[1];
-                            out.lon = coordMatch[2];
-                        }
-                    }
-                }
-
-                return out;
-            }
-        """)
-    except Exception as e:
-        log.warning(f"  DOM extraction JS failed: {e}")
-        return result
-
-    # Parse extracted data
-    if data.get("priceText"):
-        result["price"] = _num(data["priceText"])
-
-    if data.get("area"):
-        m = re.search(r"([\d.,]+)\s*m", data["area"])
-        if m:
-            result["size"] = _num(m.group(1))
-
-    if data.get("typology"):
-        rooms = _int(data["typology"])
-        if rooms is not None:
-            result["rooms"] = rooms
-            result["bedrooms"] = rooms
-
-    if data.get("bathrooms"):
-        result["bathrooms"] = _int(data["bathrooms"])
-
-    if data.get("floor"):
-        f = data["floor"]
-        if f.lower() in ("r/c", "rés-do-chão", "res do chao"):
-            result["floor"] = "0"
-        else:
-            result["floor"] = str(_int(f)) if _int(f) is not None else f
-
-    if data.get("condition"):
-        result["condition"] = _normalize_condition(data["condition"])
-
-    result["title"] = data.get("title")
-    result["description"] = data.get("description")
-    result["address"] = data.get("address")
-
-    # Preserve raw feature strings as chips for downstream property_score scoring
-    raw_chips = [str(f).strip() for f in (data.get("features") or []) if f and str(f).strip()]
-    if raw_chips:
-        result["feature_chips"] = raw_chips
-
-    # Parse features for additional data
-    for feat in (data.get("features") or []):
-        feat_lower = feat.lower()
-        if ("m2" in feat_lower or "m\u00b2" in feat_lower) and not result.get("size"):
-            m = re.search(r"([\d.,]+)\s*m", feat)
-            if m:
-                val = _num(m.group(1))
-                if "brut" in feat_lower:
-                    result["gross_area"] = val
-                    if not result.get("size"):
-                        result["size"] = val
-                elif "util" in feat_lower or "\u00fatil" in feat_lower:
-                    result["size"] = val
-                else:
-                    if not result.get("size"):
-                        result["size"] = val
-        elif re.match(r"T\d", feat.strip()) and not result.get("rooms"):
-            rooms = _int(feat)
-            result["rooms"] = rooms
-            result["bedrooms"] = rooms
-        elif ("andar" in feat_lower or "piso" in feat_lower) and not result.get("floor"):
-            m = re.search(r"(\d+)", feat)
-            if m:
-                result["floor"] = m.group(1)
-            elif "r\u00e9s" in feat_lower or "r/c" in feat_lower:
-                result["floor"] = "0"
-
-    # Location from breadcrumbs: typically [Home, District, City, Neighborhood]
-    breadcrumbs = data.get("breadcrumbs") or []
-    if len(breadcrumbs) >= 3:
-        result["district"] = breadcrumbs[1] if len(breadcrumbs) > 1 else None
-        result["city"] = breadcrumbs[2] if len(breadcrumbs) > 2 else None
-        result["neighborhood"] = breadcrumbs[3] if len(breadcrumbs) > 3 else None
-
-    if data.get("lat"):
-        result["lat"] = _coord(data["lat"])
-    if data.get("lon"):
-        result["lon"] = _coord(data["lon"])
-
-    if data.get("images"):
-        result["images"] = data["images"][:MAX_IMAGES]
-
-    # Property type from title
-    title = (result.get("title") or "").lower()
-    for pt in ["apartamento", "moradia", "vivenda", "loja", "terreno",
-               "escrit\u00f3rio", "garagem", "armaz\u00e9m", "pr\u00e9dio"]:
-        if pt in title:
-            result["property_type"] = _normalize_property_type(pt)
-            break
-
-    return result
-
-
-# -- Detail page scraper -------------------------------------------------------
-
-def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Optional[Listing]:
-    """Visit a listing detail page and return a Listing object."""
-    from models import detect_listing_type
-    listing_type = detect_listing_type(url, fallback=listing_type)
-
-    source_id = _extract_source_id(url)
-
-    # Pull __NEXT_DATA__
-    next_data = extract_next_data(page)
-    page_props = find_deep(next_data, ["props", "pageProps"], ["pageProps"]) or {}
-
-    nd = extract_listing_from_next_data(page_props)
-
-    # Always run DOM extraction so merge logic can fill fields __NEXT_DATA__ doesn't provide
-    dom = extract_from_dom(page)
-
-    price      = nd.get("price")      or dom.get("price")
-    size       = nd.get("size")       or dom.get("size")
-    gross_area = nd.get("gross_area") or dom.get("gross_area")
-    lat        = nd.get("lat")        or dom.get("lat")
-    lon        = nd.get("lon")        or dom.get("lon")
-    address    = nd.get("address")    or dom.get("address")
-    postal     = nd.get("postal_code")
-    city       = nd.get("city")       or dom.get("city") or "Lisboa"
-    district   = nd.get("district")   or dom.get("district") or "Lisboa"
-    bedrooms   = nd.get("bedrooms")   or dom.get("bedrooms")
-    floor      = nd.get("floor")      or dom.get("floor")
-    images     = nd.get("images")     or dom.get("images") or []
+    images = _collect_images(result)
+    feature_chips = _collect_feature_chips(result)
 
     price_per_sqm = round(price / size, 2) if price and size and size > 0 else None
 
-    # Merge chips from __NEXT_DATA__ and DOM, dedupe case-insensitively
-    merged_chips = []
-    seen_chip_keys = set()
-    for source_chips in (nd.get("feature_chips") or [], dom.get("feature_chips") or []):
-        for c in source_chips:
-            if not c:
-                continue
-            k = str(c).strip().lower()
-            if not k or k in seen_chip_keys:
-                continue
-            seen_chip_keys.add(k)
-            merged_chips.append(str(c).strip())
+    status = "sold" if result.get("isSold") else "active"
 
     return Listing(
         source="remax",
         source_id=source_id,
         url=url,
         listing_type=listing_type,
-        status='active',
+        status=status,
         price_amount=price,
         price_per_sqm=price_per_sqm,
         size_sqm=size,
         gross_area_sqm=gross_area,
-        rooms=nd.get("rooms") or dom.get("rooms"),
+        rooms=rooms,
         bedrooms=bedrooms,
-        bathrooms=nd.get("bathrooms") or dom.get("bathrooms"),
+        bathrooms=bathrooms,
         floor=floor,
-        property_type=nd.get("property_type") or dom.get("property_type"),
-        condition=nd.get("condition") or dom.get("condition"),
-        title=nd.get("title") or dom.get("title"),
+        property_type=property_type,
+        condition=condition,
+        title=title,
         address=address,
         postal_code=postal,
-        neighborhood=nd.get("neighborhood") or dom.get("neighborhood"),
-        parish=nd.get("parish"),
+        neighborhood=neighborhood,
+        parish=parish,
         district=district,
         city=city,
         lat=lat,
         lon=lon,
         images=json.dumps(images) if images else None,
         hash_dedupe=_hash(address, city, price, size),
-        description=nd.get("description") or dom.get("description"),
-        feature_chips=json.dumps(merged_chips) if merged_chips else None,
+        description=description,
+        feature_chips=json.dumps(feature_chips) if feature_chips else None,
         scraped_at=datetime.utcnow(),
     )
-
-
-# -- Normalisation helpers -----------------------------------------------------
-
-def _normalize_property_type(raw) -> str:
-    if not raw:
-        return "apartment"
-    s = str(raw).lower()
-    if any(w in s for w in ["moradia", "vivenda", "house", "villa"]):  return "house"
-    if any(w in s for w in ["est\u00fadio", "studio", "t0"]):              return "studio"
-    if "loft" in s:                                                     return "loft"
-    if "duplex" in s:                                                   return "duplex"
-    if any(w in s for w in ["penthouse", "cobertura"]):                return "penthouse"
-    return "apartment"
-
-
-def _normalize_condition(raw) -> Optional[str]:
-    if not raw:
-        return None
-    s = str(raw).lower()
-    if any(w in s for w in ["new", "novo", "new_development"]):        return "new"
-    if any(w in s for w in ["renov", "remodel", "rehabilit"]):         return "renovated"
-    if any(w in s for w in ["bom estado", "good", "usado", "used"]):   return "used"
-    if any(w in s for w in ["para recuperar", "to_renovate", "recover"]): return "to_renovate"
-    if any(w in s for w in ["em constru\u00e7\u00e3o", "under_construction"]):    return "new"
-    return "used"
-
-
-# -- Pagination ----------------------------------------------------------------
-
-def build_page_url(base_url: str, page_num: int) -> str:
-    if page_num == 1:
-        return base_url
-    # Use query parameter for pagination
-    sep = "&" if "?" in base_url else "?"
-    return f"{base_url}{sep}page={page_num}"
 
 
 # -- Main scraper --------------------------------------------------------------
 
 def run_scraper(
-    search_url: str = DEFAULT_SEARCH,
+    search_value: str = DEFAULT_SEARCH_VALUE,
     max_pages: int = DEFAULT_MAX_PAGES,
     max_items: int = DEFAULT_MAX_ITEMS,
+    page_size: int = DEFAULT_PAGE_SIZE,
     headless: bool = True,
     listing_type: str = 'sale',
 ):
@@ -990,10 +591,10 @@ def run_scraper(
     run_id = db.start_scrape_run("remax")
 
     new_count = updated_count = error_count = 0
-    skipped_known = 0
+    skipped_known = skipped_excluded = 0
     total_pushed = 0
+    seen_source_ids = set()
 
-    # Load already-scraped source_ids with prices so we can skip unchanged ones
     known_listings = _load_known_listings(listing_type)
     log.info(f"Loaded {len(known_listings)} known listings from DB")
 
@@ -1030,137 +631,127 @@ def run_scraper(
         else:
             log.warning("playwright-stealth not installed -- bot detection may block scraping")
 
-        # Warm up: visit homepage to pick up cookies
-        log.info("Warming up session on remax.pt...")
-        page.goto(BASE_URL, timeout=30000)
-        accept_cookies(page)
-        _polite_delay()
-
-        # -- Collect listings from search pages --------------------------------
-        # Each item has {"url": ..., "price": ...} so we can compare with DB
-        all_search_items = []  # type: list
-        seen_urls = set()  # type: set
-        blocked_count = 0
-
-        for page_num in range(1, max_pages + 1):
-            page_url = build_page_url(search_url, page_num)
-            log.info(f"Search page {page_num}: {page_url}")
-
-            if not _goto_with_retry(page, page_url):
-                blocked_count += 1
-                if blocked_count >= 3:
-                    log.warning("Blocked 3 search pages -- session may be expired. Run --setup.")
-                break
-
-            search_items = extract_search_listings(page)
-            log.info(f"  Found {len(search_items)} listings on page {page_num}")
-
-            if not search_items:
-                break  # end of results
-
-            for item in search_items:
-                if item["url"] not in seen_urls:
-                    if _is_excluded_url(item["url"]):
-                        log.info(f"  Excluded (non-property URL): {item['url']}")
-                        continue
-                    seen_urls.add(item["url"])
-                    all_search_items.append(item)
-
-            if len(all_search_items) >= max_items * 2:
-                log.info(f"Collected enough URLs ({len(all_search_items)}). Moving to detail scraping.")
-                break
-
-            _polite_delay()
-
-        log.info(f"Total listings collected from search: {len(all_search_items)}")
-
-        # -- Filter: skip known listings whose price hasn't changed ------------
-        urls_to_scrape = []
-        seen_source_ids = set()
-        price_changed = 0
-        for item in all_search_items:
-            sid = _extract_source_id(item["url"])
-            if sid:
-                seen_source_ids.add(sid)
-            if sid in known_listings:
-                old_price = known_listings[sid]
-                new_price = item.get("price")
-                # Re-scrape if price changed (or if we couldn't read the preview price)
-                if not new_price or not old_price or abs(new_price - old_price) > 1:
-                    if new_price and old_price:
-                        log.info(f"  Price changed for {sid}: {old_price} -> {new_price}")
-                    urls_to_scrape.append(item["url"])
-                    price_changed += 1
-                else:
-                    skipped_known += 1
-            else:
-                urls_to_scrape.append(item["url"])
-
-        log.info(
-            f"Skipping {skipped_known} unchanged listings, "
-            f"{price_changed} price changes to update, "
-            f"{len(urls_to_scrape) - price_changed} new to scrape"
+        # Warm up: visit the search page once so the API call inherits
+        # cookies / tokens / bot-detection fingerprints from a real page load
+        warmup_state = {
+            "regionName": search_value,
+            "businessType": 1 if listing_type == 'sale' else 2,
+            "mediaTypes": [1],
+        }
+        warmup_path = "comprar" if listing_type == 'sale' else "arrendar"
+        warmup_url = (
+            f"{BASE_URL}/{warmup_path}?searchQueryState="
+            f"{urllib.parse.quote(json.dumps(warmup_state, separators=(',', ':')))}"
         )
+        log.info(f"Warming up session: {warmup_url}")
+        try:
+            page.goto(warmup_url, timeout=30000, wait_until="domcontentloaded")
+            accept_cookies(page)
+            page.wait_for_timeout(2500)
+        except PWTimeout:
+            log.warning("Warm-up timeout, continuing anyway")
 
-        # -- Visit each detail page --------------------------------------------
-        for i, detail_url in enumerate(urls_to_scrape):
-            if total_pushed >= max_items:
-                log.info(f"Reached max_items={max_items}. Stopping.")
+        # -- Paginate through the API -----------------------------------------
+        page_number = 1
+        total_pages_reported = None
+        empty_page_count = 0
+
+        while page_number <= max_pages and total_pushed < max_items:
+            log.info(f"API page {page_number}/{max_pages} (pageSize={page_size})")
+            data = fetch_search_page(page, listing_type, search_value, page_number, page_size)
+            if data is None:
+                log.warning("No data from API, stopping")
                 break
 
-            log.info(f"[{i+1}/{len(urls_to_scrape)}] {detail_url}")
+            if total_pages_reported is None:
+                total_pages_reported = data.get("totalPages")
+                total_count = data.get("total")
+                log.info(
+                    f"  API reports total={total_count}, totalPages={total_pages_reported}"
+                )
 
-            try:
-                if not _goto_with_retry(page, detail_url):
-                    log.warning(f"  Blocked on detail page -- skipping")
-                    error_count += 1
-                    continue
+            results = data.get("results") or []
+            if not results:
+                empty_page_count += 1
+                if empty_page_count >= 2:
+                    log.info("  Two empty pages in a row, stopping")
+                    break
+                page_number += 1
+                _polite_delay()
+                continue
+            empty_page_count = 0
 
-                # Wait for content
+            page_new = page_updated = 0
+            for result in results:
+                if total_pushed >= max_items:
+                    break
+
                 try:
-                    page.wait_for_selector(
-                        "#__NEXT_DATA__, h1, [class*='price']",
-                        timeout=8000
-                    )
-                except PWTimeout:
-                    pass
+                    if _is_excluded_tags(result.get("descriptionTags") or ""):
+                        skipped_excluded += 1
+                        continue
 
-                listing = scrape_detail_page(page, detail_url, listing_type=listing_type)
+                    listing = build_listing_from_api(result, listing_type)
+                    if listing is None:
+                        error_count += 1
+                        continue
 
-                if listing is None or listing.price_amount is None:
-                    log.warning(f"  No price extracted -- skipping")
-                    error_count += 1
-                elif _is_excluded_listing(listing):
-                    log.info(f"  Excluded (non-property): {listing.title}")
-                    continue
-                else:
+                    if _is_excluded_listing(listing):
+                        skipped_excluded += 1
+                        continue
+
+                    sid = listing.source_id
+                    seen_source_ids.add(sid)
+
+                    # Skip unchanged known listings
+                    if sid in known_listings:
+                        old_price = known_listings[sid]
+                        new_price = listing.price_amount
+                        if (old_price and new_price and
+                                abs(new_price - old_price) <= 1):
+                            skipped_known += 1
+                            continue
+                        if old_price and new_price:
+                            log.info(
+                                f"  Price changed for {sid}: "
+                                f"{old_price:,.0f} -> {new_price:,.0f}"
+                            )
+
                     _, is_new = db.upsert_listing(listing)
                     if is_new:
                         new_count += 1
+                        page_new += 1
                     else:
                         updated_count += 1
+                        page_updated += 1
                     total_pushed += 1
-                    log.info(
-                        f"  OK {listing.neighborhood or 'unknown'} "
-                        f"T{listing.rooms} "
-                        f"EUR{listing.price_amount:,.0f} "
-                        f"({listing.size_sqm}m2)"
-                    )
+                except Exception as e:
+                    log.warning(f"  Error processing result: {e}")
+                    error_count += 1
 
-            except PWTimeout:
-                log.warning(f"  Timeout on detail page -- skipping")
-                error_count += 1
-            except Exception as e:
-                log.warning(f"  Error: {e}")
-                error_count += 1
+            log.info(
+                f"  Page {page_number}: +{page_new} new, {page_updated} updated "
+                f"(total so far: {total_pushed})"
+            )
 
+            if total_pages_reported and page_number >= total_pages_reported:
+                log.info(f"Reached last API page ({total_pages_reported})")
+                break
+            if data.get("hasNextPage") is False:
+                log.info("API reports no next page")
+                break
+
+            page_number += 1
             _polite_delay()
 
         context.close()
 
-    # -- Detect missing listings -----------------------------------------------
+    # -- Missing detection -----------------------------------------------------
     if len(known_listings) > 0 and len(seen_source_ids) < len(known_listings) * 0.5:
-        log.warning(f"Only saw {len(seen_source_ids)}/{len(known_listings)} listings — skipping missing detection (possible block)")
+        log.warning(
+            f"Only saw {len(seen_source_ids)}/{len(known_listings)} listings — "
+            f"skipping missing detection (possible block)"
+        )
     else:
         missing_result = db.process_missing_listings(
             source="remax", listing_type=listing_type,
@@ -1186,6 +777,7 @@ def run_scraper(
     print(f"  New              : {new_count}")
     print(f"  Updated          : {updated_count}")
     print(f"  Skipped (known)  : {skipped_known}")
+    print(f"  Skipped (excl)   : {skipped_excluded}")
     print(f"  Errors           : {error_count}")
 
 
@@ -1193,14 +785,16 @@ def run_scraper(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="remax.pt scraper")
-    parser.add_argument("--url", default=None,
-                        help="Search URL to start from (overrides --type)")
+    parser.add_argument("--search", default=DEFAULT_SEARCH_VALUE,
+                        help=f"Search value (region name) to scrape (default: {DEFAULT_SEARCH_VALUE})")
     parser.add_argument("--type", choices=["sale", "rent"], default="sale",
                         help="Listing type to scrape: 'sale' (default) or 'rent'")
     parser.add_argument("--max-pages", type=int, default=DEFAULT_MAX_PAGES,
-                        help=f"Max search result pages (default: {DEFAULT_MAX_PAGES})")
+                        help=f"Max API result pages (default: {DEFAULT_MAX_PAGES})")
     parser.add_argument("--max-items", type=int, default=DEFAULT_MAX_ITEMS,
                         help=f"Max listings to scrape (default: {DEFAULT_MAX_ITEMS})")
+    parser.add_argument("--page-size", type=int, default=DEFAULT_PAGE_SIZE,
+                        help=f"API pageSize (default: {DEFAULT_PAGE_SIZE})")
     parser.add_argument("--no-headless", action="store_true",
                         help="Show the browser window (useful for debugging)")
     parser.add_argument("--setup", action="store_true",
@@ -1222,7 +816,12 @@ if __name__ == "__main__":
             page = context.new_page()
             if _STEALTH_AVAILABLE:
                 Stealth().use_sync(page)
-            page.goto(DEFAULT_SEARCH, timeout=60000)
+            warmup_state = {"regionName": DEFAULT_SEARCH_VALUE, "businessType": 1, "mediaTypes": [1]}
+            warmup_url = (
+                f"{BASE_URL}/comprar?searchQueryState="
+                f"{urllib.parse.quote(json.dumps(warmup_state, separators=(',', ':')))}"
+            )
+            page.goto(warmup_url, timeout=60000)
             print("\n" + "=" * 60)
             print("Browser is open. Solve any challenge on remax.pt,")
             print("verify listings are visible, then press ENTER here.")
@@ -1231,17 +830,11 @@ if __name__ == "__main__":
             context.close()
             print("Session saved. You can now run the scraper normally.")
     else:
-        listing_type = args.type
-        if args.url:
-            search_url = args.url
-        elif listing_type == "rent":
-            search_url = RENTAL_SEARCH
-        else:
-            search_url = DEFAULT_SEARCH
         run_scraper(
-            search_url=search_url,
+            search_value=args.search,
             max_pages=args.max_pages,
             max_items=args.max_items,
+            page_size=args.page_size,
             headless=not args.no_headless,
-            listing_type=listing_type,
+            listing_type=args.type,
         )
