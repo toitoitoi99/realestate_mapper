@@ -1,7 +1,8 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useMap } from 'react-leaflet'
 import { Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
+import { addressLookup } from '../api'
 
 const PIN_ICON = L.divIcon({
   className: '',
@@ -21,16 +22,33 @@ function FlyToResult({ result }) {
   return null
 }
 
-export default function AddressSearch() {
+export default function AddressSearch({ onSelectListing, onLookupResult }) {
   const [query, setQuery] = useState('')
   const [suggestions, setSuggestions] = useState([])
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [lookupState, setLookupState] = useState(null) // null | 'loading' | 'done' | 'error' | 'empty' | 'busy'
+  const [lookupData, setLookupData] = useState(null)
+  const [lookupError, setLookupError] = useState(null)
   const debounceRef = useRef(null)
+  const containerRef = useRef(null)
+
+  // Close suggestions when clicking outside the search container
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setSuggestions([])
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   function handleChange(e) {
     const val = e.target.value
     setQuery(val)
+    setLookupState(null)
+    setLookupData(null)
     clearTimeout(debounceRef.current)
     if (val.trim().length < 3) { setSuggestions([]); return }
 
@@ -50,16 +68,48 @@ export default function AddressSearch() {
     setQuery(item.display_name.split(',').slice(0, 2).join(',').trim())
     setSuggestions([])
     setResult({ lat: parseFloat(item.lat), lon: parseFloat(item.lon), label: item.display_name })
+    setLookupState(null)
+    setLookupData(null)
   }
 
   function handleKeyDown(e) {
-    if (e.key === 'Escape') { setSuggestions([]); setQuery(''); setResult(null) }
+    if (e.key === 'Escape') { setSuggestions([]); setQuery(''); setResult(null); setLookupState(null); setLookupData(null) }
   }
 
   function handleClear() {
     setQuery('')
     setSuggestions([])
     setResult(null)
+    setLookupState(null)
+    setLookupData(null)
+  }
+
+  async function handleLookup() {
+    if (!result) return
+    setSuggestions([])
+    setLookupState('loading')
+    setLookupData(null)
+    try {
+      const data = await addressLookup(query, result.lat, result.lon)
+      setLookupData(data)
+      if (!data.listings || data.listings.length === 0) {
+        setLookupState('empty')
+      } else {
+        setLookupState('done')
+        if (onLookupResult) onLookupResult(data.listings)
+        if (onSelectListing && data.listings[0]) {
+          const first = data.listings[0]
+          onSelectListing({ ...first, listing_type: first.listing_type || 'sale' })
+        }
+      }
+    } catch (err) {
+      if (err.message?.includes('429')) {
+        setLookupState('busy')
+      } else {
+        setLookupState('error')
+        setLookupError(err.message || 'Search failed')
+      }
+    }
   }
 
   return (
@@ -73,6 +123,7 @@ export default function AddressSearch() {
 
       {/* Search box — positioned top-center of map */}
       <div
+        ref={containerRef}
         className="absolute top-3 left-1/2 z-[1000]"
         style={{ transform: 'translateX(-50%)', width: 360 }}
       >
@@ -82,6 +133,7 @@ export default function AddressSearch() {
             value={query}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onBlur={() => setTimeout(() => setSuggestions([]), 150)}
             placeholder="Search address in Lisbon…"
             className="w-full rounded-lg shadow-md border border-gray-200 bg-white px-4 py-2 pr-8 text-sm text-gray-800 placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-400"
           />
@@ -109,6 +161,53 @@ export default function AddressSearch() {
 
         {loading && (
           <div className="mt-1 bg-white rounded-lg shadow px-4 py-2 text-xs text-gray-400">Searching…</div>
+        )}
+
+        {/* Lookup button — appears after address is selected */}
+        {result && lookupState === null && (
+          <button
+            onClick={handleLookup}
+            className="mt-1 w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow px-4 py-2 transition-colors"
+          >
+            Find listings here
+          </button>
+        )}
+
+        {/* Lookup states */}
+        {lookupState === 'loading' && (
+          <div className="mt-1 bg-white rounded-lg shadow px-4 py-2.5 text-sm text-gray-600 flex items-center gap-2">
+            <svg className="animate-spin h-4 w-4 text-blue-500" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
+            </svg>
+            Searching… this may take 15-30 seconds
+          </div>
+        )}
+
+        {lookupState === 'done' && lookupData && (
+          <div className="mt-1 bg-green-50 border border-green-200 rounded-lg shadow px-4 py-2 text-sm text-green-800">
+            Found {lookupData.listings.length} listing{lookupData.listings.length !== 1 ? 's' : ''}
+            {lookupData.source === 'idealista' && ' (scraped from Idealista)'}
+            {lookupData.source === 'database' && ' (already in database)'}
+          </div>
+        )}
+
+        {lookupState === 'empty' && (
+          <div className="mt-1 bg-yellow-50 border border-yellow-200 rounded-lg shadow px-4 py-2 text-sm text-yellow-800">
+            No listings found near this address
+          </div>
+        )}
+
+        {lookupState === 'busy' && (
+          <div className="mt-1 bg-orange-50 border border-orange-200 rounded-lg shadow px-4 py-2 text-sm text-orange-800">
+            Another lookup is in progress. Try again in a moment.
+          </div>
+        )}
+
+        {lookupState === 'error' && (
+          <div className="mt-1 bg-red-50 border border-red-200 rounded-lg shadow px-4 py-2 text-sm text-red-800">
+            {lookupError || 'Search failed'}
+          </div>
         )}
       </div>
     </>

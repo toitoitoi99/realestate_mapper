@@ -8,8 +8,7 @@ function getActiveChips(filters, t) {
   if (filters.max_price) chips.push({ key: 'max_price', label: `≤ €${Number(filters.max_price).toLocaleString('pt-PT')}` })
   if (filters.min_sqm) chips.push({ key: 'min_sqm', label: `≥ ${filters.min_sqm} m²` })
   if (filters.max_sqm) chips.push({ key: 'max_sqm', label: `≤ ${filters.max_sqm} m²` })
-  if (filters.rooms) chips.push({ key: 'rooms', label: `T${filters.rooms}${filters.rooms === '5' ? '+' : ''}` })
-  if (filters.show_sold) chips.push({ key: 'show_sold', label: t.showSold, value: false })
+  if (filters.show_sold !== 'active') chips.push({ key: 'show_sold', label: filters.show_sold === 'sold' ? t.soldOnly : t.bothStatus, value: 'active' })
   if (filters.min_price_per_sqm) chips.push({ key: 'min_price_per_sqm', label: `≥ €${Number(filters.min_price_per_sqm).toLocaleString('pt-PT')}/m²` })
   if (filters.max_price_per_sqm) chips.push({ key: 'max_price_per_sqm', label: `≤ €${Number(filters.max_price_per_sqm).toLocaleString('pt-PT')}/m²` })
   if (filters.bedrooms) chips.push({ key: 'bedrooms', label: `${filters.bedrooms} ${t.bedrooms}` })
@@ -17,10 +16,13 @@ function getActiveChips(filters, t) {
   if (filters.floor) chips.push({ key: 'floor', label: `${t.floor}: ${filters.floor}` })
   if (filters.property_type) chips.push({ key: 'property_type', label: filters.property_type })
   if (filters.condition) chips.push({ key: 'condition', label: filters.condition })
+  if (filters.min_deal_score > 0) chips.push({ key: 'min_deal_score', label: `Deal ≥ ${filters.min_deal_score}`, value: 0 })
+  if (filters.min_rarity_score > 0) chips.push({ key: 'min_rarity_score', label: `Rarity ≥ ${filters.min_rarity_score}`, value: 0 })
   if (filters.parish) chips.push({ key: 'parish', label: filters.parish })
   if (filters.district) chips.push({ key: 'district', label: filters.district })
   if (filters.city) chips.push({ key: 'city', label: filters.city })
   if (filters.postal_code) chips.push({ key: 'postal_code', label: filters.postal_code })
+  if (filters.grant_eligible) chips.push({ key: 'grant_eligible', label: 'Grant eligible', value: '' })
   return chips
 }
 
@@ -101,7 +103,7 @@ export default function FilterPanel({ filters, setFilter, reset }) {
       <div>
         <label className="text-xs text-gray-500 mb-1 block">{t.listingType}</label>
         <div className="flex rounded overflow-hidden border border-gray-200 text-sm">
-          {[['sale', t.buy], ['rent', t.rent]].map(([type, label]) => (
+          {[['sale', t.buy], ['rent', t.rent], ['all', t.all]].map(([type, label]) => (
             <button key={type} onClick={() => setFilter('listing_type', type)}
               className={`flex-1 py-1.5 ${filters.listing_type === type
                 ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
@@ -132,34 +134,35 @@ export default function FilterPanel({ filters, setFilter, reset }) {
         </div>
       </div>
 
-      {/* Section: Property basics */}
+      {/* Status filter: Active / Sold / Both */}
       <div>
-        <label className="text-xs text-gray-500 mb-1 block">{t.rooms}</label>
-        <select
-          value={filters.rooms}
-          onChange={e => setFilter('rooms', e.target.value)}
-          className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-        >
-          <option value="">{t.any}</option>
-          {[0, 1, 2, 3, 4, 5].map(r => (
-            <option key={r} value={r}>T{r}{r === 5 ? '+' : ''}</option>
+        <label className="text-xs text-gray-500 mb-1 block">{t.statusFilter}</label>
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+          {[
+            { value: 'active', label: t.activeOnly },
+            { value: 'sold',   label: t.soldOnly },
+            { value: 'both',   label: t.bothStatus },
+          ].map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => setFilter('show_sold', opt.value)}
+              className={`flex-1 text-xs py-1.5 font-medium transition-colors ${
+                filters.show_sold === opt.value
+                  ? opt.value === 'sold'
+                    ? 'bg-amber-500 text-white'
+                    : opt.value === 'both'
+                    ? 'bg-gray-700 text-white'
+                    : 'bg-blue-500 text-white'
+                  : 'bg-white text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              {opt.label}
+            </button>
           ))}
-        </select>
+        </div>
       </div>
 
-      {/* Show sold toggle */}
-      <label className="flex items-center gap-2 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={filters.show_sold}
-          onChange={e => setFilter('show_sold', e.target.checked)}
-          className="rounded border-gray-300 text-amber-500 focus:ring-amber-400"
-        />
-        <span className="text-xs text-gray-600">{t.showSold}</span>
-        <span className="w-3 h-3 rounded-full bg-amber-400 inline-block ml-auto" />
-      </label>
-
-      {filters.show_sold && (
+      {(filters.show_sold === 'sold' || filters.show_sold === 'both') && (
         <div>
           <label className="text-xs text-gray-500 mb-1 block">{t.soldDateRange}</label>
           <div className="flex gap-2">
@@ -175,6 +178,60 @@ export default function FilterPanel({ filters, setFilter, reset }) {
               onChange={e => setFilter('sold_before', e.target.value)}
               className="flex-1 border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-amber-400"
             />
+          </div>
+        </div>
+      )}
+
+      {/* Grant eligible toggle */}
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={!!filters.grant_eligible}
+          onChange={e => setFilter('grant_eligible', e.target.checked || '')}
+          className="rounded border-gray-300 text-emerald-500 focus:ring-emerald-400"
+        />
+        <span className="text-xs text-gray-600">Grant eligible only</span>
+        <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block ml-auto" />
+      </label>
+
+      {/* Deal Score slider */}
+      <div className="bg-gray-50 rounded-lg p-3 -mx-1">
+        <label className="text-xs text-gray-500 mb-2 block">{t.dealScoreFilter}</label>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="5"
+          value={filters.min_deal_score}
+          onChange={e => setFilter('min_deal_score', Number(e.target.value))}
+          className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
+        />
+        <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+          <span>{t.scoreAll}</span>
+          <span className="font-medium text-blue-600">
+            {filters.min_deal_score === 0 ? t.scoreAll : `≥ ${filters.min_deal_score}`}
+          </span>
+        </div>
+      </div>
+
+      {/* Rarity Score slider (sales only) */}
+      {filters.listing_type !== 'rent' && (
+        <div className="bg-gray-50 rounded-lg p-3 -mx-1">
+          <label className="text-xs text-gray-500 mb-2 block">{t.rarityScoreFilter}</label>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="5"
+            value={filters.min_rarity_score}
+            onChange={e => setFilter('min_rarity_score', Number(e.target.value))}
+            className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+          />
+          <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+            <span>{t.scoreAll}</span>
+            <span className="font-medium text-emerald-600">
+              {filters.min_rarity_score === 0 ? t.scoreAll : `≥ ${filters.min_rarity_score}`}
+            </span>
           </div>
         </div>
       )}

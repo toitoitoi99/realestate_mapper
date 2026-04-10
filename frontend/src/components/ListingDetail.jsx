@@ -4,6 +4,8 @@ import { translateDescription, fetchListingDetail, fetchNearbyProjects } from '.
 import RarityBadge from './RarityBadge'
 import AmenityRating from './AmenityRating'
 import ListingComparison from './ListingComparison'
+import DealScore from './DealScore'
+import PropertyScore from './PropertyScore'
 import SourceLogo from './SourceLogo'
 
 function PriceDiff({ current, other }) {
@@ -53,6 +55,7 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
   const [crossListings, setCrossListings] = useState([])
   const [previousPrice, setPreviousPrice] = useState(null)
   const [nearbyProjects, setNearbyProjects] = useState(null)
+  const [radiusM, setRadiusM] = useState(500)
 
   useEffect(() => {
     if (lang !== 'en' || !listing.description) {
@@ -255,7 +258,7 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
           {/* Title + Price + Days on market */}
           <div>
             {(isSold || isReserved) && (
-              <span className="inline-block text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded mb-1 uppercase tracking-wide">
+              <span className="inline-block text-xs font-semibold text-gray-800 bg-gray-100 px-2 py-0.5 rounded mb-1 uppercase tracking-wide">
                 {isSold ? t.sold : t.reserved}
               </span>
             )}
@@ -346,6 +349,11 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
             )}
           </div>
 
+          {/* Deal Score */}
+          {listing.listing_type !== 'rent' && (
+            <DealScore listing={listing} listingType={listing.listing_type || 'sale'} radiusM={radiusM} />
+          )}
+
           {/* Price comparison across sites */}
           {crossListings.length > 0 && (
             <div className="border border-gray-200 rounded-lg p-3">
@@ -376,7 +384,7 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
           )}
 
           {/* ============ PRICE COMPARISON (MOVED UP) ============ */}
-          <ListingComparison listing={listing} />
+          <ListingComparison listing={listing} radiusM={radiusM} onRadiusChange={setRadiusM} />
 
           {/* Property details */}
           {details.length > 0 && (
@@ -401,6 +409,9 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
               ))}
             </div>
           )}
+
+          {/* Property Feature Score */}
+          <PropertyScore listing={listing} listingType={listing.listing_type || 'sale'} />
 
           {/* Amenity Rating */}
           <AmenityRating lat={listing.lat} lon={listing.lon} />

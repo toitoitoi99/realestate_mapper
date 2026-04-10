@@ -7,6 +7,22 @@ from datetime import datetime
 from typing import Optional
 
 
+import re
+
+# Patterns that indicate a rental listing URL or title
+_RENT_URL_RE = re.compile(r'arrendar|/arrendamento/|/alugar/|/aluguer/', re.IGNORECASE)
+_SALE_URL_RE = re.compile(r'comprar|/venda/', re.IGNORECASE)
+
+
+def detect_listing_type(url: str, fallback: str = 'sale') -> str:
+    """Infer listing type from the URL.  Returns 'rent' or 'sale'."""
+    if _RENT_URL_RE.search(url):
+        return 'rent'
+    if _SALE_URL_RE.search(url):
+        return 'sale'
+    return fallback
+
+
 @dataclass
 class Listing:
     """A single real estate listing."""
@@ -63,6 +79,7 @@ class Listing:
 
     # Metadata
     description: Optional[str] = None
+    feature_chips: Optional[str] = None   # JSON array of structured feature chips from source site
     scraped_at: datetime = field(default_factory=datetime.utcnow)
 
     # DB primary key (set after insert)
@@ -102,6 +119,7 @@ class Listing:
             "missing_since": self.missing_since,
             "previous_listing_id": self.previous_listing_id,
             "description": self.description,
+            "feature_chips": self.feature_chips,
             "scraped_at": self.scraped_at.isoformat() if self.scraped_at else None,
         }
 

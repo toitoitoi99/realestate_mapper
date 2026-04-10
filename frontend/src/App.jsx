@@ -35,6 +35,7 @@ export default function App() {
   const [scraping, setScraping] = useState(false)
   const [selectedNeighborhood, setSelectedNeighborhood] = useState(null)
   const [selectedListing, setSelectedListing] = useState(null)
+  const [highlightedListing, setHighlightedListing] = useState(null)
   const [sidebarTab, setSidebarTab] = useState('listings')
   const [neighbourhoodTypologies, setNeighbourhoodTypologies] = useState({})
   const [parishStats, setParishStats] = useState({})
@@ -84,13 +85,19 @@ export default function App() {
   useEffect(() => {
     setLoading(true)
     // show_sold and sort_by are UI-only — don't send them to the API
-    const { show_sold, sort_by, ...apiFilters } = filters
+    const { show_sold, sort_by, listing_type, min_deal_score, min_rarity_score, ...apiFilters } = filters
+    // 'all' means no listing_type filter (backend unions both tables)
+    if (listing_type && listing_type !== 'all') apiFilters.listing_type = listing_type
+    if (min_deal_score > 0) apiFilters.min_deal_score = min_deal_score
+    if (min_rarity_score > 0) apiFilters.min_rarity_score = min_rarity_score
     if (selectedNeighborhood) apiFilters.neighborhood = selectedNeighborhood
     fetchListings(apiFilters)
       .then(d => {
         let all = d.listings ?? []
-        if (!show_sold) all = all.filter(l => l.status === 'active' || !l.status)
-        if (sort_by === 'rarity') all = [...all].sort((a, b) => (b.rarity_score ?? 0) - (a.rarity_score ?? 0))
+        if (show_sold === 'active' || !show_sold) all = all.filter(l => l.status === 'active' || !l.status)
+        else if (show_sold === 'sold') all = all.filter(l => l.status === 'sold' || l.status === 'reserved')
+        if (sort_by === 'rating') all = [...all].sort((a, b) => (b.deal_score ?? 0) - (a.deal_score ?? 0))
+        else if (sort_by === 'rarity') all = [...all].sort((a, b) => (b.rarity_score ?? 0) - (a.rarity_score ?? 0))
         else if (sort_by === 'price_asc') all = [...all].sort((a, b) => (a.price_amount ?? 0) - (b.price_amount ?? 0))
         else if (sort_by === 'price_desc') all = [...all].sort((a, b) => (b.price_amount ?? 0) - (a.price_amount ?? 0))
         else if (sort_by === 'psm_gross_asc') all = [...all].sort((a, b) => {
@@ -139,15 +146,23 @@ export default function App() {
   }, [])
 
   const filteredListings = useMemo(() => {
-    if (!showNeighborhoods || hiddenParishes.size === 0) return listings
-    return listings.filter(l => {
+    const base = listings
+    if (!showNeighborhoods) return base
+
+    // If parishes selected for comparison, show only those
+    if (selectedParishes?.size > 0) {
+      return base.filter(l => l.neighborhood && selectedParishes.has(l.neighborhood))
+    }
+
+    return base.filter(l => {
       if (!l.neighborhood) return true
       const group = parishToGroup?.[l.neighborhood]
-      if (!group || !visibleGroups[group]) return false
+      if (!group) return true           // unknown parish → keep visible
+      if (!visibleGroups[group]) return false
       if (hiddenParishes.has(l.neighborhood)) return false
       return true
     })
-  }, [listings, showNeighborhoods, hiddenParishes, parishToGroup, visibleGroups])
+  }, [listings, showNeighborhoods, hiddenParishes, parishToGroup, visibleGroups, selectedParishes])
 
   const toggleGroup = useCallback((key) => {
     setVisibleGroups(prev => ({ ...prev, [key]: !prev[key] }))
@@ -192,7 +207,9 @@ export default function App() {
           selectedNeighborhood={selectedNeighborhood}
           onClearNeighborhood={() => setSelectedNeighborhood(null)}
           selectedListing={selectedListing}
-          onSelectListing={setSelectedListing}
+          onSelectListing={(l) => { setSelectedListing(l); setHighlightedListing(l); }}
+          highlightedListing={highlightedListing}
+          onClearHighlight={() => setHighlightedListing(null)}
           sidebarTab={sidebarTab}
           onChangeTab={setSidebarTab}
           // Neighbourhood panel props
@@ -229,12 +246,15 @@ export default function App() {
           areaConfig={areas[currentArea]}
           baseMap={baseMap}
           onChangeBaseMap={setBaseMap}
-          listings={listings}
+          listings={filteredListings}
           neighborhoods={neighborhoods}
           onSelectNeighborhood={handleSelectNeighborhood}
           selectedNeighborhood={selectedNeighborhood}
-          onSelectListing={setSelectedListing}
-          selectedListing={selectedListing}
+          onSelectListing={(l) => {
+            setHighlightedListing(l)
+            setSelectedListing(prev => prev ? l : prev)
+          }}
+          selectedListing={highlightedListing}
           projects={projects}
           showProjects={showProjects}
           visibleCategories={visibleCategories}
@@ -249,6 +269,13 @@ export default function App() {
           showSoldTrends={showSoldTrends}
           soldTrendsData={soldTrendsData}
           selectedParishes={selectedParishes}
+          onLookupResult={(newListings) => {
+            setListings(prev => {
+              const ids = new Set(prev.map(l => `${l.id}-${l.listing_type}`))
+              const toAdd = newListings.filter(l => !ids.has(`${l.id}-${l.listing_type}`))
+              return toAdd.length ? [...prev, ...toAdd] : prev
+            })
+          }}
         />
       </div>
     </div>

@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 
 const DEFAULT_FILTERS = {
   listing_type: 'sale',
-  show_sold: false,
+  show_sold: 'active',
   min_price: '',
   max_price: '',
   min_sqm: '',
@@ -12,7 +12,7 @@ const DEFAULT_FILTERS = {
   sold_after: '',
   sold_before: '',
   sort_by: 'default',
-  limit: 500,
+  limit: 10000,
   min_price_per_sqm: '',
   max_price_per_sqm: '',
   bedrooms: '',
@@ -24,6 +24,9 @@ const DEFAULT_FILTERS = {
   district: '',
   city: '',
   postal_code: '',
+  min_deal_score: 0,
+  min_rarity_score: 0,
+  grant_eligible: '',
 }
 
 export function useFilters() {

@@ -316,6 +316,19 @@ def extract_listing_from_next_data(ad: dict) -> dict:
     if description:
         description = str(description)[:1000]
 
+    # Structured feature chips from __NEXT_DATA__
+    chips = []
+    for key in ("features", "characteristics", "extras", "amenities", "tags"):
+        raw = ad.get(key)
+        if isinstance(raw, list):
+            for item in raw:
+                if isinstance(item, str):
+                    chips.append(item.strip())
+                elif isinstance(item, dict):
+                    label = item.get("label") or item.get("name") or item.get("text") or item.get("value")
+                    if label:
+                        chips.append(str(label).strip())
+
     return {
         "price": price,
         "size": size,
@@ -336,6 +349,7 @@ def extract_listing_from_next_data(ad: dict) -> dict:
         "lon": lon,
         "images": images,
         "description": description,
+        "feature_chips": [c for c in chips if c] or None,
     }
 
 
@@ -563,6 +577,25 @@ def extract_from_dom(page: Page) -> dict:
         except (json.JSONDecodeError, TypeError):
             pass
 
+    # Structured feature chips (detail list + info-features span) — used later for
+    # property_score extraction. Combine both sources and dedupe.
+    chips_raw = (data.get("detailFeatures") or []) + (data.get("features") or [])
+    seen_chips = set()
+    chips = []
+    for c in chips_raw:
+        if not c:
+            continue
+        cs = str(c).strip()
+        if not cs:
+            continue
+        key = cs.lower()
+        if key in seen_chips:
+            continue
+        seen_chips.add(key)
+        chips.append(cs)
+    if chips:
+        result["feature_chips"] = chips
+
     # Condition from detail features
     for feat in (data.get("detailFeatures") or []):
         fl = feat.lower()
@@ -584,6 +617,8 @@ def extract_from_dom(page: Page) -> dict:
 
 def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Optional[Listing]:
     """Visit a listing detail page and return a Listing object."""
+    from models import detect_listing_type
+    listing_type = detect_listing_type(url, fallback=listing_type)
 
     # Extract source_id from URL: /imovel/12345678/
     id_match = re.search(r"/imovel/(\d+)", url)
@@ -664,6 +699,19 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
         except Exception:
             pass
 
+    # Merge chips from __NEXT_DATA__ and DOM, dedupe case-insensitively
+    merged_chips = []
+    seen_chip_keys = set()
+    for source_chips in (nd.get("feature_chips") or [], dom.get("feature_chips") or []):
+        for c in source_chips:
+            if not c:
+                continue
+            k = str(c).strip().lower()
+            if not k or k in seen_chip_keys:
+                continue
+            seen_chip_keys.add(k)
+            merged_chips.append(str(c).strip())
+
     return Listing(
         source="idealista",
         source_id=source_id,
@@ -692,6 +740,7 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
         hash_dedupe=_hash(address, city, price, size),
         hash_cross=_hash_cross(address, city, price, size),
         description=nd.get("description") or dom.get("description"),
+        feature_chips=json.dumps(merged_chips) if merged_chips else None,
         scraped_at=datetime.utcnow(),
     )
 

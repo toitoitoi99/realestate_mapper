@@ -1,18 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { TileLayer, CircleMarker, GeoJSON, Popup, useMap } from 'react-leaflet'
+import { TileLayer, CircleMarker, GeoJSON, Popup, useMap, useMapEvents } from 'react-leaflet'
 import { LeafletContext, createLeafletContext } from '@react-leaflet/core'
 import L from 'leaflet'
-import { useLanguage } from '../LanguageContext'
 import 'leaflet/dist/leaflet.css'
 import ProjectLayer from './ProjectLayer'
 import SecurityLayer from './SecurityLayer'
 import NeighborhoodLayer from './NeighborhoodLayer'
 import MapLegend from './MapLegend'
 import AddressSearch from './AddressSearch'
-import ChatPanel from './ChatPanel'
 import SoldTrendsLayer from './SoldTrendsLayer'
 import { BASE_MAPS } from '../baseMaps'
-import RarityBadge from './RarityBadge'
+import ListingPopupCard from './ListingPopupCard'
 
 const DEFAULT_CENTRE = [38.68, -9.10]
 const DEFAULT_ZOOM = 10
@@ -141,6 +139,20 @@ function DynamicTileLayer({ baseMap }) {
   return null
 }
 
+function ZoomTracker({ onZoom }) {
+  const map = useMapEvents({
+    zoomend: () => onZoom(map.getZoom()),
+  })
+  useEffect(() => { onZoom(map.getZoom()) }, [map])
+  return null
+}
+
+function listingMarkerSize(zoom) {
+  const radius = Math.max(3, Math.min(10, zoom - 8))
+  const weight = zoom >= 15 ? 1.5 : zoom >= 13 ? 1 : 0.5
+  return { radius, weight }
+}
+
 // Simple ray-casting point-in-polygon for client-side filtering
 function pointInPolygon(lat, lon, ring) {
   let inside = false
@@ -181,10 +193,8 @@ export default function Map({
   selectedListing,
   showSoldTrends, soldTrendsData,
   selectedParishes,
+  onLookupResult,
 }) {
-  const { t } = useLanguage()
-  const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
-
   const isParishVisible = (name) => {
     if (!showNeighborhoods || !name) return true
     const group = parishToGroup?.[name]
@@ -202,6 +212,19 @@ export default function Map({
     })
   }, [selectedParishes, parishFeatures])
 
+  // Build visible parish features for point-in-polygon fallback
+  const visibleParishFeatures = useMemo(() => {
+    if (!showNeighborhoods || !parishFeatures?.length) return null
+    return parishFeatures.filter(f => {
+      const name = f.properties?.name
+      if (!name) return false
+      const group = parishToGroup?.[name]
+      if (!group || !visibleGroups[group]) return false
+      if (hiddenParishes?.has(name)) return false
+      return true
+    })
+  }, [showNeighborhoods, parishFeatures, parishToGroup, visibleGroups, hiddenParishes])
+
   const allWithCoords = (listings?.filter(l => l.lat && l.lon) ?? [])
 
   // When parishes are selected for comparison, use point-in-polygon (bypass isParishVisible)
@@ -210,12 +233,20 @@ export default function Map({
     withCoords = allWithCoords.filter(l =>
       selectedParishFeatures.some(f => isPointInFeature(l.lat, l.lon, f))
     )
+  } else if (showNeighborhoods && visibleParishFeatures?.length > 0) {
+    // Use parish name match first; for unknown neighborhoods, fall back to point-in-polygon
+    withCoords = allWithCoords.filter(l => {
+      if (isParishVisible(l.neighborhood)) return true
+      // Neighborhood name not in parishToGroup — check coords against visible parishes
+      return visibleParishFeatures.some(f => isPointInFeature(l.lat, l.lon, f))
+    })
   } else {
     withCoords = allWithCoords.filter(l => isParishVisible(l.neighborhood))
   }
 
   const ref = useRef(null)
   const [ctx, setCtx] = useState(null)
+  const [mapZoom, setMapZoom] = useState(areaConfig?.zoom || DEFAULT_ZOOM)
 
   useEffect(() => {
     if (!ref.current) return
@@ -244,6 +275,7 @@ export default function Map({
             showNeighborhoods={showNeighborhoods}
           />
           <FlyToListing listing={selectedListing} />
+          <ZoomTracker onZoom={setMapZoom} />
 
           <NeighborhoodLayer
             showNeighborhoods={showNeighborhoods}
@@ -260,36 +292,26 @@ export default function Map({
             const isSold = l.status === 'sold'
             const isReserved = l.status === 'reserved'
 
+            const isSelected = selectedListing && selectedListing.id === l.id
+
             let markerColor
-            if (isSold || isReserved) {
-              markerColor = { color: '#92400e', fillColor: '#f59e0b' }
+            if (isSelected) {
+              markerColor = { color: '#991b1b', fillColor: '#ef4444' }
+            } else if (isSold || isReserved) {
+              markerColor = { color: '#000000', fillColor: '#1f2937' }
             } else if (isRent) {
-              markerColor = { color: '#065f46', fillColor: '#10b981' }
+              markerColor = { color: '#6b21a8', fillColor: '#a855f7' }
             } else {
               markerColor = { color: '#1d4ed8', fillColor: '#3b82f6' }
             }
 
             const popupContent = (
               <Popup>
-                <div className="text-sm">
-                  {(isSold || isReserved) && (
-                    <span className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
-                      {isSold ? `${t.sold} · ` : `${t.reserved} · `}
-                    </span>
-                  )}
-                  <b>€{fmt(l.price_amount)}{isRent ? '/mo' : ''}</b>
-                  {l.size_sqm && <> · {fmt(l.size_sqm)} m²</>}
-                  {l.rooms != null && <> · T{l.rooms}</>}<br />
-                  {l.neighborhood && <span className="text-gray-500">{l.neighborhood}</span>}
-                  <br />
-                  <RarityBadge score={l.rarity_score} factors={l.rarity_factors} compact />
-                  {l.rarity_score != null && ' '}
-                  <a href={l.url} target="_blank" rel="noopener noreferrer" className="text-blue-600">
-                    {t.viewListing}
-                  </a>
-                </div>
+                <ListingPopupCard listing={l} />
               </Popup>
             )
+
+            const handleClick = () => onSelectListing(l)
 
             if (l.building_geojson) {
               const geojson = typeof l.building_geojson === 'string'
@@ -298,19 +320,22 @@ export default function Map({
                 <GeoJSON
                   key={`bldg-${l.id}`}
                   data={{ type: 'Feature', geometry: geojson, properties: {} }}
-                  style={() => ({ ...markerColor, fillOpacity: 0.35, weight: 2 })}
+                  style={() => ({ ...markerColor, fillOpacity: (isSold || isReserved) ? 0.5 : 0.35, weight: mapZoom >= 15 ? 3 : 2 })}
+                  eventHandlers={{ click: handleClick }}
                 >
                   {popupContent}
                 </GeoJSON>
               )
             }
 
+            const mSize = listingMarkerSize(mapZoom)
             return (
               <CircleMarker
                 key={l.id}
                 center={[l.lat, l.lon]}
-                radius={3}
-                pathOptions={{ ...markerColor, fillOpacity: 0.6, weight: 0.5 }}
+                radius={mSize.radius}
+                pathOptions={{ ...markerColor, fillOpacity: (isSold || isReserved) ? 0.85 : 0.6, weight: (isSold || isReserved) ? mSize.weight + 1 : mSize.weight }}
+                eventHandlers={{ click: handleClick }}
               >
                 {popupContent}
               </CircleMarker>
@@ -347,11 +372,9 @@ export default function Map({
             />
           )}
 
-          <AddressSearch />
+          <AddressSearch onSelectListing={onSelectListing} onLookupResult={onLookupResult} />
         </LeafletContext.Provider>
       )}
-
-      <ChatPanel />
 
       <MapLegend
         baseMap={baseMap}

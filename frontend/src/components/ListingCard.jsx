@@ -1,15 +1,20 @@
 import { useLanguage } from '../LanguageContext'
+import GrantBadge from './GrantBadge'
 import RarityBadge from './RarityBadge'
 import SourceLogo from './SourceLogo'
 
-export default function ListingCard({ listing, onSelect }) {
+export default function ListingCard({ listing, onSelect, highlighted }) {
   const { t } = useLanguage()
   const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
 
   return (
     <div
       onClick={() => onSelect(listing)}
-      className="block p-3 border border-gray-100 rounded-lg hover:border-blue-300 hover:shadow-sm transition-all text-left cursor-pointer"
+      className={`block p-3 rounded-lg transition-all text-left cursor-pointer ${
+        highlighted
+          ? 'bg-blue-50 border-2 border-blue-400 shadow-sm'
+          : 'border border-gray-100 hover:border-blue-300 hover:shadow-sm'
+      }`}
     >
       <div className="flex justify-between items-start gap-2 mb-1">
         <span className="font-semibold text-gray-900 text-sm leading-tight line-clamp-2">
@@ -30,10 +35,11 @@ export default function ListingCard({ listing, onSelect }) {
         {listing.neighborhood && (
           <span className="text-xs text-gray-400 truncate">{listing.neighborhood}</span>
         )}
-        <SourceLogo source={listing.source} />
+        <span className="ml-auto"><SourceLogo source={listing.source} /></span>
       </div>
 
       <RarityBadge score={listing.rarity_score} factors={listing.rarity_factors} />
+      <GrantBadge eligible={listing.grant_eligible} />
     </div>
   )
 }

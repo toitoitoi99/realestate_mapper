@@ -22,6 +22,89 @@ from models import Listing, Neighborhood, ScrapeRun
 logger = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).parent / "data" / "lisboa_realestate.db"
+LOW_DENSITY_PATH = Path(__file__).parent / "data" / "low_density_territories.json"
+
+# -- Grant eligibility: low-density territory lookup ---------------------------
+_low_density_municipalities = set()  # normalized city names
+_low_density_parishes = {}           # normalized municipality -> set of parish names
+_grant_programs = []
+
+def _normalize(s):
+    """Normalize a string for fuzzy matching: lowercase, strip accents."""
+    if not s:
+        return ""
+    s = s.lower().strip()
+    # Decompose unicode and strip combining marks (accents)
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return s
+
+def _load_low_density_territories():
+    global _low_density_municipalities, _low_density_parishes, _grant_programs
+    if _low_density_municipalities:
+        return  # already loaded
+    if not LOW_DENSITY_PATH.exists():
+        logger.warning("low_density_territories.json not found")
+        return
+    data = json.loads(LOW_DENSITY_PATH.read_text(encoding="utf-8"))
+    _grant_programs = data.get("programs", [])
+    # Group 1: all parishes in municipality are low-density
+    for district, municipalities in data.get("group_1_municipalities", {}).items():
+        if district.startswith("_"):
+            continue
+        for m in municipalities:
+            _low_density_municipalities.add(_normalize(m))
+    # Group 2: only specific parishes
+    for municipality, parishes in data.get("group_2_parishes", {}).items():
+        if municipality.startswith("_"):
+            continue
+        norm_mun = _normalize(municipality)
+        _low_density_parishes[norm_mun] = {_normalize(p) for p in parishes}
+
+def is_grant_eligible(city, parish):
+    """Check if a listing's city/parish falls in a low-density territory."""
+    _load_low_density_territories()
+    norm_city = _normalize(city)
+    norm_parish = _normalize(parish)
+    # Group 1: entire municipality is low-density
+    if norm_city in _low_density_municipalities:
+        return True
+    # Group 2: check specific parishes within partially-classified municipalities
+    if norm_city in _low_density_parishes:
+        eligible_parishes = _low_density_parishes[norm_city]
+        # Try exact match first, then substring match (parish names may be abbreviated)
+        if norm_parish in eligible_parishes:
+            return True
+        for ep in eligible_parishes:
+            if norm_parish and (norm_parish in ep or ep in norm_parish):
+                return True
+    return False
+
+def get_grant_details(city, parish):
+    """Return detailed grant program info for an eligible listing."""
+    _load_low_density_territories()
+    if not is_grant_eligible(city, parish):
+        return None
+    return {
+        "in_low_density": True,
+        "programs": _grant_programs,
+    }
+
+# -- Listing exclusion filters -------------------------------------------------
+# Keywords that indicate non-property listings (timeshares, hotel weeks, etc.)
+# Checked in upsert_listing() so all scrapers benefit automatically.
+EXCLUDED_TITLE_KEYWORDS = [
+    "time sharing", "timesharing", "time-sharing", "timeshare",
+    "direito de habitação periódica",  # Portuguese legal term for timeshare
+    "habitação periódica",
+    "multipropriedade",               # fractional ownership
+]
+EXCLUDED_DESCRIPTION_KEYWORDS = [
+    "time sharing", "timesharing", "time-sharing", "timeshare",
+    "direito de habitação periódica",
+    "habitação periódica",
+    "multipropriedade",
+]
 
 
 def get_connection() -> sqlite3.Connection:
@@ -99,6 +182,44 @@ _LISTING_COLS = """
 def _table_for(listing_type):
     """Return the table name for a listing type."""
     return "rentals" if listing_type == "rent" else "sales"
+
+
+def _reclassify_rentals(conn):
+    """Move listings that are clearly rentals from sales → rentals.
+
+    Detection: low price (< 5000 €) combined with rental keywords in
+    the URL or title (arrend*, alug*).  High-price listings mentioning
+    'arrendamento' alongside 'venda' are left in sales.
+    """
+    rental_cols = [
+        "source", "source_id", "url", "status", "price_amount",
+        "price_per_sqm", "size_sqm", "gross_area_sqm", "rooms", "bedrooms",
+        "bathrooms", "floor", "property_type", "condition", "title",
+        "address", "postal_code", "neighborhood", "parish", "district",
+        "city", "lat", "lon", "images", "hash_dedupe", "hash_cross",
+        "hash_location", "missing_since", "previous_listing_id",
+        "description", "scraped_at",
+    ]
+    # Only include columns that exist in rentals table
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(rentals)").fetchall()}
+    cols = [c for c in rental_cols if c in existing]
+    col_list = ", ".join(cols)
+
+    where = """
+        price_amount > 0 AND price_amount < 5000
+        AND (
+            url LIKE '%arrend%' OR url LIKE '%alug%'
+            OR title LIKE '%arrend%' OR title LIKE '%alug%'
+        )
+    """
+    moved = conn.execute(f"""
+        INSERT OR IGNORE INTO rentals ({col_list})
+        SELECT {col_list} FROM sales WHERE {where}
+    """).rowcount
+    if moved:
+        conn.execute(f"DELETE FROM sales WHERE {where}")
+        conn.commit()
+        logger.info(f"[DB] Reclassified {moved} rental(s) from sales → rentals")
 
 
 def init_db():
@@ -184,6 +305,9 @@ def init_db():
         sale_count = conn.execute("SELECT COUNT(*) as c FROM sales").fetchone()["c"]
         rent_count = conn.execute("SELECT COUNT(*) as c FROM rentals").fetchone()["c"]
         logger.info(f"[DB] Migration complete: {sale_count} sales, {rent_count} rentals")
+
+    # -- Reclassify misplaced rentals in the sales table ----------------------
+    _reclassify_rentals(conn)
 
     # -- Other tables ---------------------------------------------------------
     conn.executescript("""
@@ -326,6 +450,18 @@ def init_db():
         if "previous_listing_id" not in existing:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN previous_listing_id INTEGER")
             logger.info(f"[DB] Added previous_listing_id column to {tbl}")
+        if "deal_score" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN deal_score REAL")
+            logger.info(f"[DB] Added deal_score column to {tbl}")
+        if "property_score" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN property_score REAL")
+            logger.info(f"[DB] Added property_score column to {tbl}")
+        if "property_features" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN property_features TEXT")
+            logger.info(f"[DB] Added property_features column to {tbl}")
+        if "feature_chips" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN feature_chips TEXT")
+            logger.info(f"[DB] Added feature_chips column to {tbl}")
     conn.commit()
 
     # -- Backfill hash_cross for existing rows ------------------------------------
@@ -481,7 +617,18 @@ def upsert_listing(listing: Listing) -> tuple:
     Insert or update a listing. Returns (id, is_new).
     Natural key: (source, source_id).
     Routes to the correct table based on listing_type.
+    Returns (None, False) if listing is excluded (timeshare, etc.).
     """
+    # Filter out non-property listings (timeshares, hotel weeks, etc.)
+    title_lower = (listing.title or "").lower()
+    desc_lower = (listing.description or "").lower()
+    if any(kw in title_lower for kw in EXCLUDED_TITLE_KEYWORDS):
+        logger.info(f"[DB] Excluded non-property listing (title): {listing.source_id} — {listing.title}")
+        return (None, False)
+    if any(kw in desc_lower for kw in EXCLUDED_DESCRIPTION_KEYWORDS):
+        logger.info(f"[DB] Excluded non-property listing (description): {listing.source_id}")
+        return (None, False)
+
     table = _table_for(getattr(listing, "listing_type", None) or "sale")
     conn = get_connection()
     try:
@@ -526,7 +673,7 @@ def upsert_listing(listing: Listing) -> tuple:
                         property_type=?, condition=?, title=?, address=?, postal_code=?,
                         neighborhood=?, parish=?, district=?, city=?, lat=?, lon=?,
                         images=?, hash_dedupe=?, hash_cross=?, hash_location=?,
-                        missing_since=NULL, description=?, scraped_at=?
+                        missing_since=NULL, description=?, feature_chips=?, scraped_at=?
                     WHERE source=? AND source_id=?
                 """, (
                     listing.url, listing.status,
@@ -537,7 +684,7 @@ def upsert_listing(listing: Listing) -> tuple:
                     listing.postal_code, listing.neighborhood, listing.parish,
                     listing.district, listing.city, listing.lat, listing.lon,
                     listing.images, listing.hash_dedupe, listing.hash_cross, hl,
-                    listing.description,
+                    listing.description, listing.feature_chips,
                     ts, listing.source, listing.source_id
                 ))
             return row["id"], False
@@ -552,8 +699,8 @@ def upsert_listing(listing: Listing) -> tuple:
                         bathrooms, floor, property_type, condition, title,
                         address, postal_code, neighborhood, parish, district,
                         city, lat, lon, images, hash_dedupe, hash_cross,
-                        hash_location, previous_listing_id, description, scraped_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        hash_location, previous_listing_id, description, feature_chips, scraped_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     listing.source, listing.source_id, listing.url,
                     listing.status,
@@ -564,7 +711,7 @@ def upsert_listing(listing: Listing) -> tuple:
                     listing.postal_code, listing.neighborhood, listing.parish,
                     listing.district, listing.city, listing.lat, listing.lon,
                     listing.images, listing.hash_dedupe, listing.hash_cross,
-                    hl, prev_id, listing.description, ts
+                    hl, prev_id, listing.description, listing.feature_chips, ts
                 ))
             return cur.lastrowid, True
     finally:
@@ -594,6 +741,9 @@ def get_listings(
     district: Optional[str] = None,
     city: Optional[str] = None,
     postal_code: Optional[str] = None,
+    grant_eligible: Optional[bool] = None,
+    min_deal_score: Optional[float] = None,
+    min_rarity_score: Optional[float] = None,
     limit: int = 500,
     offset: int = 0,
 ) -> List[dict]:
@@ -643,6 +793,10 @@ def get_listings(
         clauses.append("city=?"); params.append(city)
     if postal_code:
         clauses.append("postal_code=?"); params.append(postal_code)
+    if min_deal_score is not None:
+        clauses.append("deal_score>=?"); params.append(min_deal_score)
+    if min_rarity_score is not None:
+        clauses.append("rarity_score>=?"); params.append(min_rarity_score)
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
@@ -665,19 +819,23 @@ def get_listings(
     else:
         # Union both tables using shared columns
         rows = conn.execute(
-            f"SELECT {_shared_cols}, rarity_score, rarity_factors, building_geojson, 'sale' as listing_type FROM sales {where} "
+            f"SELECT {_shared_cols}, rarity_score, rarity_factors, building_geojson, deal_score, property_score, property_features, 'sale' as listing_type FROM sales {where} "
             f"UNION ALL "
-            f"SELECT {_shared_cols}, NULL as rarity_score, NULL as rarity_factors, NULL as building_geojson, 'rent' as listing_type FROM rentals {where} "
+            f"SELECT {_shared_cols}, NULL as rarity_score, NULL as rarity_factors, NULL as building_geojson, deal_score, property_score, property_features, 'rent' as listing_type FROM rentals {where} "
             f"ORDER BY scraped_at DESC LIMIT ? OFFSET ?",
             params + params + [limit, offset]
         ).fetchall()
 
     conn.close()
+    _load_low_density_territories()
     result = []
     for r in rows:
         row = dict(r)
         if not row.get("status"):
             row["status"] = "active"
+        row["grant_eligible"] = is_grant_eligible(row.get("city"), row.get("parish"))
+        if grant_eligible and not row["grant_eligible"]:
+            continue
         result.append(row)
     return result
 
@@ -783,37 +941,51 @@ def get_radius_comparison(
             below = sum(1 for v in psqm_sorted if v < tp)
             comp_stats["listing_percentile"] = round(below / n * 100, 1)
 
-    # --- Nearby rentals ---
-    rent_table = "rentals" if table == "sales" else "sales"
-    rent_rows = conn.execute(
+    # --- Cross-reference: nearby rentals (for sales) or nearby sales (for rentals) ---
+    cross_table = "rentals" if table == "sales" else "sales"
+    cross_rows = conn.execute(
         f"SELECT id, price_per_sqm, price_amount, size_sqm, bedrooms, address, lat, lon, source "
-        f"FROM {rent_table} WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? AND price_per_sqm IS NOT NULL",
+        f"FROM {cross_table} WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? AND price_per_sqm IS NOT NULL",
         (lat - dlat, lat + dlat, lon - dlon, lon + dlon)
     ).fetchall()
 
-    rentals = []
-    for r in rent_rows:
+    cross_listings = []
+    for r in cross_rows:
         dist = _haversine(lat, lon, r["lat"], r["lon"])
         if dist <= radius_m:
             d = dict(r)
             d["distance_m"] = round(dist)
-            rentals.append(d)
+            cross_listings.append(d)
 
-    rentals.sort(key=lambda x: x["distance_m"])
+    cross_listings.sort(key=lambda x: x["distance_m"])
 
-    rent_psqm = [r["price_per_sqm"] for r in rentals if r["price_per_sqm"]]
+    cross_psqm = [r["price_per_sqm"] for r in cross_listings if r["price_per_sqm"]]
     rent_stats = {}
-    if rent_psqm:
-        avg_rent = statistics.mean(rent_psqm)
-        med_rent = statistics.median(rent_psqm)
-        est_monthly = round(avg_rent * (target["size_sqm"] or 0), 2)
-        gross_yield = round((avg_rent * 12 / target["price_per_sqm"]) * 100, 2) if target["price_per_sqm"] else None
-        rent_stats = {
-            "avg_rent_per_sqm": round(avg_rent, 2),
-            "median_rent_per_sqm": round(med_rent, 2),
-            "estimated_monthly_rent": est_monthly,
-            "gross_yield_pct": gross_yield,
-        }
+    if cross_psqm:
+        avg_cross = statistics.mean(cross_psqm)
+        med_cross = statistics.median(cross_psqm)
+        if table == "sales":
+            # Viewing a sale: show nearby rental prices and yield = rent*12/sale_price
+            est_monthly = round(avg_cross * (target["size_sqm"] or 0), 2)
+            gross_yield = round((avg_cross * 12 / target["price_per_sqm"]) * 100, 2) if target["price_per_sqm"] else None
+            rent_stats = {
+                "avg_rent_per_sqm": round(avg_cross, 2),
+                "median_rent_per_sqm": round(med_cross, 2),
+                "estimated_monthly_rent": est_monthly,
+                "gross_yield_pct": gross_yield,
+            }
+        else:
+            # Viewing a rental: show nearby sale prices and yield = this_rent*12/avg_sale_price
+            target_rent_psqm = target["price_per_sqm"]
+            gross_yield = round((target_rent_psqm * 12 / avg_cross) * 100, 2) if avg_cross else None
+            est_purchase = round(avg_cross * (target["size_sqm"] or 0), 2)
+            rent_stats = {
+                "avg_sale_per_sqm": round(avg_cross, 2),
+                "median_sale_per_sqm": round(med_cross, 2),
+                "estimated_purchase_price": est_purchase,
+                "gross_yield_pct": gross_yield,
+                "source": "sales",
+            }
 
     # --- History ---
     history = get_listing_history(listing_id, listing_type if table == "sales" else "rent")
@@ -827,9 +999,9 @@ def get_radius_comparison(
             "listings": comparables[:20],
         },
         "rentals": {
-            "count": len(rentals),
+            "count": len(cross_listings),
             "stats": rent_stats,
-            "listings": rentals[:10],
+            "listings": cross_listings[:10],
         },
         "history": history,
     }
@@ -952,6 +1124,93 @@ def get_address_matches(listing_id: int, listing_type: str = "sale") -> List[dic
     conn.close()
     matches = sorted(results.values(), key=lambda x: x.get("scraped_at", ""), reverse=True)
     return matches
+
+
+def find_nearby_listings(lat, lon, radius_m=100, address=None, listing_type=None):
+    # type: (float, float, int, Optional[str], Optional[str]) -> List[dict]
+    """Find listings near a coordinate, optionally filtered by address similarity.
+
+    Uses a two-pass strategy: first searches within radius_m, then if an address
+    is provided and no results found, does a wider search (up to 1km) requiring
+    high address similarity. This handles cases where geocoded coordinates point
+    to one part of a long street but listings are on another part.
+    """
+    conn = get_connection()
+    norm_addr = _normalize_address(address)
+
+    tables = []
+    if listing_type == "rent":
+        tables = [("rentals", "rent")]
+    elif listing_type == "sale":
+        tables = [("sales", "sale")]
+    else:
+        tables = [("sales", "sale"), ("rentals", "rent")]
+
+    select_cols = (
+        "id, source, source_id, url, status, price_amount, price_per_sqm, "
+        "size_sqm, rooms, bedrooms, property_type, condition, "
+        "title, address, neighborhood, parish, lat, lon, scraped_at"
+    )
+
+    # Pass 1: proximity search within requested radius
+    dlat = radius_m / 111000.0
+    dlon = radius_m / 87000.0
+    results = []
+    for tbl, lt in tables:
+        rows = conn.execute(
+            f"SELECT {select_cols} FROM {tbl} "
+            f"WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? "
+            f"AND status='active'",
+            (lat - dlat, lat + dlat, lon - dlon, lon + dlon)
+        ).fetchall()
+        for r in rows:
+            dist = _haversine(lat, lon, r["lat"], r["lon"])
+            if dist > radius_m:
+                continue
+            if norm_addr:
+                r_norm = _normalize_address(r["address"])
+                sim = _address_similarity(norm_addr, r_norm) if r_norm else 0
+                if sim < 0.3:
+                    continue
+            d = dict(r)
+            d["listing_type"] = lt
+            d["distance_m"] = round(dist)
+            results.append(d)
+
+    # Pass 2: if no results and we have an address, widen to 1km but require
+    # high address similarity (>=0.5). Handles long streets where the geocoded
+    # point is far from the actual listing.
+    if not results and norm_addr:
+        wide_radius = 1000
+        dlat_w = wide_radius / 111000.0
+        dlon_w = wide_radius / 87000.0
+        seen_ids = set()
+        for tbl, lt in tables:
+            rows = conn.execute(
+                f"SELECT {select_cols} FROM {tbl} "
+                f"WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? "
+                f"AND status='active'",
+                (lat - dlat_w, lat + dlat_w, lon - dlon_w, lon + dlon_w)
+            ).fetchall()
+            for r in rows:
+                if r["id"] in seen_ids:
+                    continue
+                r_norm = _normalize_address(r["address"])
+                sim = _address_similarity(norm_addr, r_norm) if r_norm else 0
+                if sim < 0.5:
+                    continue
+                dist = _haversine(lat, lon, r["lat"], r["lon"])
+                if dist > wide_radius:
+                    continue
+                seen_ids.add(r["id"])
+                d = dict(r)
+                d["listing_type"] = lt
+                d["distance_m"] = round(dist)
+                results.append(d)
+
+    conn.close()
+    results.sort(key=lambda x: x["distance_m"])
+    return results
 
 
 # ── Neighborhoods ─────────────────────────────────────────────────────────────
@@ -1295,12 +1554,12 @@ def get_neighborhoods(district: Optional[str] = None) -> List[dict]:
     conn = get_connection()
     if district:
         rows = conn.execute(
-            "SELECT * FROM neighborhoods WHERE district=? ORDER BY avg_price_per_sqm",
+            "SELECT * FROM neighborhoods WHERE district=? ORDER BY name",
             (district,)
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM neighborhoods ORDER BY avg_price_per_sqm"
+            "SELECT * FROM neighborhoods ORDER BY name"
         ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -1755,6 +2014,635 @@ def get_neighbourhood_typologies():
         result[name]["distribution"][str(r["rooms"])] = r["cnt"]
         result[name]["total"] += r["cnt"]
     return result
+
+
+# ── Deal Score ───────────────────────────────────────────────────────────────
+
+def _deal_rating(score):
+    """Letter rating for a 0-100 score."""
+    if score >= 80:
+        return "A"
+    if score >= 60:
+        return "B"
+    if score >= 40:
+        return "C"
+    return "D"
+
+
+def compute_deal_score(listing_id, listing_type="sale", radius_m=500):
+    """
+    Composite deal score (0-100) combining value, location, yield, scarcity, growth, and risk.
+    Returns dict with deal_score, deal_rating, and per-dimension breakdown.
+    """
+    conn = get_connection()
+    table = _table_for(listing_type)
+    try:
+        row = conn.execute(
+            f"SELECT id, lat, lon, price_per_sqm, price_amount, size_sqm, "
+            f"parish, neighborhood, rarity_score, rarity_factors, "
+            f"condition, scraped_at, property_type, bedrooms "
+            f"FROM {table} WHERE id=?",
+            (listing_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        return {"error": "Listing not found"}
+    if row["lat"] is None or row["lon"] is None:
+        return {"error": "Listing missing coordinates"}
+
+    lat, lon = row["lat"], row["lon"]
+    price_psm = row["price_per_sqm"]
+
+    # ── 1. VALUE (discount-to-market: how far below estimated fair value) ──
+    # Tiered comparables: prefer same property type, fall back to all types
+    prop_type = row["property_type"]
+    bedrooms = row["bedrooms"]
+    comparison = get_radius_comparison(listing_id, listing_type, radius_m,
+                                       filter_property_type=prop_type)
+    comp_count = 0
+    comp_stats = {}
+    comp_type_label = prop_type or "all"
+    if "comparables" in comparison:
+        comp_count = comparison["comparables"].get("count", 0)
+        comp_stats = comparison["comparables"].get("stats", {})
+
+    # If fewer than 5 same-type comps, widen to all property types
+    if comp_count < 5:
+        comparison_all = get_radius_comparison(listing_id, listing_type, radius_m)
+        all_count = comparison_all.get("comparables", {}).get("count", 0)
+        if all_count > comp_count:
+            comparison = comparison_all
+            comp_count = all_count
+            comp_stats = comparison["comparables"].get("stats", {})
+            comp_type_label = "all types"
+
+    # Primary signal: discount vs local median price/sqm (comparables)
+    discount_pct = None
+    local_median = comp_stats.get("median_price_per_sqm")
+    if local_median and price_psm and local_median > 0:
+        discount_pct = ((local_median - price_psm) / local_median) * 100
+        # Score: -20% above = 0, +20% below = 100 (linear)
+        discount_component = max(0.0, min(100.0, (discount_pct + 20) / 40 * 100))
+    else:
+        discount_component = 50.0
+
+    # Secondary signal: INE municipal benchmark (macro check)
+    ine_component = 50.0
+    ine_detail = ""
+    conn2 = get_connection()
+    try:
+        ine_row = conn2.execute(
+            "SELECT median_price_per_sqm FROM ine_stats "
+            "WHERE is_latest=1 AND (category='Total' OR category LIKE '%otal%') "
+            "ORDER BY median_price_per_sqm DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        conn2.close()
+
+    if ine_row and ine_row["median_price_per_sqm"] and price_psm:
+        ine_median = ine_row["median_price_per_sqm"]
+        ine_diff_pct = ((price_psm - ine_median) / ine_median) * 100
+        ine_component = max(0, min(100, (1 - (ine_diff_pct + 30) / 60) * 100))
+        ine_detail = ", {:.0f}% vs INE median".format(ine_diff_pct)
+
+    # Blend: 70% local discount, 30% INE benchmark
+    value_score = discount_component * 0.7 + ine_component * 0.3
+
+    if discount_pct is not None:
+        type_note = " [vs {}]".format(comp_type_label) if comp_type_label != "all types" else ""
+        if discount_pct > 0:
+            value_detail = "{:.0f}% below median ({}/m\u00b2 vs {}{}){}".format(
+                discount_pct, int(price_psm), int(local_median), type_note, ine_detail
+            )
+        else:
+            value_detail = "{:.0f}% above median ({}/m\u00b2 vs {}{}){}".format(
+                abs(discount_pct), int(price_psm), int(local_median), type_note, ine_detail
+            )
+    else:
+        value_detail = "No nearby comparables" + ine_detail
+
+    # ── 2. LOCATION (amenity score) ──
+    from amenity_rating import get_amenity_rating
+    amenity = get_amenity_rating(lat, lon)
+    location_score = float(amenity.get("overall_score", 50))
+    location_class = amenity.get("classification", "?")
+    location_detail = "Class {} amenity area (score {:.0f})".format(location_class, location_score)
+
+    # ── 3. YIELD (gross rental yield) ──
+    yield_score = 0.0
+    yield_detail = "N/A"
+    if listing_type == "sale":
+        rent_stats = comparison.get("rentals", {}).get("stats", {})
+        gross_yield = rent_stats.get("gross_yield_pct")
+        est_rent = rent_stats.get("estimated_monthly_rent")
+        if gross_yield is not None:
+            yield_score = min(100.0, (gross_yield / 6.0) * 100)
+            yield_detail = "{:.1f}% gross yield".format(gross_yield)
+            if est_rent:
+                yield_detail += ", est. \u20ac{:,.0f}/mo rent".format(est_rent)
+        else:
+            yield_detail = "No nearby rentals for yield calc"
+
+    # ── 4. SCARCITY (rarity score) ──
+    scarcity_score = float(row["rarity_score"] or 0)
+    scarcity_detail = "Rarity score {:.0f}".format(scarcity_score)
+    factors_raw = row["rarity_factors"]
+    if factors_raw:
+        try:
+            factors = json.loads(factors_raw) if isinstance(factors_raw, str) else factors_raw
+            if factors:
+                factor_labels = {
+                    "price_dev": "unusual price",
+                    "typology": "uncommon typology",
+                    "size_dev": "unusual size",
+                    "condition": "condition contrast",
+                    "scarcity": "low supply",
+                    "prop_type": "rare property type",
+                    "vs_sold": "below sold prices",
+                    "new_build_prox": "near new builds",
+                }
+                top_factor = max(factors.items(), key=lambda x: x[1])
+                scarcity_detail += " \u2014 {}".format(factor_labels.get(top_factor[0], top_factor[0]))
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # ── 5. GROWTH (parish sold trend — 24-month lookback, min sample) ──
+    growth_score = 50.0
+    growth_detail = "No sold trend data"
+    parish = row["parish"]
+    if parish:
+        # Use 24-month lookback for more robust trend
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        start_date = (datetime.now() - timedelta(days=730)).strftime("%Y-%m-%d")
+        trends = get_sold_trends(start_date, end_date)
+        parish_trend = None
+        for t in trends:
+            if t["parish"] and parish.lower() in t["parish"].lower():
+                parish_trend = t
+                break
+        if parish_trend and parish_trend["count"] >= 6:
+            pct = parish_trend["pct_change"]
+            growth_score = max(0, min(100, (pct + 10) / 20 * 100))
+            growth_detail = "{:+.1f}% parish trend ({} txns, 24mo)".format(pct, parish_trend["count"])
+        elif parish_trend and parish_trend["count"] < 6:
+            # Insufficient sample — dampen toward neutral
+            pct = parish_trend["pct_change"]
+            dampened = pct * (parish_trend["count"] / 6.0)
+            growth_score = max(0, min(100, (dampened + 10) / 20 * 100))
+            growth_detail = "{:+.1f}% trend (low confidence, {} txns)".format(pct, parish_trend["count"])
+        else:
+            # Fallback: use INE municipal-level quarterly data
+            conn_ine = get_connection()
+            try:
+                ine_rows = conn_ine.execute(
+                    "SELECT median_price_per_sqm, period_label FROM ine_stats "
+                    "WHERE (category='Total' OR category LIKE '%otal%') "
+                    "AND median_price_per_sqm IS NOT NULL "
+                    "ORDER BY period_label DESC LIMIT 4"
+                ).fetchall()
+            finally:
+                conn_ine.close()
+            if len(ine_rows) >= 2:
+                latest = ine_rows[0]["median_price_per_sqm"]
+                oldest = ine_rows[-1]["median_price_per_sqm"]
+                if oldest and oldest > 0:
+                    ine_pct = ((latest - oldest) / oldest) * 100
+                    growth_score = max(0, min(100, (ine_pct + 10) / 20 * 100))
+                    growth_detail = "{:+.1f}% INE municipal trend ({}>{})".format(
+                        ine_pct, ine_rows[-1]["period_label"], ine_rows[0]["period_label"]
+                    )
+
+    # ── 6. RISK (red flags — inverted: 100 = no risk, 0 = high risk) ──
+    risk_flags = []
+    risk_penalty = 0  # accumulates 0-100 of penalty
+
+    # 6a. Days on market — long time suggests overpricing or issues
+    scraped_at = row["scraped_at"]
+    days_on_market = None
+    if scraped_at:
+        try:
+            first_seen = datetime.fromisoformat(scraped_at.replace("Z", "+00:00"))
+            days_on_market = (datetime.now(first_seen.tzinfo) - first_seen).days
+        except (ValueError, TypeError):
+            try:
+                first_seen = datetime.strptime(scraped_at[:10], "%Y-%m-%d")
+                days_on_market = (datetime.now() - first_seen).days
+            except (ValueError, TypeError):
+                pass
+
+    if days_on_market is not None:
+        if days_on_market > 180:
+            risk_penalty += 30
+            risk_flags.append("{} days on market (stale)".format(days_on_market))
+        elif days_on_market > 90:
+            risk_penalty += 15
+            risk_flags.append("{} days on market".format(days_on_market))
+
+    # 6b. Price reductions — multiple cuts signal overpricing
+    history = comparison.get("history", [])
+    price_cuts = [h for h in history if h.get("field") == "price_amount"
+                  and h.get("old_value") and h.get("new_value")]
+    cut_count = 0
+    total_cut_pct = 0
+    for h in price_cuts:
+        try:
+            old_val = float(h["old_value"])
+            new_val = float(h["new_value"])
+            if new_val < old_val:
+                cut_count += 1
+                total_cut_pct += ((old_val - new_val) / old_val) * 100
+        except (ValueError, TypeError):
+            pass
+
+    if cut_count >= 3:
+        risk_penalty += 25
+        risk_flags.append("{} price cuts ({:.0f}% total reduction)".format(cut_count, total_cut_pct))
+    elif cut_count >= 1:
+        risk_penalty += 10
+        risk_flags.append("{} price cut(s) ({:.0f}% reduction)".format(cut_count, total_cut_pct))
+
+    # 6c. Overpriced vs comparables — significantly above local median
+    if discount_pct is not None and discount_pct < -15:
+        overprice = abs(discount_pct)
+        risk_penalty += min(30, overprice)
+        risk_flags.append("{:.0f}% above local median".format(overprice))
+
+    # 6d. Low comparable count — thin market means uncertain valuation
+    if comp_count < 5:
+        risk_penalty += 10
+        risk_flags.append("Few comparables ({})".format(comp_count))
+
+    risk_score = max(0.0, 100.0 - risk_penalty)
+    if risk_flags:
+        risk_detail = "; ".join(risk_flags)
+    else:
+        risk_detail = "No red flags detected"
+
+    # ── Composite ──
+    if listing_type == "sale":
+        weights = {"value": 25, "location": 20, "yield": 20, "scarcity": 10, "growth": 10, "risk": 15}
+    else:
+        weights = {"value": 30, "location": 25, "yield": 0, "scarcity": 15, "growth": 15, "risk": 15}
+
+    scores = {
+        "value": value_score,
+        "location": location_score,
+        "yield": yield_score,
+        "scarcity": scarcity_score,
+        "growth": growth_score,
+        "risk": risk_score,
+    }
+
+    total_weight = sum(weights.values())
+    deal_score = sum(scores[k] * weights[k] for k in scores) / total_weight
+
+    details = {
+        "value": value_detail,
+        "location": location_detail,
+        "yield": yield_detail,
+        "scarcity": scarcity_detail,
+        "growth": growth_detail,
+        "risk": risk_detail,
+    }
+
+    dim_keys = ["value", "location", "yield", "scarcity", "growth", "risk"]
+    dimensions = {}
+    for k in dim_keys:
+        s = round(scores[k], 1)
+        dimensions[k] = {
+            "score": s,
+            "rating": _deal_rating(s),
+            "weight": weights[k],
+            "detail": details[k],
+        }
+
+    return {
+        "deal_score": round(deal_score, 1),
+        "deal_rating": _deal_rating(deal_score),
+        "dimensions": dimensions,
+        "comparables_count": comp_count,
+        "listing_type": listing_type,
+    }
+
+
+def compute_all_deal_scores():
+    """Batch-compute and store deal_score for all active listings with coordinates."""
+    conn = get_connection()
+    try:
+        sales_rows = conn.execute(
+            "SELECT id FROM sales WHERE lat IS NOT NULL AND lon IS NOT NULL "
+            "AND (status='active' OR status IS NULL)"
+        ).fetchall()
+        rental_rows = conn.execute(
+            "SELECT id FROM rentals WHERE lat IS NOT NULL AND lon IS NOT NULL "
+            "AND (status='active' OR status IS NULL)"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    updated = 0
+    for row in sales_rows:
+        try:
+            result = compute_deal_score(row["id"], "sale", 500)
+            if "deal_score" in result:
+                c = get_connection()
+                try:
+                    c.execute("UPDATE sales SET deal_score=? WHERE id=?",
+                              (result["deal_score"], row["id"]))
+                    c.commit()
+                    updated += 1
+                finally:
+                    c.close()
+        except Exception as e:
+            logger.debug("Deal score failed for sale %s: %s", row["id"], e)
+
+    for row in rental_rows:
+        try:
+            result = compute_deal_score(row["id"], "rent", 500)
+            if "deal_score" in result:
+                c = get_connection()
+                try:
+                    c.execute("UPDATE rentals SET deal_score=? WHERE id=?",
+                              (result["deal_score"], row["id"]))
+                    c.commit()
+                    updated += 1
+                finally:
+                    c.close()
+        except Exception as e:
+            logger.debug("Deal score failed for rental %s: %s", row["id"], e)
+
+    logger.info("[DB] Computed deal scores for %d listings", updated)
+    return updated
+
+
+# ── Property Feature Score ──────────────────────────────────────────────────
+
+# Each feature: (key, patterns, apt_weight, house_weight)
+# Patterns are checked case-insensitively against description + title.
+# Scoring model: score = min(100, sum of detected feature weights).
+# Weights are absolute points (not percentages), calibrated so a well-equipped
+# listing reaches ~80-100 and a bare listing scores ~0-20.
+_PROPERTY_FEATURES = [
+    ("outdoor_space", [r"\bvaranda\b", r"\bvarandas\b", r"\bmarquise\b", r"\bbalcony\b",
+                       r"\bterra[cç]o\b", r"\brooftop\b", r"\bterrace\b", r"\bterra[cç]os?\b"], 20, 12),
+    ("elevator",      [r"\belevador\b", r"\bascensor\b", r"\belevator\b", r"\blift\b"], 18, 0),
+    ("parking",       [r"\bgarage[ms]?\b", r"\bestacionamento\b", r"\blugar de garagem\b",
+                       r"\bparqueamento\b", r"\bparking\b", r"\bbox\b"], 18, 20),
+    ("view",          [r"\bvista rio\b", r"\bvista mar\b", r"\bvista cidade\b",
+                       r"\bpanor[aâ]mic[oa]\b", r"\briver view\b", r"\bsea view\b",
+                       r"\bvista desafogada\b", r"\bvista frontal\b"], 18, 18),
+    ("pool",          [r"\bpiscina\b", r"\bpool\b", r"\bswimming\b"], 12, 20),
+    ("air_cond",      [r"\bar condicionado\b", r"\bclimatiza[çc][aã]o\b",
+                       r"\bair\s*condition", r"\bac\s*instalado\b"], 12, 12),
+    ("garden",        [r"\bjardim\b", r"\bquintal\b", r"\blogradouro\b", r"\bgarden\b"], 8, 20),
+    ("renovated",     [r"\bremodelad[oa]\b", r"\brenovad[oa]\b", r"\breconstru[ií]d[oa]\b",
+                       r"\brenovated\b", r"\brefurbished\b", r"\btotalmente novo\b"], 5, 5),
+    ("energy_a_b_c",  [r"\bclasse energ[eé]tica\s*[abc]\b", r"\bcertificado\s*[abc]\b",
+                       r"\benergy\s*(class|rating)\s*[abc]\b", r"\bclasse\s*[abc][+]?\b",
+                       r"energ[eé]tica[:\s]+[abc][+-]?\b",
+                       r"energ[eé]tico\s+classe\s+[abc]\b",
+                       r"efici[eê]ncia\s+energ[eé]tica\s+classe\s+[abc]\b"], 5, 5),
+    ("storage",       [r"\barreca?da[çc][aã]o\b", r"\barrumos?\b", r"\bstorage\b"], 2, 2),
+    ("suite",         [r"\bsu[ií]te\b", r"\ben\s*suite\b", r"\bensuite\b"], 2, 2),
+]
+
+# Compiled regex for each feature
+_FEATURE_PATTERNS = [
+    (key, [re.compile(p, re.IGNORECASE) for p in pats], aw, hw)
+    for key, pats, aw, hw in _PROPERTY_FEATURES
+]
+
+
+def _normalize_text(text):
+    """Normalize accented characters for more robust matching."""
+    if not text:
+        return ""
+    # NFD decomposition then strip combining marks — gives us base characters
+    # but we also keep the original for accent-specific patterns
+    return text.lower()
+
+
+_NEGATION_RE = re.compile(r"\b(sem|n[aã]o\s+(tem|possui|dispõe|dispoe)|inexistente|no)\b", re.IGNORECASE)
+
+
+def extract_property_features(description, title=None, property_type=None, condition=None,
+                               bathrooms=None, floor=None, feature_chips=None):
+    """Extract features from listing text and structured fields.
+
+    Returns (score, features_dict) where features_dict maps feature_key → True/False
+    and score is 0-100.
+
+    `feature_chips` is an optional list of short structured strings from the source
+    site (e.g. ["Varanda", "Elevador", "Ar condicionado"]). Chips are matched per-
+    chip so negated chips ("Sem elevador") can override positive matches, and
+    chip matches are tried independently of the marketing-blob description.
+    """
+    text = " ".join(filter(None, [title or "", description or ""]))
+    text_lower = text.lower()
+
+    # Check both property_type field AND title for house indicators
+    _house_kw = ("house", "moradia", "villa", "vivenda", "quinta", "moradia independente",
+                 "moradia geminada", "moradia isolada")
+    type_lower = (property_type or "").lower()
+    title_lower = (title or "").lower()
+    is_house = any(k in type_lower for k in _house_kw) or any(k in title_lower for k in _house_kw)
+
+    # Normalize chips → list of lowercased strings; classify each as positive/negative
+    pos_chips: list = []
+    neg_chips: list = []
+    if feature_chips:
+        for raw in feature_chips:
+            if not raw:
+                continue
+            c = str(raw).strip().lower()
+            if not c:
+                continue
+            if _NEGATION_RE.search(c):
+                neg_chips.append(c)
+            else:
+                pos_chips.append(c)
+
+    detected = {}
+    for key, patterns, apt_w, house_w in _FEATURE_PATTERNS:
+        # Match against free-text description/title
+        found = any(p.search(text_lower) for p in patterns)
+        # Match against positive chips (structured data wins over negated description text)
+        if not found and pos_chips:
+            found = any(p.search(chip) for chip in pos_chips for p in patterns)
+        # Explicit negation in chips overrides any positive hit
+        if found and neg_chips:
+            if any(p.search(chip) for chip in neg_chips for p in patterns):
+                found = False
+        detected[key] = found
+
+    # Bonus: condition field says "new" → count as renovated if not already
+    if condition and condition.lower() in ("new", "novo", "nova"):
+        detected["renovated"] = True
+
+    # Bonus: multiple bathrooms
+    detected["multi_bath"] = (bathrooms or 0) >= 2
+
+    # Bonus: high floor with elevator (apartments only)
+    high_floor = False
+    if floor and not is_house:
+        floor_str = str(floor).lower()
+        m = re.search(r'(\d+)', floor_str)
+        if m and int(m.group(1)) >= 3:
+            high_floor = True
+        if "último" in floor_str or "last" in floor_str or "ultimo" in floor_str:
+            high_floor = True
+    detected["high_floor_elevator"] = high_floor and detected.get("elevator", False)
+
+    # Compute score as capped sum of absolute weights (not percentage of total).
+    # This rewards well-equipped listings instead of penalising ones where
+    # the description simply doesn't enumerate every possible feature.
+    bonus_weights_apt = {"multi_bath": 10, "high_floor_elevator": 8}
+    bonus_weights_house = {"multi_bath": 10, "high_floor_elevator": 0}
+
+    earned = 0
+    for key, _, apt_w, house_w in _FEATURE_PATTERNS:
+        w = house_w if is_house else apt_w
+        if detected.get(key):
+            earned += w
+    bw = bonus_weights_house if is_house else bonus_weights_apt
+    for bkey, bweight in bw.items():
+        if detected.get(bkey):
+            earned += bweight
+
+    score = min(100, round(earned, 1))
+
+    # Build features list (only detected ones)
+    features_found = [k for k, v in detected.items() if v]
+
+    return score, features_found
+
+
+def compute_property_score(listing_id, listing_type="sale"):
+    """Compute and return property feature score for a single listing."""
+    table = _table_for(listing_type)
+    conn = get_connection()
+    row = conn.execute(
+        f"SELECT id, description, title, property_type, condition, bathrooms, floor, feature_chips "
+        f"FROM {table} WHERE id=?", (listing_id,)
+    ).fetchone()
+    conn.close()
+
+    if not row:
+        return {"error": "Listing not found"}
+
+    desc = row["description"] or ""
+    title = row["title"] or ""
+
+    # Parse structured feature chips if present
+    chips = None
+    raw_chips = row["feature_chips"]
+    if raw_chips:
+        try:
+            parsed = json.loads(raw_chips)
+            if isinstance(parsed, list):
+                chips = [str(c) for c in parsed if c]
+        except (json.JSONDecodeError, TypeError):
+            chips = None
+
+    # Skip only if we have no text AND no chips to analyze
+    if len(desc.strip()) < 20 and len(title.strip()) < 5 and not chips:
+        return {
+            "property_score": None,
+            "property_rating": None,
+            "features": [],
+            "note": "Insufficient description text"
+        }
+
+    score, features = extract_property_features(
+        desc, title, row["property_type"], row["condition"],
+        row["bathrooms"], row["floor"], feature_chips=chips
+    )
+
+    _house_kw = ("house", "moradia", "villa", "vivenda", "quinta", "moradia independente",
+                 "moradia geminada", "moradia isolada")
+    type_lower = (row["property_type"] or "").lower()
+    title_lower = (row["title"] or "").lower()
+    is_house = any(k in type_lower for k in _house_kw) or any(k in title_lower for k in _house_kw)
+
+    rating = "A" if score >= 80 else "B" if score >= 60 else "C" if score >= 40 else "D"
+
+    # Feature details with labels and weights
+    feature_labels = {
+        "outdoor_space": "Outdoor space", "elevator": "Elevator",
+        "parking": "Parking", "storage": "Storage room", "pool": "Pool",
+        "garden": "Garden", "view": "View", "energy_a_b_c": "Energy A/B/C",
+        "renovated": "Renovated/New", "air_cond": "A/C", "suite": "Suite",
+        "multi_bath": "2+ Bathrooms", "high_floor_elevator": "High floor + elevator",
+    }
+    feature_details = []
+    for key, _, apt_w, house_w in _PROPERTY_FEATURES:
+        w = house_w if is_house else apt_w
+        if w == 0:
+            continue  # not applicable for this property type
+        feature_details.append({
+            "key": key,
+            "label": feature_labels.get(key, key),
+            "detected": key in features,
+            "weight": w,
+        })
+    # Add bonus features
+    bonus_map = [
+        ("multi_bath", 10, 10),
+        ("high_floor_elevator", 8, 0),
+    ]
+    for bkey, apt_bw, house_bw in bonus_map:
+        bw = house_bw if is_house else apt_bw
+        if bw == 0:
+            continue
+        feature_details.append({
+            "key": bkey,
+            "label": feature_labels.get(bkey, bkey),
+            "detected": bkey in features,
+            "weight": bw,
+        })
+
+    return {
+        "property_score": score,
+        "property_rating": rating,
+        "property_type_class": "house" if is_house else "apartment",
+        "features": feature_details,
+        "detected_count": len(features),
+        "total_features": len(feature_details),
+    }
+
+
+def compute_all_property_scores():
+    """Batch-compute and store property_score for all active listings."""
+    conn = get_connection()
+    updated = 0
+
+    for tbl, lt in [("sales", "sale"), ("rentals", "rent")]:
+        rows = conn.execute(
+            f"SELECT id FROM {tbl} WHERE status='active' AND description IS NOT NULL"
+        ).fetchall()
+        for row in rows:
+            try:
+                result = compute_property_score(row["id"], lt)
+                if result.get("property_score") is not None:
+                    features_json = json.dumps(result["features"])
+                    c = get_connection()
+                    try:
+                        c.execute(
+                            f"UPDATE {tbl} SET property_score=?, property_features=? WHERE id=?",
+                            (result["property_score"], features_json, row["id"])
+                        )
+                        c.commit()
+                        updated += 1
+                    finally:
+                        c.close()
+            except Exception as e:
+                logger.debug("Property score failed for %s %s: %s", tbl, row["id"], e)
+
+    conn.close()
+    logger.info("[DB] Computed property scores for %d listings", updated)
+    return updated
 
 
 if __name__ == "__main__":

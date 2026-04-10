@@ -34,13 +34,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 import database as db
 from scrapers.idealista import IdealistaScraper
 from models import ScrapeRun
-from chat_handler import ChatHandler
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 PORT = int(os.environ.get("PORT", 8000))
 _executor = ThreadPoolExecutor(max_workers=4)
+_address_lookup_lock = threading.Lock()
 
 # ── Area config ──────────────────────────────────────────────────────────────
 
@@ -117,7 +117,10 @@ class ListingsHandler(BaseHandler):
             district=self.get_argument("district", None),
             city=self.get_argument("city", None),
             postal_code=self.get_argument("postal_code", None),
-            limit=self.get_int_arg("limit", 500),
+            grant_eligible=self.get_argument("grant_eligible", None) == "true" or None,
+            min_deal_score=self.get_float_arg("min_deal_score"),
+            min_rarity_score=self.get_float_arg("min_rarity_score"),
+            limit=self.get_int_arg("limit", 10000),
             offset=self.get_int_arg("offset", 0),
         )
         self.write_json({"count": len(listings), "listings": listings})
@@ -163,6 +166,11 @@ class ListingDetailHandler(BaseHandler):
             if prev_row:
                 result["previous_price_amount"] = prev_row["price_amount"]
                 result["previous_price_per_sqm"] = prev_row["price_per_sqm"]
+
+        # Grant eligibility
+        grant = db.get_grant_details(result.get("city"), result.get("parish"))
+        result["grant_eligible"] = grant is not None
+        result["grant_details"] = grant
 
         self.write_json(result)
 
@@ -494,6 +502,16 @@ def _run_scrape(source: str, run_id: int, max_pages: int):
 
         db.rebuild_neighborhoods()
 
+        # Recompute scores for all active listings
+        try:
+            db.compute_rarity_scores()
+        except Exception as e:
+            logger.warning("Failed to recompute rarity scores: %s", e)
+        try:
+            db.compute_all_deal_scores()
+        except Exception as e:
+            logger.warning("Failed to recompute deal scores: %s", e)
+
         run = ScrapeRun(
             source=source,
             listings_found=len(listings),
@@ -553,6 +571,30 @@ class ComparisonHandler(BaseHandler):
         result = db.get_radius_comparison(
             int(listing_id), listing_type, radius_m,
             filter_property_type, filter_bedrooms
+        )
+        self.write_json(result)
+
+
+class DealScoreHandler(BaseHandler):
+    """GET /api/listings/:id/deal-score — composite purchase evaluation score"""
+
+    async def get(self, listing_id):
+        listing_type = self.get_argument("listing_type", "sale")
+        radius_m = int(self.get_argument("radius", "500"))
+        radius_m = max(100, min(5000, radius_m))  # clamp to sane range
+        result = await tornado.ioloop.IOLoop.current().run_in_executor(
+            _executor, db.compute_deal_score, int(listing_id), listing_type, radius_m
+        )
+        self.write_json(result)
+
+
+class PropertyScoreHandler(BaseHandler):
+    """GET /api/listings/:id/property-score"""
+
+    async def get(self, listing_id):
+        listing_type = self.get_argument("listing_type", "sale")
+        result = await tornado.ioloop.IOLoop.current().run_in_executor(
+            _executor, db.compute_property_score, int(listing_id), listing_type
         )
         self.write_json(result)
 
@@ -740,12 +782,140 @@ class ParishStatsHandler(BaseHandler):
         self.write_json({"stats": result})
 
 
+class AddressLookupHandler(BaseHandler):
+    """POST /api/address-lookup — find or scrape listings near an address"""
+
+    async def post(self):
+        try:
+            body = json.loads(self.request.body or "{}")
+        except json.JSONDecodeError:
+            self.set_status(400)
+            self.write_json({"error": "Invalid JSON"})
+            return
+
+        address = body.get("address", "").strip()
+        lat = body.get("lat")
+        lon = body.get("lon")
+        listing_type = body.get("listing_type", "sale")
+        radius_m = int(body.get("radius_m", 100))
+
+        if not address or lat is None or lon is None:
+            self.set_status(400)
+            self.write_json({"error": "address, lat, lon are required"})
+            return
+
+        try:
+            lat = float(lat)
+            lon = float(lon)
+        except (ValueError, TypeError):
+            self.set_status(400)
+            self.write_json({"error": "lat/lon must be numbers"})
+            return
+
+        # Step 1: check DB for nearby listings
+        nearby = await tornado.ioloop.IOLoop.current().run_in_executor(
+            _executor, db.find_nearby_listings, lat, lon, radius_m, address, listing_type
+        )
+        if nearby:
+            # Compute deal scores for each found listing
+            deal_scores = {}
+            for item in nearby:
+                if item["listing_type"] == "sale":
+                    try:
+                        ds = await tornado.ioloop.IOLoop.current().run_in_executor(
+                            _executor, db.compute_deal_score, item["id"], "sale", 500
+                        )
+                        deal_scores[item["id"]] = ds
+                    except Exception:
+                        pass
+            self.write_json({
+                "source": "database",
+                "listings": nearby,
+                "deal_scores": deal_scores,
+            })
+            return
+
+        # Step 2: search Idealista
+        if not _address_lookup_lock.acquire(blocking=False):
+            self.set_status(429)
+            self.write_json({"error": "Another address lookup is in progress. Please try again in a moment."})
+            return
+
+        try:
+            from scrapers.idealista_address_lookup import search_idealista_by_address
+            listings = await tornado.ioloop.IOLoop.current().run_in_executor(
+                _executor,
+                search_idealista_by_address,
+                address, lat, lon, listing_type, True, 5, 300,
+            )
+
+            if not listings:
+                self.write_json({
+                    "source": "idealista",
+                    "listings": [],
+                    "deal_scores": {},
+                })
+                return
+
+            # Upsert scraped listings
+            inserted = []
+            for listing in listings:
+                try:
+                    lid, is_new = db.upsert_listing(listing)
+                    lt = listing.listing_type or listing_type
+                    inserted.append({"id": lid, "listing_type": lt, "is_new": is_new})
+                except Exception as e:
+                    logger.warning("Failed to upsert listing: %s", e)
+
+            # Recompute rarity scores for new sales listings
+            has_new_sales = any(
+                item["is_new"] and item["listing_type"] == "sale" for item in inserted
+            )
+            if has_new_sales:
+                try:
+                    await tornado.ioloop.IOLoop.current().run_in_executor(
+                        _executor, db.compute_rarity_scores
+                    )
+                except Exception as e:
+                    logger.warning("Failed to recompute rarity scores: %s", e)
+
+            # Re-query the DB for the now-inserted listings with full columns
+            result_listings = await tornado.ioloop.IOLoop.current().run_in_executor(
+                _executor, db.find_nearby_listings, lat, lon, 300, address, None
+            )
+
+            deal_scores = {}
+            for item in inserted:
+                if item["listing_type"] == "sale":
+                    try:
+                        ds = await tornado.ioloop.IOLoop.current().run_in_executor(
+                            _executor, db.compute_deal_score, item["id"], "sale", 500
+                        )
+                        deal_scores[item["id"]] = ds
+                    except Exception:
+                        pass
+
+            self.write_json({
+                "source": "idealista",
+                "listings": result_listings,
+                "deal_scores": deal_scores,
+            })
+        except Exception as e:
+            logger.exception("Address lookup scrape failed: %s", e)
+            self.set_status(500)
+            self.write_json({"error": "Scrape failed: {}".format(str(e))})
+        finally:
+            _address_lookup_lock.release()
+
+
 # ── App setup ─────────────────────────────────────────────────────────────────
 
 def make_app() -> tornado.web.Application:
     return tornado.web.Application(
         [
             (r"/api/listings",              ListingsHandler),
+            (r"/api/listings/(\d+)/deal-score",       DealScoreHandler),
+            (r"/api/listings/(\d+)/property-score",  PropertyScoreHandler),
             (r"/api/listings/(\d+)/compare",         ComparisonHandler),
             (r"/api/listings/(\d+)/address-history",  AddressHistoryHandler),
             (r"/api/listings/(\d+)",        ListingDetailHandler),
@@ -762,10 +932,10 @@ def make_app() -> tornado.web.Application:
             (r"/api/areas",                 AreasHandler),
             (r"/api/parishes",              ParishesHandler),
             (r"/api/translate",              TranslateHandler),
-            (r"/api/chat",                  ChatHandler),
             (r"/api/neighbourhood-typologies", NeighbourhoodTypologiesHandler),
             (r"/api/parish-stats",          ParishStatsHandler),
             (r"/api/nearby-projects",       NearbyProjectsHandler),
+            (r"/api/address-lookup",        AddressLookupHandler),
         ],
         debug=False,
     )

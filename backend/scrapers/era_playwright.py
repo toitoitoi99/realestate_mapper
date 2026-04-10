@@ -758,6 +758,22 @@ def extract_from_dom(page: Page) -> dict:
             elif not result.get("gross_area") and val != result.get("size"):
                 result["gross_area"] = val
 
+    # Preserve raw chips + key-value pairs for property_score scoring
+    raw_chips = []
+    for f in (data.get("features") or []):
+        if f and str(f).strip():
+            raw_chips.append(str(f).strip())
+    kv_texts = data.get("kvTexts") or []
+    for i in range(0, len(kv_texts) - 1, 2):
+        k = (kv_texts[i] or "").strip()
+        v = (kv_texts[i + 1] or "").strip() if i + 1 < len(kv_texts) else ""
+        if k and v:
+            raw_chips.append(f"{k}: {v}")
+        elif k:
+            raw_chips.append(k)
+    if raw_chips:
+        result["feature_chips"] = raw_chips
+
     # Parse features list
     for feat in (data.get("features") or []):
         fl = feat.lower()
@@ -865,6 +881,8 @@ def extract_from_dom(page: Page) -> dict:
 
 def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Optional[Listing]:
     """Visit a listing detail page and return a Listing object."""
+    from models import detect_listing_type
+    listing_type = detect_listing_type(url, fallback=listing_type)
 
     source_id = _extract_source_id(url)
 
@@ -918,6 +936,7 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
         images=json.dumps(images) if images else None,
         hash_dedupe=_hash(address, city, price, size),
         description=ld.get("description") or dom.get("description"),
+        feature_chips=json.dumps(dom.get("feature_chips")) if dom.get("feature_chips") else None,
         scraped_at=datetime.utcnow(),
     )
 
@@ -953,9 +972,9 @@ def _normalize_condition(raw) -> Optional[str]:
 def build_page_url(base_url: str, page_num: int) -> str:
     if page_num == 1:
         return base_url
-    # ERA uses ?pag=N query parameter for pagination
+    # ERA uses ?page=N query parameter for pagination
     sep = "&" if "?" in base_url else "?"
-    return f"{base_url}{sep}pag={page_num}"
+    return f"{base_url}{sep}page={page_num}"
 
 
 # ── Main scraper ──────────────────────────────────────────────────────────────

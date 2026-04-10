@@ -72,6 +72,44 @@ MAX_DELAY = 5.5
 
 PROFILE_DIR = Path(__file__).parent.parent / "data" / "browser_profile_remax"
 
+# -- Listing exclusion filters -------------------------------------------------
+# Exclude non-property listings: timeshares, garages, storage, parking, etc.
+
+# URL path slugs that indicate non-property listings (RE/MAX uses slugs like
+# "venda-outros---habitacao-..." or "venda-garagem-...")
+EXCLUDED_URL_SLUGS = [
+    "outros---habitac",   # "Outros - Habitação/Habitacional" — timeshares, hotel weeks
+    "garagem",            # garages / parking boxes
+    "armazem", "armazém", # warehouses / storage
+    "escritorio", "escritório",  # offices
+    "loja",               # shops / commercial
+]
+
+# Keywords in title or description that indicate non-property listings
+EXCLUDED_KEYWORDS = [
+    "time sharing", "timesharing", "time-sharing", "timeshare",
+    "semana ", "semana)",  # "semana 14" = week 14 (timeshare week)
+    "direito de habitação periódica",  # Portuguese legal term for timeshare
+    "habitação periódica",
+    "multipropriedade",  # fractional ownership
+]
+
+
+def _is_excluded_url(url: str) -> bool:
+    """Check if a listing URL contains a slug indicating a non-property type."""
+    path = url.lower()
+    return any(slug in path for slug in EXCLUDED_URL_SLUGS)
+
+
+def _is_excluded_listing(listing: "Listing") -> bool:
+    """Check if a listing's title/description indicates a non-property (e.g. timeshare)."""
+    text = " ".join(filter(None, [
+        (listing.title or "").lower(),
+        (listing.description or "").lower(),
+    ]))
+    return any(kw in text for kw in EXCLUDED_KEYWORDS)
+
+
 # -- Utilities -----------------------------------------------------------------
 
 def _num(v) -> Optional[float]:
@@ -548,6 +586,19 @@ def extract_listing_from_next_data(page_props: dict) -> dict:
                     images.append(url)
     images = [u for u in images if u and u.startswith("http")][:MAX_IMAGES]
 
+    # Structured feature chips from __NEXT_DATA__
+    chips = []
+    for key in ("features", "characteristics", "extras", "amenities", "tags", "attributes"):
+        raw = ad.get(key)
+        if isinstance(raw, list):
+            for item in raw:
+                if isinstance(item, str):
+                    chips.append(item.strip())
+                elif isinstance(item, dict):
+                    label = item.get("label") or item.get("name") or item.get("text") or item.get("value")
+                    if label:
+                        chips.append(str(label).strip())
+
     return {
         "price": price,
         "size": size,
@@ -569,6 +620,7 @@ def extract_listing_from_next_data(page_props: dict) -> dict:
         "lon": lon,
         "images": images,
         "description": description,
+        "feature_chips": [c for c in chips if c] or None,
     }
 
 
@@ -747,6 +799,11 @@ def extract_from_dom(page: Page) -> dict:
     result["description"] = data.get("description")
     result["address"] = data.get("address")
 
+    # Preserve raw feature strings as chips for downstream property_score scoring
+    raw_chips = [str(f).strip() for f in (data.get("features") or []) if f and str(f).strip()]
+    if raw_chips:
+        result["feature_chips"] = raw_chips
+
     # Parse features for additional data
     for feat in (data.get("features") or []):
         feat_lower = feat.lower()
@@ -804,6 +861,8 @@ def extract_from_dom(page: Page) -> dict:
 
 def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Optional[Listing]:
     """Visit a listing detail page and return a Listing object."""
+    from models import detect_listing_type
+    listing_type = detect_listing_type(url, fallback=listing_type)
 
     source_id = _extract_source_id(url)
 
@@ -830,6 +889,19 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
     images     = nd.get("images")     or dom.get("images") or []
 
     price_per_sqm = round(price / size, 2) if price and size and size > 0 else None
+
+    # Merge chips from __NEXT_DATA__ and DOM, dedupe case-insensitively
+    merged_chips = []
+    seen_chip_keys = set()
+    for source_chips in (nd.get("feature_chips") or [], dom.get("feature_chips") or []):
+        for c in source_chips:
+            if not c:
+                continue
+            k = str(c).strip().lower()
+            if not k or k in seen_chip_keys:
+                continue
+            seen_chip_keys.add(k)
+            merged_chips.append(str(c).strip())
 
     return Listing(
         source="remax",
@@ -859,6 +931,7 @@ def scrape_detail_page(page: Page, url: str, listing_type: str = 'sale') -> Opti
         images=json.dumps(images) if images else None,
         hash_dedupe=_hash(address, city, price, size),
         description=nd.get("description") or dom.get("description"),
+        feature_chips=json.dumps(merged_chips) if merged_chips else None,
         scraped_at=datetime.utcnow(),
     )
 
@@ -987,6 +1060,9 @@ def run_scraper(
 
             for item in search_items:
                 if item["url"] not in seen_urls:
+                    if _is_excluded_url(item["url"]):
+                        log.info(f"  Excluded (non-property URL): {item['url']}")
+                        continue
                     seen_urls.add(item["url"])
                     all_search_items.append(item)
 
@@ -1054,6 +1130,9 @@ def run_scraper(
                 if listing is None or listing.price_amount is None:
                     log.warning(f"  No price extracted -- skipping")
                     error_count += 1
+                elif _is_excluded_listing(listing):
+                    log.info(f"  Excluded (non-property): {listing.title}")
+                    continue
                 else:
                     _, is_new = db.upsert_listing(listing)
                     if is_new:
