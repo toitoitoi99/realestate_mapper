@@ -250,7 +250,10 @@ export default function App() {
           neighborhoods={neighborhoods}
           onSelectNeighborhood={handleSelectNeighborhood}
           selectedNeighborhood={selectedNeighborhood}
-          onSelectListing={setHighlightedListing}
+          onSelectListing={(l) => {
+            setHighlightedListing(l)
+            setSelectedListing(prev => prev ? l : prev)
+          }}
           selectedListing={highlightedListing}
           projects={projects}
           showProjects={showProjects}
