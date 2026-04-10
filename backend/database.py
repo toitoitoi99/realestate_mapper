@@ -2378,29 +2378,31 @@ def compute_all_deal_scores():
 
 # Each feature: (key, patterns, apt_weight, house_weight)
 # Patterns are checked case-insensitively against description + title.
-# Use raw strings; accented chars handled via NFD normalization.
+# Scoring model: score = min(100, sum of detected feature weights).
+# Weights are absolute points (not percentages), calibrated so a well-equipped
+# listing reaches ~80-100 and a bare listing scores ~0-20.
 _PROPERTY_FEATURES = [
     ("outdoor_space", [r"\bvaranda\b", r"\bvarandas\b", r"\bmarquise\b", r"\bbalcony\b",
-                       r"\bterra[cç]o\b", r"\brooftop\b", r"\bterrace\b", r"\bterra[cç]os?\b"], 15, 10),
-    ("elevator",      [r"\belevador\b", r"\bascensor\b", r"\belevator\b", r"\blift\b"], 10, 0),
+                       r"\bterra[cç]o\b", r"\brooftop\b", r"\bterrace\b", r"\bterra[cç]os?\b"], 20, 12),
+    ("elevator",      [r"\belevador\b", r"\bascensor\b", r"\belevator\b", r"\blift\b"], 18, 0),
     ("parking",       [r"\bgarage[ms]?\b", r"\bestacionamento\b", r"\blugar de garagem\b",
-                       r"\bparqueamento\b", r"\bparking\b", r"\bbox\b"], 10, 12),
-    ("storage",       [r"\barreca?da[çc][aã]o\b", r"\barrumos?\b", r"\bstorage\b"], 5, 3),
-    ("pool",          [r"\bpiscina\b", r"\bpool\b", r"\bswimming\b"], 8, 15),
-    ("garden",        [r"\bjardim\b", r"\bquintal\b", r"\blogradouro\b", r"\bgarden\b"], 3, 15),
+                       r"\bparqueamento\b", r"\bparking\b", r"\bbox\b"], 18, 20),
     ("view",          [r"\bvista rio\b", r"\bvista mar\b", r"\bvista cidade\b",
                        r"\bpanor[aâ]mic[oa]\b", r"\briver view\b", r"\bsea view\b",
-                       r"\bvista desafogada\b", r"\bvista frontal\b"], 12, 12),
+                       r"\bvista desafogada\b", r"\bvista frontal\b"], 18, 18),
+    ("pool",          [r"\bpiscina\b", r"\bpool\b", r"\bswimming\b"], 12, 20),
+    ("air_cond",      [r"\bar condicionado\b", r"\bclimatiza[çc][aã]o\b",
+                       r"\bair\s*condition", r"\bac\s*instalado\b"], 12, 12),
+    ("garden",        [r"\bjardim\b", r"\bquintal\b", r"\blogradouro\b", r"\bgarden\b"], 8, 20),
+    ("renovated",     [r"\bremodelad[oa]\b", r"\brenovad[oa]\b", r"\breconstru[ií]d[oa]\b",
+                       r"\brenovated\b", r"\brefurbished\b", r"\btotalmente novo\b"], 5, 5),
     ("energy_a_b_c",  [r"\bclasse energ[eé]tica\s*[abc]\b", r"\bcertificado\s*[abc]\b",
                        r"\benergy\s*(class|rating)\s*[abc]\b", r"\bclasse\s*[abc][+]?\b",
                        r"energ[eé]tica[:\s]+[abc][+-]?\b",
                        r"energ[eé]tico\s+classe\s+[abc]\b",
-                       r"efici[eê]ncia\s+energ[eé]tica\s+classe\s+[abc]\b"], 7, 8),
-    ("renovated",     [r"\bremodelad[oa]\b", r"\brenovad[oa]\b", r"\breconstru[ií]d[oa]\b",
-                       r"\brenovated\b", r"\brefurbished\b", r"\btotalmente novo\b"], 10, 10),
-    ("air_cond",      [r"\bar condicionado\b", r"\bclimatiza[çc][aã]o\b",
-                       r"\bair\s*condition", r"\bac\s*instalado\b"], 5, 5),
-    ("suite",         [r"\bsu[ií]te\b", r"\ben\s*suite\b", r"\bensuite\b"], 5, 5),
+                       r"efici[eê]ncia\s+energ[eé]tica\s+classe\s+[abc]\b"], 5, 5),
+    ("storage",       [r"\barreca?da[çc][aã]o\b", r"\barrumos?\b", r"\bstorage\b"], 2, 2),
+    ("suite",         [r"\bsu[ií]te\b", r"\ben\s*suite\b", r"\bensuite\b"], 2, 2),
 ]
 
 # Compiled regex for each feature
@@ -2459,26 +2461,23 @@ def extract_property_features(description, title=None, property_type=None, condi
             high_floor = True
     detected["high_floor_elevator"] = high_floor and detected.get("elevator", False)
 
-    # Compute score
-    # Weights for bonus features
-    bonus_weights_apt = {"multi_bath": 5, "high_floor_elevator": 5}
-    bonus_weights_house = {"multi_bath": 5, "high_floor_elevator": 0}
+    # Compute score as capped sum of absolute weights (not percentage of total).
+    # This rewards well-equipped listings instead of penalising ones where
+    # the description simply doesn't enumerate every possible feature.
+    bonus_weights_apt = {"multi_bath": 10, "high_floor_elevator": 8}
+    bonus_weights_house = {"multi_bath": 10, "high_floor_elevator": 0}
 
-    total_possible = 0
     earned = 0
     for key, _, apt_w, house_w in _FEATURE_PATTERNS:
         w = house_w if is_house else apt_w
-        total_possible += w
         if detected.get(key):
             earned += w
-    # Add bonus weights
     bw = bonus_weights_house if is_house else bonus_weights_apt
     for bkey, bweight in bw.items():
-        total_possible += bweight
         if detected.get(bkey):
             earned += bweight
 
-    score = round((earned / total_possible) * 100, 1) if total_possible > 0 else 0
+    score = min(100, round(earned, 1))
 
     # Build features list (only detected ones)
     features_found = [k for k, v in detected.items() if v]
@@ -2545,8 +2544,8 @@ def compute_property_score(listing_id, listing_type="sale"):
         })
     # Add bonus features
     bonus_map = [
-        ("multi_bath", 5 if not is_house else 5, 5),
-        ("high_floor_elevator", 5 if not is_house else 0, 0),
+        ("multi_bath", 10, 10),
+        ("high_floor_elevator", 8, 0),
     ]
     for bkey, apt_bw, house_bw in bonus_map:
         bw = house_bw if is_house else apt_bw
