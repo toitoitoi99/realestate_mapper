@@ -2036,10 +2036,12 @@ def compute_deal_score(listing_id, listing_type="sale", radius_m=500):
     """
     conn = get_connection()
     table = _table_for(listing_type)
+    # Rentals table has no rarity columns — select them only for sales
+    rarity_cols = "rarity_score, rarity_factors, " if table == "sales" else ""
     try:
         row = conn.execute(
             f"SELECT id, lat, lon, price_per_sqm, price_amount, size_sqm, "
-            f"parish, neighborhood, rarity_score, rarity_factors, "
+            f"parish, neighborhood, {rarity_cols}"
             f"condition, scraped_at, property_type, bedrooms "
             f"FROM {table} WHERE id=?",
             (listing_id,)
@@ -2146,9 +2148,11 @@ def compute_deal_score(listing_id, listing_type="sale", radius_m=500):
             yield_detail = "No nearby rentals for yield calc"
 
     # ── 4. SCARCITY (rarity score) ──
-    scarcity_score = float(row["rarity_score"] or 0)
-    scarcity_detail = "Rarity score {:.0f}".format(scarcity_score)
-    factors_raw = row["rarity_factors"]
+    # Rentals don't have rarity scores — use neutral default
+    row_keys = row.keys() if hasattr(row, "keys") else []
+    scarcity_score = float(row["rarity_score"] or 0) if "rarity_score" in row_keys else 50.0
+    scarcity_detail = "Rarity score {:.0f}".format(scarcity_score) if "rarity_score" in row_keys else "N/A for rentals"
+    factors_raw = row["rarity_factors"] if "rarity_factors" in row_keys else None
     if factors_raw:
         try:
             factors = json.loads(factors_raw) if isinstance(factors_raw, str) else factors_raw
