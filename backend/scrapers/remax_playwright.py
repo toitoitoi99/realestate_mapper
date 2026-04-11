@@ -61,9 +61,9 @@ SEARCH_API = "https://www.remax.pt/api/Listing/PaginatedMultiMatchSearch"
 IMAGE_BASE = "https://i.maxwork.pt/l-feat/"
 
 DEFAULT_SEARCH_VALUE = "Lisboa"
-DEFAULT_PAGE_SIZE = 20
-DEFAULT_MAX_PAGES = 75      # 75 * 20 = 1500 items, matches old max_items default
-DEFAULT_MAX_ITEMS = 1500
+DEFAULT_PAGE_SIZE = 50
+DEFAULT_MAX_PAGES = 500     # 500 * 50 = 25000 items ceiling; API reports ~8.4k
+DEFAULT_MAX_ITEMS = 25000
 MAX_IMAGES = 15
 
 # Delay between API page fetches (seconds)
