@@ -6,17 +6,30 @@ Setup (one-time):
     playwright install chromium
 
 Run:
-    python scrapers/imovirtual_playwright.py --setup          # One-time: solve Cloudflare challenge
-    python scrapers/imovirtual_playwright.py                  # Headless scrape (after --setup)
+    python scrapers/imovirtual_playwright.py                  # Headless scrape
     python scrapers/imovirtual_playwright.py --max-pages 5    # Quick test run
     python scrapers/imovirtual_playwright.py --type rent      # Scrape rentals
 
-The scraper will:
-    1. Open a headless Chrome browser with persistent profile
-    2. Paginate through imovirtual search results for Lisboa
-    3. Visit each listing's detail page
-    4. Extract data from __NEXT_DATA__ JSON + DOM selectors fallback
-    5. Save each listing to SQLite and rebuild neighborhood stats when done
+The scraper is API-first: it pulls every listing from the embedded Next.js
+`__NEXT_DATA__` JSON (and the GraphQL XHR as a safety-net) on each search
+results page, so it never visits detail pages at all. This is ~40× fewer
+requests than the old detail-page flow, which kept tripping CloudFront WAF.
+
+Flow:
+    1. Launch a fresh (non-persistent) headless Chrome context. CloudFront
+       cookies pinned to a flagged profile were the main cause of the WAF
+       403s in the old flow.
+    2. For each search page 1..N: navigate, read `__NEXT_DATA__`, iterate
+       `pageProps.data.searchAds.items` — each item has price, area, rooms,
+       location hierarchy, images, tags, etc.
+    3. Build a `Listing` per item, dedupe by source_id, upsert into SQLite.
+    4. Rebuild neighborhood stats when done.
+
+Tradeoff: per-listing lat/lon is not present in the search feed, so
+imovirtual listings won't show exact pins on the map (they still carry
+parish/neighborhood names for the sidebar and can be positioned at the
+parish centroid downstream). Everything else — price, size, rooms, floor,
+images, tags — comes through intact.
 """
 
 import re
@@ -66,9 +79,11 @@ MAX_IMAGES = 15
 BLOCKED_RETRIES = 3
 BLOCKED_WAIT = 8
 
-# Delay between page visits (seconds)
-MIN_DELAY = 2.5
-MAX_DELAY = 5.5
+# Delay between search-page visits (seconds). API-first mode issues one
+# request per ~36 listings, so even generous delays finish the full run
+# in a few minutes — we can afford to be polite.
+MIN_DELAY = 3.0
+MAX_DELAY = 6.0
 
 PROFILE_DIR = Path(__file__).parent.parent / "data" / "browser_profile_imovirtual"
 
@@ -119,25 +134,250 @@ def _int(v) -> Optional[int]:
     return int(m.group()) if m else None
 
 
+def _stringify(v) -> str:
+    """Coerce a value that may be a dict/list/None/etc. into a safe string
+    for hashing. Dicts/lists are treated as empty — hashing falls back to
+    the other fields (price/size/city) which is the right thing to do when
+    the address is an opaque object we can't parse."""
+    if v is None:
+        return ""
+    if isinstance(v, (dict, list)):
+        return ""
+    return str(v)
+
+
 def _hash(address, city, price, size, source="imovirtual") -> str:
-    addr = (address or "").lower().strip()
+    addr = _stringify(address).lower().strip()
     price_r = str(round(price / 1000) * 1000) if price else ""
     size_r = str(round(size)) if size else ""
-    raw = f"{addr}|{(city or '').lower()}|{price_r}|{size_r}|{source}"
+    raw = f"{addr}|{_stringify(city).lower()}|{price_r}|{size_r}|{source}"
     return hashlib.sha1(raw.encode()).hexdigest()
 
 
 def _hash_cross(address, city, price, size) -> str:
     """Source-agnostic hash for cross-site matching."""
-    addr = (address or "").lower().strip()
+    addr = _stringify(address).lower().strip()
     price_r = str(round(price / 1000) * 1000) if price else ""
     size_r = str(round(size)) if size else ""
-    raw = f"{addr}|{(city or '').lower()}|{price_r}|{size_r}"
+    raw = f"{addr}|{_stringify(city).lower()}|{price_r}|{size_r}"
     return hashlib.sha1(raw.encode()).hexdigest()
 
 
 def _polite_delay():
     time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
+
+
+# ── Enum decoders for the imovirtual search schema ───────────────────────────
+#
+# The GraphQL search feed returns rooms/floor/estate as string enums rather
+# than numeric values. These mappings match the internal taxonomy used by
+# olxgroup-verticalsre-atlas (same codebase powers OLX Group real-estate
+# sites across EU). Values outside the map fall back to None and the
+# downstream code handles that gracefully.
+
+_ROOMS_ENUM = {
+    "ONE": 1, "TWO": 2, "THREE": 3, "FOUR": 4, "FIVE": 5,
+    "SIX": 6, "SEVEN": 7, "EIGHT": 8, "NINE": 9, "TEN": 10,
+    "MORE": 11,
+}
+
+_FLOOR_ENUM = {
+    "CELLAR": "-1",
+    "GROUND": "0",
+    "FIRST": "1", "SECOND": "2", "THIRD": "3", "FOURTH": "4",
+    "FIFTH": "5", "SIXTH": "6", "SEVENTH": "7", "EIGHTH": "8",
+    "NINTH": "9", "TENTH": "10",
+    "ABOVE_TENTH": "10+",
+    "GARRET": "attic",
+}
+
+_ESTATE_ENUM = {
+    "FLAT": "apartment",
+    "APARTMENT": "apartment",
+    "HOUSE": "house",
+    "VILLA": "house",
+    "TERRAIN": "land",
+    "OFFICE": "office",
+    "COMMERCIAL_PROPERTY": "commercial",
+    "GARAGE": "garage",
+    "ROOM": "room",
+}
+
+
+def _parse_rooms(v) -> Optional[int]:
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return int(v) or None
+    s = str(v).strip().upper()
+    if s in _ROOMS_ENUM:
+        return _ROOMS_ENUM[s]
+    return _int(s)
+
+
+def _parse_floor(v) -> Optional[str]:
+    if v is None:
+        return None
+    s = str(v).strip()
+    return _FLOOR_ENUM.get(s.upper(), s) or None
+
+
+def _parse_estate(v) -> str:
+    if v is None:
+        return "apartment"
+    s = str(v).strip().upper()
+    return _ESTATE_ENUM.get(s) or "apartment"
+
+
+# ── Search-item → Listing builder ─────────────────────────────────────────────
+
+def _parse_location_hierarchy(location: dict) -> dict:
+    """Pull district / council / parish / neighborhood names out of the
+    `location.reverseGeocoding.locations` list, which is ordered from
+    coarsest (district) to finest (neighborhood)."""
+    out = {"district": None, "city": None, "parish": None, "neighborhood": None}
+    if not isinstance(location, dict):
+        return out
+
+    rg = location.get("reverseGeocoding") or {}
+    levels = rg.get("locations") or []
+    for lvl in levels:
+        if not isinstance(lvl, dict):
+            continue
+        name = lvl.get("name")
+        kind = (lvl.get("locationLevel") or "").lower()
+        if not name:
+            continue
+        if kind == "district":
+            out["district"] = name
+        elif kind == "council":
+            out["city"] = name
+        elif kind == "parish":
+            out["parish"] = name
+        elif kind == "neighborhood":
+            out["neighborhood"] = name
+    return out
+
+
+def _build_listing_from_search_item(item: dict) -> Optional[Listing]:
+    """Build a Listing directly from a searchAds.items entry in the Next.js
+    page data. Returns None if the row is too broken to salvage."""
+    if not isinstance(item, dict):
+        return None
+
+    slug = item.get("slug") or ""
+    if not slug:
+        return None
+    url = f"{BASE_URL}/pt/anuncio/{slug}"
+    source_id = _extract_source_id(url) or str(item.get("id") or "")
+    if not source_id:
+        return None
+
+    # Transaction drives sale vs rent — trust the API over the caller hint.
+    transaction = (item.get("transaction") or "").upper()
+    if transaction == "RENT":
+        listing_type = "rent"
+        price_obj = item.get("rentPrice") or item.get("totalPrice") or {}
+    else:
+        listing_type = "sale"
+        price_obj = item.get("totalPrice") or {}
+    price = _num((price_obj or {}).get("value"))
+
+    pps_obj = item.get("pricePerSquareMeter") or {}
+    price_per_sqm = _num((pps_obj or {}).get("value"))
+    size = _num(item.get("areaInSquareMeters"))
+    # Re-derive pps if the API omitted it but we have both price + size
+    if price and size and size > 0 and not price_per_sqm:
+        price_per_sqm = round(price / size, 2)
+
+    # terrainAreaInSquareMeters is land size for houses — keep it as "gross"
+    # so the existing downstream plumbing has something to display.
+    gross = _num(item.get("terrainAreaInSquareMeters"))
+    if gross and size and gross == size:
+        gross = None
+
+    rooms = _parse_rooms(item.get("roomsNumber"))
+    floor = _parse_floor(item.get("floorNumber"))
+    property_type = _parse_estate(item.get("estate"))
+
+    # Location hierarchy from reverseGeocoding. `location.address.city` is
+    # actually the parish (imovirtual's taxonomy is inconsistent with
+    # Portuguese administrative terms) — we override it from the
+    # reverseGeocoding list below.
+    location = item.get("location") or {}
+    hier = _parse_location_hierarchy(location)
+
+    address = None
+    addr_parts = (location.get("address") or {}) if isinstance(location, dict) else {}
+    street = addr_parts.get("street")
+    if isinstance(street, dict):
+        street_name = street.get("name")
+        street_num = street.get("number")
+        if street_name:
+            address = f"{street_name} {street_num}".strip() if street_num else street_name
+
+    city = hier.get("city") or "Lisboa"
+    district = hier.get("district") or "Lisboa"
+    parish = hier.get("parish")
+    neighborhood = hier.get("neighborhood") or hier.get("parish")
+
+    # Images: prefer large, fall back to medium
+    images = []
+    for img in (item.get("images") or [])[:MAX_IMAGES]:
+        if not isinstance(img, dict):
+            continue
+        u = img.get("large") or img.get("medium") or img.get("url")
+        if u and isinstance(u, str) and u.startswith("http"):
+            images.append(u)
+
+    # Feature chips from tags[].value (e.g. AIR_CONDITIONING, SEPARATE_KITCHEN)
+    chips = []
+    for t in (item.get("tags") or []):
+        if isinstance(t, dict):
+            val = t.get("value")
+            if val:
+                chips.append(str(val).replace("_", " ").title())
+
+    description = item.get("shortDescription")
+    if description:
+        description = str(description)[:1000]
+
+    title = item.get("title") or None
+
+    status = "active"
+
+    return Listing(
+        source="imovirtual",
+        source_id=source_id,
+        url=url,
+        listing_type=listing_type,
+        status=status,
+        price_amount=price,
+        price_per_sqm=price_per_sqm,
+        size_sqm=size,
+        gross_area_sqm=gross,
+        rooms=rooms,
+        bedrooms=rooms,  # imovirtual search feed doesn't split them
+        bathrooms=None,
+        floor=floor,
+        property_type=property_type,
+        condition=None,
+        title=title,
+        address=address,
+        postal_code=None,
+        neighborhood=neighborhood,
+        parish=parish,
+        district=district,
+        city=city,
+        lat=None,
+        lon=None,
+        images=json.dumps(images) if images else None,
+        hash_dedupe=_hash(address, city, price, size),
+        hash_cross=_hash_cross(address, city, price, size),
+        description=description,
+        feature_chips=json.dumps(chips) if chips else None,
+        scraped_at=datetime.utcnow(),
+    )
 
 
 # ── Blocked page detection ────────────────────────────────────────────────────
@@ -385,11 +625,27 @@ def extract_listing_from_next_data(page_props: dict) -> dict:
     location = find_deep(ad, ["location"]) or {}
     address_parts = find_deep(ad, ["location", "address"]) or {}
 
+    def _addr_text(v):
+        """Unwrap an address candidate that may be a dict (imovirtual sometimes
+        wraps street/name as {"name": "...", ...}) into a plain string."""
+        if v is None:
+            return None
+        if isinstance(v, dict):
+            return v.get("name") or v.get("street") or v.get("value") or None
+        if isinstance(v, list):
+            for item in v:
+                t = _addr_text(item)
+                if t:
+                    return t
+            return None
+        s = str(v).strip()
+        return s or None
+
     # Build address from location hierarchy
     address = (
-        address_parts.get("street") or
-        address_parts.get("name") or
-        ad.get("address")
+        _addr_text(address_parts.get("street")) or
+        _addr_text(address_parts.get("name")) or
+        _addr_text(ad.get("address"))
     )
 
     # Navigate location hierarchy: country > region > subregion > city > district
@@ -831,6 +1087,34 @@ def build_page_url(base_url: str, page_num: int) -> str:
 
 # ── Main scraper ──────────────────────────────────────────────────────────────
 
+def _extract_items_from_next_data(page: "Page") -> tuple:
+    """Return (items_list, total_pages) from the current page's
+    `__NEXT_DATA__`. items_list may be empty if the feed changed shape."""
+    try:
+        raw = page.evaluate(
+            "() => { const el = document.getElementById('__NEXT_DATA__'); "
+            "return el ? el.textContent : null; }"
+        )
+    except Exception:
+        return [], None
+    if not raw:
+        return [], None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return [], None
+
+    pp = (
+        data.get("props", {}).get("pageProps", {})
+        if isinstance(data, dict) else {}
+    )
+    search_ads = ((pp.get("data") or {}).get("searchAds")) or {}
+    items = search_ads.get("items") or []
+    pagination = search_ads.get("pagination") or {}
+    total_pages = pagination.get("totalPages")
+    return items, total_pages
+
+
 def run_scraper(
     search_url: str = DEFAULT_SEARCH,
     max_pages: int = DEFAULT_MAX_PAGES,
@@ -854,11 +1138,17 @@ def run_scraper(
     known_listings = _load_known_listings(listing_type)
     log.info(f"Loaded {len(known_listings)} known listings from DB")
 
-    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    # API-first collection: every listing comes from the embedded Next.js
+    # `__NEXT_DATA__` on each search page. No detail-page round-trip.
+    all_listings = []      # type: list[Listing]
+    seen_source_ids = set()  # type: set[str]
 
     with sync_playwright() as pw:
-        context = pw.chromium.launch_persistent_context(
-            str(PROFILE_DIR),
+        # CRITICAL: fresh (non-persistent) context. The old flow used a
+        # persistent Chrome profile, which baked a CloudFront "flagged"
+        # cookie after the first block and propagated it to every
+        # subsequent run — 100% 403. A fresh context starts clean.
+        browser = pw.chromium.launch(
             channel="chrome",
             headless=headless,
             args=[
@@ -866,6 +1156,8 @@ def run_scraper(
                 "--disable-blink-features=AutomationControlled",
                 "--disable-dev-shm-usage",
             ],
+        )
+        context = browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -874,10 +1166,10 @@ def run_scraper(
             viewport={"width": 1280, "height": 900},
             locale="pt-PT",
             timezone_id="Europe/Lisbon",
+            extra_http_headers={
+                "Accept-Language": "pt-PT,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+            },
         )
-        context.set_extra_http_headers({
-            "Accept-Language": "pt-PT,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-        })
 
         page = context.new_page()
 
@@ -887,127 +1179,182 @@ def run_scraper(
         else:
             log.warning("playwright-stealth not installed — bot detection may block scraping")
 
-        # Warm up: visit homepage to pick up cookies
-        log.info("Warming up session on imovirtual.com...")
-        page.goto(BASE_URL, timeout=30000)
-        accept_cookies(page)
-        _polite_delay()
+        # Safety-net XHR capture: imovirtual's GraphQL endpoint for the
+        # search feed. If pagination ever starts hydrating client-side
+        # and `__NEXT_DATA__` stops containing the items list, we can
+        # still pick them up from the response body. The same technique
+        # is used in era_playwright.py.
+        xhr_items = []  # list[dict]
 
-        # ── Collect listings from search pages ─────────────────────────────
-        # Each item has {"url": ..., "price": ...} so we can compare with DB
-        all_search_items = []  # type: list
-        seen_urls = set()  # type: set
+        def _on_response(resp):
+            try:
+                url = resp.url
+                if "/graphql" not in url and "searchAds" not in url:
+                    return
+                if resp.request.method not in ("POST", "GET"):
+                    return
+                body = resp.json()
+            except Exception:
+                return
+            try:
+                def walk(o):
+                    # Find any list containing dicts with estate/transaction
+                    if isinstance(o, dict):
+                        if o.get("__typename") == "AdvertListItem":
+                            xhr_items.append(o)
+                            return
+                        for v in o.values():
+                            walk(v)
+                    elif isinstance(o, list):
+                        for v in o:
+                            walk(v)
+                walk(body)
+            except Exception as e:
+                log.debug(f"  XHR parse error: {e}")
+
+        page.on("response", _on_response)
+
+        # Warm-up visit to the homepage to pick up cookies before hitting
+        # the search URL. Helps stay out of the aggressive "direct-to-deep"
+        # heuristic in CloudFront.
+        log.info("Warming up session on imovirtual.com...")
+        try:
+            page.goto(BASE_URL, timeout=30000, wait_until="domcontentloaded")
+            accept_cookies(page)
+            _polite_delay()
+        except Exception as e:
+            log.warning(f"  Warm-up visit failed: {e}")
+
         blocked_count = 0
+        total_pages_api = None
 
         for page_num in range(1, max_pages + 1):
+            if len(all_listings) >= max_items:
+                log.info(
+                    f"Collected enough listings ({len(all_listings)} >= "
+                    f"max_items={max_items}). Stopping pagination."
+                )
+                break
+
             page_url = build_page_url(search_url, page_num)
             log.info(f"Search page {page_num}: {page_url}")
 
             if not _goto_with_retry(page, page_url):
                 blocked_count += 1
                 if blocked_count >= 3:
-                    log.warning("Blocked 3 search pages — session may be expired. Run --setup.")
-                break
+                    log.warning(
+                        "Blocked on 3 search pages in a row — giving up "
+                        "to avoid wasting time. Try again later."
+                    )
+                    break
+                continue
+            blocked_count = 0
 
-            search_items = extract_search_listings(page)
-            log.info(f"  Found {len(search_items)} listings on page {page_num}")
+            # Give the page a moment for any client-side hydration.
+            page.wait_for_timeout(800)
 
-            if not search_items:
-                break  # end of results
+            items, total_pages_new = _extract_items_from_next_data(page)
+            if total_pages_new and total_pages_api is None:
+                total_pages_api = total_pages_new
+                log.info(
+                    f"  API reports {total_pages_api} total pages "
+                    f"(~{total_pages_api * 36} listings)"
+                )
 
-            for item in search_items:
-                if item["url"] not in seen_urls:
-                    seen_urls.add(item["url"])
-                    all_search_items.append(item)
+            # Merge any XHR-captured items discovered during this navigation
+            # that weren't already in __NEXT_DATA__.
+            if xhr_items:
+                seen_ids_in_batch = {it.get("id") for it in items if isinstance(it, dict)}
+                for xhr in xhr_items:
+                    if xhr.get("id") not in seen_ids_in_batch:
+                        items.append(xhr)
+                xhr_items.clear()
 
-            if len(all_search_items) >= max_items * 2:
-                log.info(f"Collected enough URLs ({len(all_search_items)}). Moving to detail scraping.")
-                break
-
-            _polite_delay()
-
-        log.info(f"Total listings collected from search: {len(all_search_items)}")
-
-        # ── Filter: skip known listings whose price hasn't changed ────────────
-        urls_to_scrape = []
-        seen_source_ids = set()
-        price_changed = 0
-        for item in all_search_items:
-            sid = _extract_source_id(item["url"])
-            if sid:
-                seen_source_ids.add(sid)
-            if sid in known_listings:
-                old_price = known_listings[sid]
-                new_price = item.get("price")
-                # Re-scrape if price changed (or if we couldn't read the preview price)
-                if not new_price or not old_price or abs(new_price - old_price) > 1:
-                    if new_price and old_price:
-                        log.info(f"  Price changed for {sid}: {old_price} -> {new_price}")
-                    urls_to_scrape.append(item["url"])
-                    price_changed += 1
-                else:
-                    skipped_known += 1
-            else:
-                urls_to_scrape.append(item["url"])
-
-        log.info(
-            f"Skipping {skipped_known} unchanged listings, "
-            f"{price_changed} price changes to update, "
-            f"{len(urls_to_scrape) - price_changed} new to scrape"
-        )
-
-        # ── Visit each detail page ────────────────────────────────────────────
-        for i, detail_url in enumerate(urls_to_scrape):
-            if total_pushed >= max_items:
-                log.info(f"Reached max_items={max_items}. Stopping.")
-                break
-
-            log.info(f"[{i+1}/{len(urls_to_scrape)}] {detail_url}")
-
-            try:
-                if not _goto_with_retry(page, detail_url):
-                    log.warning(f"  Blocked on detail page — skipping")
-                    error_count += 1
+            added = 0
+            for raw_item in items:
+                listing = _build_listing_from_search_item(raw_item)
+                if listing is None or not listing.source_id:
                     continue
+                if listing.source_id in seen_source_ids:
+                    continue
+                seen_source_ids.add(listing.source_id)
+                all_listings.append(listing)
+                added += 1
 
-                # Wait for content
-                try:
-                    page.wait_for_selector(
-                        "#__NEXT_DATA__, h1[data-cy='adPageAdTitle'], h1",
-                        timeout=8000
-                    )
-                except PWTimeout:
-                    pass
+            log.info(
+                f"  Page {page_num}: +{added} listings "
+                f"(total {len(all_listings)})"
+            )
 
-                listing = scrape_detail_page(page, detail_url, listing_type=listing_type)
+            if added == 0:
+                log.info(
+                    "  No new items — likely end of results. Stopping pagination."
+                )
+                break
 
-                if listing is None or listing.price_amount is None:
-                    log.warning(f"  No price extracted — skipping")
-                    error_count += 1
-                else:
-                    _, is_new = db.upsert_listing(listing)
-                    if is_new:
-                        new_count += 1
-                    else:
-                        updated_count += 1
-                    total_pushed += 1
-                    log.info(
-                        f"  OK {listing.neighborhood or 'unknown'} "
-                        f"T{listing.rooms} "
-                        f"EUR{listing.price_amount:,.0f} "
-                        f"({listing.size_sqm}m2)"
-                    )
-
-            except PWTimeout:
-                log.warning(f"  Timeout on detail page — skipping")
-                error_count += 1
-            except Exception as e:
-                log.warning(f"  Error: {e}")
-                error_count += 1
+            # Stop at the API-reported total page count
+            if total_pages_api and page_num >= total_pages_api:
+                log.info("  Reached last page reported by API.")
+                break
 
             _polite_delay()
+
+        try:
+            page.remove_listener("response", _on_response)
+        except Exception:
+            pass
 
         context.close()
+        browser.close()
+
+    log.info(f"Total listings collected from search feed: {len(all_listings)}")
+
+    # ── Filter by requested listing_type and upsert ─────────────────────────
+    filtered = [li for li in all_listings if li.listing_type == listing_type]
+    # Scope seen_source_ids to the requested type so missing-detection
+    # doesn't get confused when a sale search accidentally harvests a
+    # rental or vice-versa.
+    seen_source_ids = {li.source_id for li in filtered if li.source_id}
+    log.info(
+        f"Upserting {len(filtered)} {listing_type} listings "
+        f"(skipped {len(all_listings) - len(filtered)} of the other type)"
+    )
+
+    for i, listing in enumerate(filtered):
+        if total_pushed >= max_items:
+            log.info(f"Reached max_items={max_items}. Stopping.")
+            break
+        sid = listing.source_id
+        if listing.price_amount is None:
+            log.warning(f"  [{i+1}/{len(filtered)}] {sid}: no price — skipping")
+            error_count += 1
+            continue
+        # Price-unchanged skip for known listings
+        if sid in known_listings:
+            old_price = known_listings[sid]
+            new_price = listing.price_amount
+            if old_price and new_price and abs(new_price - old_price) < 1:
+                skipped_known += 1
+                # We still count it as "seen" so missing-detection works
+                continue
+        try:
+            _, is_new = db.upsert_listing(listing)
+            if is_new:
+                new_count += 1
+            else:
+                updated_count += 1
+            total_pushed += 1
+            if (i + 1) % 25 == 0 or (i + 1) == len(filtered):
+                log.info(
+                    f"  [{i+1}/{len(filtered)}] OK "
+                    f"{listing.neighborhood or listing.parish or 'unknown'} "
+                    f"T{listing.rooms} "
+                    f"EUR{listing.price_amount:,.0f} "
+                    f"({listing.size_sqm}m2)"
+                )
+        except Exception as e:
+            log.warning(f"  [{i+1}/{len(filtered)}] {sid}: upsert error: {e}")
+            error_count += 1
 
     # ── Detect missing listings ──────────────────────────────────────────────
     if len(known_listings) > 0 and len(seen_source_ids) < len(known_listings) * 0.5:
