@@ -299,10 +299,19 @@ export default function Map({
               markerColor = { color: '#991b1b', fillColor: '#ef4444' }
             } else if (isSold || isReserved) {
               markerColor = { color: '#000000', fillColor: '#1f2937' }
-            } else if (isRent) {
-              markerColor = { color: '#6b21a8', fillColor: '#a855f7' }
             } else {
-              markerColor = { color: '#1d4ed8', fillColor: '#3b82f6' }
+              // Color by flip_score when available — greener = better flip candidate.
+              const fs = l.flip_score
+              if (fs != null) {
+                if (fs >= 80)      markerColor = { color: '#065f46', fillColor: '#10b981' }  // A — emerald
+                else if (fs >= 60) markerColor = { color: '#166534', fillColor: '#22c55e' }  // B — green
+                else if (fs >= 40) markerColor = { color: '#854d0e', fillColor: '#f59e0b' }  // C — amber
+                else               markerColor = { color: '#991b1b', fillColor: '#ef4444' }  // D — red
+              } else if (isRent) {
+                markerColor = { color: '#6b21a8', fillColor: '#a855f7' }
+              } else {
+                markerColor = { color: '#475569', fillColor: '#94a3b8' }                    // unscored — slate
+              }
             }
 
             const popupContent = (

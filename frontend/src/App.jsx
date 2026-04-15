@@ -89,19 +89,19 @@ export default function App() {
   useEffect(() => {
     setLoading(true)
     // show_sold and sort_by are UI-only — don't send them to the API
-    const { show_sold, sort_by, listing_type, min_deal_score, min_rarity_score, ...apiFilters } = filters
+    const { show_sold, sort_by, listing_type, min_flip_score, min_rent_score, ...apiFilters } = filters
     // 'all' means no listing_type filter (backend unions both tables)
     if (listing_type && listing_type !== 'all') apiFilters.listing_type = listing_type
-    if (min_deal_score > 0) apiFilters.min_deal_score = min_deal_score
-    if (min_rarity_score > 0) apiFilters.min_rarity_score = min_rarity_score
+    if (min_flip_score > 0) apiFilters.min_flip_score = min_flip_score
+    if (min_rent_score > 0) apiFilters.min_rent_score = min_rent_score
     if (selectedNeighborhood) apiFilters.neighborhood = selectedNeighborhood
     fetchListings(apiFilters)
       .then(d => {
         let all = d.listings ?? []
         if (show_sold === 'active' || !show_sold) all = all.filter(l => l.status === 'active' || !l.status)
         else if (show_sold === 'sold') all = all.filter(l => l.status === 'sold' || l.status === 'reserved')
-        if (sort_by === 'rating') all = [...all].sort((a, b) => (b.deal_score ?? 0) - (a.deal_score ?? 0))
-        else if (sort_by === 'rarity') all = [...all].sort((a, b) => (b.rarity_score ?? 0) - (a.rarity_score ?? 0))
+        if (sort_by === 'flip') all = [...all].sort((a, b) => (b.flip_score ?? 0) - (a.flip_score ?? 0))
+        else if (sort_by === 'rent_score') all = [...all].sort((a, b) => (b.rent_score ?? 0) - (a.rent_score ?? 0))
         else if (sort_by === 'price_asc') all = [...all].sort((a, b) => (a.price_amount ?? 0) - (b.price_amount ?? 0))
         else if (sort_by === 'price_desc') all = [...all].sort((a, b) => (b.price_amount ?? 0) - (a.price_amount ?? 0))
         else if (sort_by === 'psm_gross_asc') all = [...all].sort((a, b) => {

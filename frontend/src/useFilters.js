@@ -24,8 +24,8 @@ const DEFAULT_FILTERS = {
   district: '',
   city: '',
   postal_code: '',
-  min_deal_score: 0,
-  min_rarity_score: 0,
+  min_flip_score: 0,
+  min_rent_score: 0,
   grant_eligible: '',
 }
 

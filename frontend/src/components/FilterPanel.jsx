@@ -16,8 +16,8 @@ function getActiveChips(filters, t) {
   if (filters.floor) chips.push({ key: 'floor', label: `${t.floor}: ${filters.floor}` })
   if (filters.property_type) chips.push({ key: 'property_type', label: filters.property_type })
   if (filters.condition) chips.push({ key: 'condition', label: filters.condition })
-  if (filters.min_deal_score > 0) chips.push({ key: 'min_deal_score', label: `Deal ≥ ${filters.min_deal_score}`, value: 0 })
-  if (filters.min_rarity_score > 0) chips.push({ key: 'min_rarity_score', label: `Rarity ≥ ${filters.min_rarity_score}`, value: 0 })
+  if (filters.min_flip_score > 0) chips.push({ key: 'min_flip_score', label: `Flip ≥ ${filters.min_flip_score}`, value: 0 })
+  if (filters.min_rent_score > 0) chips.push({ key: 'min_rent_score', label: `Rent ≥ ${filters.min_rent_score}`, value: 0 })
   if (filters.parish) chips.push({ key: 'parish', label: filters.parish })
   if (filters.district) chips.push({ key: 'district', label: filters.district })
   if (filters.city) chips.push({ key: 'city', label: filters.city })
@@ -194,47 +194,45 @@ export default function FilterPanel({ filters, setFilter, reset }) {
         <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block ml-auto" />
       </label>
 
-      {/* Deal Score slider */}
+      {/* Flip Score slider */}
       <div className="bg-gray-50 rounded-lg p-3 -mx-1">
-        <label className="text-xs text-gray-500 mb-2 block">{t.dealScoreFilter}</label>
+        <label className="text-xs text-gray-500 mb-2 block">Flip score</label>
         <input
           type="range"
           min="0"
           max="100"
           step="5"
-          value={filters.min_deal_score}
-          onChange={e => setFilter('min_deal_score', Number(e.target.value))}
+          value={filters.min_flip_score || 0}
+          onChange={e => setFilter('min_flip_score', Number(e.target.value))}
           className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
         />
         <div className="flex justify-between text-[10px] text-gray-400 mt-1">
-          <span>{t.scoreAll}</span>
+          <span>All</span>
           <span className="font-medium text-blue-600">
-            {filters.min_deal_score === 0 ? t.scoreAll : `≥ ${filters.min_deal_score}`}
+            {!filters.min_flip_score ? 'All' : `≥ ${filters.min_flip_score}`}
           </span>
         </div>
       </div>
 
-      {/* Rarity Score slider (sales only) */}
-      {filters.listing_type !== 'rent' && (
-        <div className="bg-gray-50 rounded-lg p-3 -mx-1">
-          <label className="text-xs text-gray-500 mb-2 block">{t.rarityScoreFilter}</label>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            step="5"
-            value={filters.min_rarity_score}
-            onChange={e => setFilter('min_rarity_score', Number(e.target.value))}
-            className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-          />
-          <div className="flex justify-between text-[10px] text-gray-400 mt-1">
-            <span>{t.scoreAll}</span>
-            <span className="font-medium text-emerald-600">
-              {filters.min_rarity_score === 0 ? t.scoreAll : `≥ ${filters.min_rarity_score}`}
-            </span>
-          </div>
+      {/* Rent Score slider */}
+      <div className="bg-gray-50 rounded-lg p-3 -mx-1">
+        <label className="text-xs text-gray-500 mb-2 block">Rent score</label>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="5"
+          value={filters.min_rent_score || 0}
+          onChange={e => setFilter('min_rent_score', Number(e.target.value))}
+          className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+        />
+        <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+          <span>All</span>
+          <span className="font-medium text-emerald-600">
+            {!filters.min_rent_score ? 'All' : `≥ ${filters.min_rent_score}`}
+          </span>
         </div>
-      )}
+      </div>
 
       {/* Advanced filters — collapsible */}
       <div
