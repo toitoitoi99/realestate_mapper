@@ -32,8 +32,19 @@ import tornado.web
 sys.path.insert(0, str(Path(__file__).parent))
 
 import database as db
-from scrapers.idealista import IdealistaScraper
 from models import ScrapeRun
+
+# Scrapers available via /api/scrape — keyed by the `source` string written
+# to the scrape_runs table. Each module exposes `run_scraper(...)` with the
+# same signature and manages its own scrape_runs row lifecycle.
+SCRAPER_MODULES = {
+    "idealista":  "scrapers.idealista_playwright",
+    "era":        "scrapers.era_playwright",
+    "remax":      "scrapers.remax_playwright",
+    "imovirtual": "scrapers.imovirtual_playwright",
+    "olx":        "scrapers.olx_playwright",
+    "casa_sapo":  "scrapers.casa_sapo_playwright",
+}
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -233,23 +244,25 @@ class ScrapeHandler(BaseHandler):
         source = body.get("source", "idealista")
         max_pages = int(body.get("max_pages", 10))
 
-        if source != "idealista":
-            self.write_error_json(f"Unknown source '{source}'. Only 'idealista' is supported so far.")
+        if source not in SCRAPER_MODULES:
+            self.write_error_json(
+                f"Unknown source '{source}'. Available: {sorted(SCRAPER_MODULES.keys())}"
+            )
             return
 
-        run_id = db.start_scrape_run(source)
-
-        # Fire off in a daemon thread so the HTTP response returns immediately
+        # Fire off in a daemon thread so the HTTP response returns immediately.
+        # The scraper itself creates/updates its scrape_runs row; poll
+        # /api/scrape-runs?source=<source>&limit=1 to track progress.
         thread = threading.Thread(
             target=_run_scrape,
-            args=(source, run_id, max_pages),
+            args=(source, max_pages),
             daemon=True,
         )
         thread.start()
 
         self.write_json({
-            "message": f"Scrape started for '{source}' (run_id={run_id})",
-            "run_id": run_id,
+            "message": f"Scrape started for '{source}'",
+            "source": source,
         }, status=202)
 
 
@@ -486,52 +499,48 @@ class TranslateHandler(BaseHandler):
 
 # ── Background scrape logic ───────────────────────────────────────────────────
 
-def _run_scrape(source: str, run_id: int, max_pages: int):
-    """Runs in a background thread."""
+def _run_scrape(source: str, max_pages: int):
+    """Runs in a background thread.
+
+    Dispatches to the Playwright scraper module for `source`. Each module's
+    `run_scraper()` creates its own scrape_runs row and writes the final
+    status itself. We only write a fallback 'failed' row if the dispatch
+    itself blows up before the scraper had a chance to do so (e.g. import
+    error).
+    """
+    module_name = SCRAPER_MODULES.get(source)
+    if module_name is None:
+        logger.error(f"[scrape] Unknown source: {source}")
+        return
+
     try:
-        scraper = IdealistaScraper(max_pages=max_pages)
-        listings = scraper.scrape()
-
-        new_count = updated_count = 0
-        for listing in listings:
-            _, is_new = db.upsert_listing(listing)
-            if is_new:
-                new_count += 1
-            else:
-                updated_count += 1
-
-        db.rebuild_neighborhoods()
-
-        # Recompute scores for all active listings
-        try:
-            db.compute_rarity_scores()
-        except Exception as e:
-            logger.warning("Failed to recompute rarity scores: %s", e)
-        try:
-            db.compute_all_deal_scores()
-        except Exception as e:
-            logger.warning("Failed to recompute deal scores: %s", e)
-
-        run = ScrapeRun(
-            source=source,
-            listings_found=len(listings),
-            listings_new=new_count,
-            listings_updated=updated_count,
-            status="completed",
-        )
-        db.finish_scrape_run(run_id, run)
-        logger.info(
-            f"[scrape] Run {run_id} complete: "
-            f"{len(listings)} found, {new_count} new, {updated_count} updated"
-        )
+        import importlib
+        module = importlib.import_module(module_name)
+        run_scraper = getattr(module, "run_scraper")
+        logger.info(f"[scrape] Starting {source} (max_pages={max_pages})")
+        run_scraper(max_pages=max_pages)
+        logger.info(f"[scrape] {source} finished")
     except Exception as e:
-        run = ScrapeRun(
-            source=source,
-            status="failed",
-            notes=str(e),
-        )
-        db.finish_scrape_run(run_id, run)
-        logger.error(f"[scrape] Run {run_id} failed: {e}")
+        logger.exception(f"[scrape] {source} crashed in dispatcher: {e}")
+        # Safety-net: the scraper either never wrote a row, or wrote a
+        # `running` row but crashed before `finish_scrape_run`. In the
+        # latter case, mark the orphaned row as failed; otherwise create
+        # a fresh failed row so the UI sees *some* terminal state.
+        try:
+            latest = db.get_scrape_runs(source=source, limit=1)
+            if latest and latest[0].get("status") == "running":
+                db.finish_scrape_run(
+                    latest[0]["id"],
+                    ScrapeRun(source=source, status="failed", notes=f"dispatcher: {e}"),
+                )
+            else:
+                run_id = db.start_scrape_run(source)
+                db.finish_scrape_run(
+                    run_id,
+                    ScrapeRun(source=source, status="failed", notes=f"dispatcher: {e}"),
+                )
+        except Exception:
+            pass
 
 
 # ── Gradient helper ───────────────────────────────────────────────────────────

@@ -50,6 +50,12 @@ export const translations = {
     lastScrape:      'Last scrape:',
     runScraper:      'Run scraper',
     scraping:        'Scraping…',
+    scraperPickerAria: 'Select scraper source',
+    statusRunning:   'running',
+    statusFailed:    'failed',
+    statusFound:     'found',
+    statusNew:       'new',
+    statusErrors:    'errors',
 
     // FilterPanel
     filters:         'Filters',
@@ -249,6 +255,12 @@ export const translations = {
     lastScrape:      'Última actualização:',
     runScraper:      'Actualizar dados',
     scraping:        'A actualizar…',
+    scraperPickerAria: 'Escolher fonte',
+    statusRunning:   'em curso',
+    statusFailed:    'falhou',
+    statusFound:     'encontrados',
+    statusNew:       'novos',
+    statusErrors:    'erros',
 
     // FilterPanel
     filters:         'Filtros',

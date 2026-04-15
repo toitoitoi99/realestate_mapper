@@ -1,6 +1,53 @@
 import { useLanguage } from '../LanguageContext'
 
-export default function StatsBar({ stats, ineStats, onScrape, scraping, areas, currentArea, onChangeArea }) {
+export const SCRAPER_OPTIONS = [
+  { key: 'idealista',  label: 'Idealista' },
+  { key: 'era',        label: 'ERA' },
+  { key: 'remax',      label: 'Remax' },
+  { key: 'imovirtual', label: 'Imovirtual' },
+  { key: 'olx',        label: 'OLX' },
+  { key: 'casa_sapo',  label: 'Casa Sapo' },
+]
+
+const SCRAPER_LABEL = Object.fromEntries(SCRAPER_OPTIONS.map(s => [s.key, s.label]))
+
+function ScrapeStatus({ status, t }) {
+  if (!status) return null
+  const label = SCRAPER_LABEL[status.source] ?? status.source
+  let dot = '', text = '', cls = 'text-gray-600'
+  if (status.status === 'running') {
+    dot = '🟡'
+    cls = 'text-amber-700'
+    const found = status.listings_found ?? 0
+    text = `${t.statusRunning} · ${label}${found ? ` · ${found} ${t.statusFound}` : ''}`
+  } else if (status.status === 'completed') {
+    dot = '🟢'
+    cls = 'text-emerald-700'
+    const nw = status.listings_new ?? 0
+    const er = status.errors ?? 0
+    text = `${label} · ${nw} ${t.statusNew}${er ? ` · ${er} ${t.statusErrors}` : ''}`
+  } else if (status.status === 'failed') {
+    dot = '🔴'
+    cls = 'text-red-700'
+    text = `${t.statusFailed} · ${label}`
+  } else {
+    return null
+  }
+  return (
+    <span
+      className={`text-xs ${cls} whitespace-nowrap`}
+      title={status.notes || `${status.status} (${status.started_at ?? ''})`}
+    >
+      {dot} {text}
+    </span>
+  )
+}
+
+export default function StatsBar({
+  stats, ineStats, onScrape, scraping,
+  areas, currentArea, onChangeArea,
+  selectedScraper, onSelectScraper, scrapeStatus,
+}) {
   const { lang, toggle, t } = useLanguage()
   if (!stats) return null
 
@@ -55,13 +102,28 @@ export default function StatsBar({ stats, ineStats, onScrape, scraping, areas, c
         ))}
       </div>
 
-      <button
-        onClick={onScrape}
-        disabled={scraping}
-        className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
-      >
-        {scraping ? t.scraping : t.runScraper}
-      </button>
+      {/* Scraper picker + status + trigger */}
+      <div className="flex items-center gap-2">
+        <ScrapeStatus status={scrapeStatus} t={t} />
+        <select
+          value={selectedScraper}
+          onChange={e => onSelectScraper(e.target.value)}
+          disabled={scraping}
+          aria-label={t.scraperPickerAria}
+          className="px-2 py-1 text-xs border border-gray-300 rounded bg-white text-gray-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {SCRAPER_OPTIONS.map(s => (
+            <option key={s.key} value={s.key}>{s.label}</option>
+          ))}
+        </select>
+        <button
+          onClick={onScrape}
+          disabled={scraping}
+          className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+        >
+          {scraping ? t.scraping : t.runScraper}
+        </button>
+      </div>
     </div>
   )
 }
