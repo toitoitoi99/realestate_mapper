@@ -48,11 +48,11 @@ export async function fetchListings(filters = {}) {
   return api(`${BASE}/listings?${params}`)
 }
 
-export async function triggerScrape(maxPages = 10) {
+export async function triggerScrape({ source = 'idealista', maxPages = 10 } = {}) {
   return api(`${BASE}/scrape`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source: 'idealista', max_pages: maxPages }),
+    body: JSON.stringify({ source, max_pages: maxPages }),
   })
 }
 
@@ -61,8 +61,11 @@ export async function fetchProjects(layer = null) {
   return api(`${BASE}/projects${params}`)
 }
 
-export async function fetchScrapeRuns() {
-  return api(`${BASE}/scrape-runs?limit=5`)
+export async function fetchScrapeRuns({ source, limit = 5 } = {}) {
+  const params = new URLSearchParams()
+  if (source) params.set('source', source)
+  params.set('limit', String(limit))
+  return api(`${BASE}/scrape-runs?${params}`)
 }
 
 export async function fetchIneStats() {

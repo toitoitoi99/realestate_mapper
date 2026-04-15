@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { fetchAreas, fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes, fetchSoldTrends, fetchNeighbourhoodTypologies, fetchParishStats } from './api'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { fetchAreas, fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes, fetchSoldTrends, fetchNeighbourhoodTypologies, fetchParishStats, fetchScrapeRuns } from './api'
 import { useFilters } from './useFilters'
 import { CATEGORIES } from './projectCategories'
 import { DEFAULT_BASE_MAP } from './baseMaps'
@@ -33,6 +33,10 @@ export default function App() {
   const [baseMap, setBaseMap] = useState(DEFAULT_BASE_MAP)
   const [loading, setLoading] = useState(false)
   const [scraping, setScraping] = useState(false)
+  const [selectedScraper, setSelectedScraper] = useState('idealista')
+  const [scrapeStatus, setScrapeStatus] = useState(null)  // latest scrape_runs row for selectedScraper, or null
+  const pollRef = useRef(null)
+  const fadeRef = useRef(null)
   const [selectedNeighborhood, setSelectedNeighborhood] = useState(null)
   const [selectedListing, setSelectedListing] = useState(null)
   const [highlightedListing, setHighlightedListing] = useState(null)
@@ -132,18 +136,89 @@ export default function App() {
       .finally(() => setLoading(false))
   }, [filters, selectedNeighborhood])
 
-  const handleScrape = useCallback(async () => {
-    setScraping(true)
+  // Poll a single source's latest scrape_runs row; transition UI state
+  // when it reaches a terminal status.
+  const pollOnce = useCallback(async (source) => {
     try {
-      await triggerScrape(10)
-      setTimeout(() => {
-        fetchStats().then(setStats)
-        setScraping(false)
-      }, 5000)
-    } catch {
-      setScraping(false)
+      const { runs = [] } = await fetchScrapeRuns({ source, limit: 1 })
+      const row = runs[0] ?? null
+      if (row) setScrapeStatus(row)
+      return row
+    } catch (e) {
+      console.error('poll scrape-runs failed', e)
+      return null
     }
   }, [])
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+  }, [])
+
+  const startPolling = useCallback((source) => {
+    stopPolling()
+    pollRef.current = setInterval(async () => {
+      const row = await pollOnce(source)
+      if (row && (row.status === 'completed' || row.status === 'failed')) {
+        stopPolling()
+        setScraping(false)
+        fetchStats().then(setStats).catch(() => {})
+        // Keep the finished status visible briefly, then fade.
+        if (fadeRef.current) clearTimeout(fadeRef.current)
+        fadeRef.current = setTimeout(() => setScrapeStatus(null), 30000)
+      }
+    }, 3000)
+  }, [pollOnce, stopPolling])
+
+  const handleScrape = useCallback(async () => {
+    if (scraping) return
+    setScraping(true)
+    // Provisional row so the UI flips to "running" immediately; real row
+    // overwrites this on the next poll tick.
+    setScrapeStatus({
+      source: selectedScraper,
+      status: 'running',
+      listings_found: 0,
+      listings_new: 0,
+      errors: 0,
+      started_at: new Date().toISOString(),
+    })
+    if (fadeRef.current) { clearTimeout(fadeRef.current); fadeRef.current = null }
+    try {
+      await triggerScrape({ source: selectedScraper, maxPages: 10 })
+      startPolling(selectedScraper)
+    } catch (e) {
+      setScraping(false)
+      setScrapeStatus({
+        source: selectedScraper,
+        status: 'failed',
+        notes: String(e?.message ?? e),
+      })
+    }
+  }, [scraping, selectedScraper, startPolling])
+
+  // Rehydrate on mount / when the selected scraper changes: if the latest
+  // row for the selected source is already `running` (e.g. a scrape kicked
+  // off in another tab, or the user reloaded mid-run), resume polling.
+  useEffect(() => {
+    let cancelled = false
+    pollOnce(selectedScraper).then((row) => {
+      if (cancelled) return
+      if (row && row.status === 'running') {
+        setScraping(true)
+        startPolling(selectedScraper)
+      }
+    })
+    return () => { cancelled = true }
+  }, [selectedScraper, pollOnce, startPolling])
+
+  // Cleanup timers on unmount
+  useEffect(() => () => {
+    stopPolling()
+    if (fadeRef.current) clearTimeout(fadeRef.current)
+  }, [stopPolling])
 
   const filteredListings = useMemo(() => {
     const base = listings
@@ -196,7 +271,18 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <StatsBar stats={stats} ineStats={ineStats} onScrape={handleScrape} scraping={scraping} areas={areas} currentArea={currentArea} onChangeArea={setCurrentArea} />
+      <StatsBar
+        stats={stats}
+        ineStats={ineStats}
+        onScrape={handleScrape}
+        scraping={scraping}
+        areas={areas}
+        currentArea={currentArea}
+        onChangeArea={setCurrentArea}
+        selectedScraper={selectedScraper}
+        onSelectScraper={setSelectedScraper}
+        scrapeStatus={scrapeStatus}
+      />
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <Sidebar
           filters={filters}

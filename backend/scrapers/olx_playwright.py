@@ -875,10 +875,20 @@ def run_scraper(
             if not search_items:
                 break  # end of results
 
+            skipped_external = 0
             for item in search_items:
+                # OLX cross-posts listings from other sites (imovirtual, etc.)
+                # whose detail pages are behind their own anti-bot layer and
+                # always fail. Only keep native olx.pt listing URLs.
+                url = item["url"]
+                if "olx.pt/d/anuncio/" not in url:
+                    skipped_external += 1
+                    continue
                 if item["url"] not in seen_urls:
                     seen_urls.add(item["url"])
                     all_search_items.append(item)
+            if skipped_external:
+                log.info(f"    Skipped {skipped_external} non-olx.pt cross-posts")
 
             if len(all_search_items) >= max_items * 2:
                 log.info(f"Collected enough URLs ({len(all_search_items)}). Moving to detail scraping.")
