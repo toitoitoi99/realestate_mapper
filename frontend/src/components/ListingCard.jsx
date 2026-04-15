@@ -1,6 +1,6 @@
 import { useLanguage } from '../LanguageContext'
 import GrantBadge from './GrantBadge'
-import RarityBadge from './RarityBadge'
+import { FlipRentBadges } from './FlipRentScorecard'
 import SourceLogo from './SourceLogo'
 
 export default function ListingCard({ listing, onSelect, highlighted }) {
@@ -38,7 +38,7 @@ export default function ListingCard({ listing, onSelect, highlighted }) {
         <span className="ml-auto"><SourceLogo source={listing.source} /></span>
       </div>
 
-      <RarityBadge score={listing.rarity_score} factors={listing.rarity_factors} />
+      <FlipRentBadges flip={listing.flip_score} rent={listing.rent_score} />
       <GrantBadge eligible={listing.grant_eligible} />
     </div>
   )

@@ -106,12 +106,6 @@ export async function translateDescription(id, listingType = 'sale') {
   })
 }
 
-export async function fetchDealScore(id, listingType = 'sale', radiusM = 500) {
-  const params = new URLSearchParams({ listing_type: listingType, radius: radiusM })
-  const res = await fetch(`${BASE}/listings/${id}/deal-score?${params}`)
-  return res.json()
-}
-
 export async function fetchListingComparison(id, listingType = 'sale', radiusM = 500, propertyType = null, bedrooms = null) {
   const params = new URLSearchParams({ listing_type: listingType, radius_m: radiusM })
   if (propertyType) params.set('property_type', propertyType)
@@ -137,9 +131,17 @@ export async function fetchAddressHistory(id, listingType = 'sale') {
   return api(`${BASE}/listings/${id}/address-history?${params}`)
 }
 
-export async function fetchPropertyScore(id, listingType = 'sale') {
+export async function fetchFlipRentPreview(id, {
+  listingType = 'sale',
+  disable = [],
+  renoCostPerSqm = null,
+  renoTier = null,
+} = {}) {
   const params = new URLSearchParams({ listing_type: listingType })
-  return api(`${BASE}/listings/${id}/property-score?${params}`)
+  if (disable && disable.length) params.set('disable', disable.join(','))
+  if (renoCostPerSqm != null) params.set('reno_cost_per_sqm', renoCostPerSqm)
+  if (renoTier) params.set('reno_tier', renoTier)
+  return api(`${BASE}/listings/${id}/score-preview?${params}`)
 }
 
 export async function addressLookup(address, lat, lon, listingType = 'sale') {

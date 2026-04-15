@@ -1,11 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useLanguage } from '../LanguageContext'
 import { translateDescription, fetchListingDetail, fetchNearbyProjects } from '../api'
-import RarityBadge from './RarityBadge'
+import FlipRentScorecard from './FlipRentScorecard'
 import AmenityRating from './AmenityRating'
 import ListingComparison from './ListingComparison'
-import DealScore from './DealScore'
-import PropertyScore from './PropertyScore'
 import SourceLogo from './SourceLogo'
 
 function PriceDiff({ current, other }) {
@@ -293,7 +291,6 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
             {/* Row 1: Quick badges */}
             <div className="flex flex-wrap items-center gap-1.5">
-              <RarityBadge score={listing.rarity_score} factors={listing.rarity_factors} compact />
               {listing.condition && (
                 <span className="text-[10px] font-medium bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded">
                   {listing.condition}
@@ -349,10 +346,8 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
             )}
           </div>
 
-          {/* Deal Score */}
-          {listing.listing_type !== 'rent' && (
-            <DealScore listing={listing} listingType={listing.listing_type || 'sale'} radiusM={radiusM} />
-          )}
+          {/* Flip + Rent scorecard (replaces Deal Score / Property Score / Rarity) */}
+          <FlipRentScorecard listing={listing} />
 
           {/* Price comparison across sites */}
           {crossListings.length > 0 && (
@@ -409,9 +404,6 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
               ))}
             </div>
           )}
-
-          {/* Property Feature Score */}
-          <PropertyScore listing={listing} listingType={listing.listing_type || 'sale'} />
 
           {/* Amenity Rating */}
           <AmenityRating lat={listing.lat} lon={listing.lon} />

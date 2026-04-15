@@ -131,6 +131,9 @@ class ListingsHandler(BaseHandler):
             grant_eligible=self.get_argument("grant_eligible", None) == "true" or None,
             min_deal_score=self.get_float_arg("min_deal_score"),
             min_rarity_score=self.get_float_arg("min_rarity_score"),
+            min_flip_score=self.get_float_arg("min_flip_score"),
+            min_rent_score=self.get_float_arg("min_rent_score"),
+            region_profile=self.get_argument("region_profile", None),
             limit=self.get_int_arg("limit", 10000),
             offset=self.get_int_arg("offset", 0),
         )
@@ -584,30 +587,6 @@ class ComparisonHandler(BaseHandler):
         self.write_json(result)
 
 
-class DealScoreHandler(BaseHandler):
-    """GET /api/listings/:id/deal-score — composite purchase evaluation score"""
-
-    async def get(self, listing_id):
-        listing_type = self.get_argument("listing_type", "sale")
-        radius_m = int(self.get_argument("radius", "500"))
-        radius_m = max(100, min(5000, radius_m))  # clamp to sane range
-        result = await tornado.ioloop.IOLoop.current().run_in_executor(
-            _executor, db.compute_deal_score, int(listing_id), listing_type, radius_m
-        )
-        self.write_json(result)
-
-
-class PropertyScoreHandler(BaseHandler):
-    """GET /api/listings/:id/property-score"""
-
-    async def get(self, listing_id):
-        listing_type = self.get_argument("listing_type", "sale")
-        result = await tornado.ioloop.IOLoop.current().run_in_executor(
-            _executor, db.compute_property_score, int(listing_id), listing_type
-        )
-        self.write_json(result)
-
-
 class AddressHistoryHandler(BaseHandler):
     """GET /api/listings/:id/address-history"""
 
@@ -919,12 +898,130 @@ class AddressLookupHandler(BaseHandler):
 
 # ── App setup ─────────────────────────────────────────────────────────────────
 
+class FlipRentPreviewHandler(BaseHandler):  # noqa
+    """GET /api/listings/:id/score-preview
+
+    Re-roll flip & rent scores for a listing with some signals disabled and/or
+    a reno-cost override. Does NOT write to the DB — used by the UI toggle
+    panel and reno-cost slider.
+
+    Query params:
+        listing_type = sale | rent   (default: auto)
+        disable      = comma-separated signal keys
+        reno_cost_per_sqm = float    (€/m² override)
+        reno_tier    = cosmetic | mid | gut
+    """
+
+    def get(self, listing_id: str):
+        import json as _json
+        from scoring_engine import SignalBundle, compute_both
+        from region_profiles import estimate_reno_cost
+
+        listing_type = self.get_argument("listing_type", None)
+        disable_raw = self.get_argument("disable", "")
+        disabled = {s.strip() for s in disable_raw.split(",") if s.strip()}
+        reno_cost_per_sqm = self.get_float_arg("reno_cost_per_sqm")
+        reno_tier = self.get_argument("reno_tier", None) or None
+
+        # Find the listing row in sales or rentals.
+        conn = db.get_connection()
+        row = None
+        table_used = None
+        candidates = (
+            ("sales",) if listing_type == "sale" else
+            ("rentals",) if listing_type == "rent" else
+            ("sales", "rentals")
+        )
+        for tbl in candidates:
+            r = conn.execute(
+                f"SELECT * FROM {tbl} WHERE id=?", (listing_id,)
+            ).fetchone()
+            if r:
+                row = dict(r); table_used = tbl; break
+
+        if not row:
+            conn.close()
+            self.write_error_json("Listing not found", 404)
+            return
+
+        profile = row.get("region_profile") or "urban_dense"
+        flip_factors_raw = row.get("flip_factors")
+        if not flip_factors_raw:
+            conn.close()
+            self.write_error_json(
+                "Listing has no scored signals yet (run signal_batch.py)", 400,
+            )
+            return
+
+        try:
+            flip_factors = _json.loads(flip_factors_raw)
+        except _json.JSONDecodeError:
+            conn.close()
+            self.write_error_json("Corrupt flip_factors JSON", 500); return
+
+        bundle_json = flip_factors.get("bundle") or {}
+        positives = bundle_json.get("positives") or {}
+        blockers = bundle_json.get("blockers") or {}
+
+        bundle = SignalBundle(
+            positives={k: (float(v) if v is not None else None)
+                       for k, v in positives.items()},
+            blockers={k: (float(v) if v is not None else None)
+                      for k, v in blockers.items()},
+            comparables_count=bundle_json.get("comparables_count") or 0,
+            market_median_eur_sqm=bundle_json.get("market_median_eur_sqm"),
+            expected_resale_eur_sqm=bundle_json.get("expected_resale_eur_sqm"),
+            expected_rent_eur_sqm=bundle_json.get("expected_rent_eur_sqm"),
+            notes=bundle_json.get("notes") or {},
+        )
+
+        # Reno-cost override: recomputes estimate AND market_discount/resale
+        # derived signals since they depend on reno_cost.
+        override_reno = estimate_reno_cost(
+            size_sqm=row.get("size_sqm"),
+            condition=row.get("condition"),
+            profile_name=profile,
+            tier_override=reno_tier,
+            cost_per_sqm_override=reno_cost_per_sqm,
+        ) if (reno_cost_per_sqm is not None or reno_tier is not None) else None
+
+        if override_reno is not None and bundle.expected_resale_eur_sqm and row.get("size_sqm"):
+            from scoring_engine import compute_expected_resale_signal
+            new_resale = compute_expected_resale_signal(
+                row.get("price_amount"), row.get("size_sqm"),
+                bundle.expected_resale_eur_sqm, override_reno,
+            )
+            bundle.positives["expected_resale"] = new_resale
+
+        results = compute_both(bundle, profile, disabled_signals=disabled)
+
+        self.write_json({
+            "listing_id": row["id"],
+            "listing_type": "rent" if table_used == "rentals" else "sale",
+            "profile": profile,
+            "disabled": sorted(disabled),
+            "reno_cost_estimate": override_reno if override_reno is not None else row.get("reno_cost_estimate"),
+            "reno_cost_per_sqm_override": reno_cost_per_sqm,
+            "reno_tier_override": reno_tier,
+            "flip": results["flip"].to_dict(),
+            "rent": results["rent"].to_dict(),
+            "bundle": {
+                "positives": bundle.positives,
+                "blockers": bundle.blockers,
+                "comparables_count": bundle.comparables_count,
+                "market_median_eur_sqm": bundle.market_median_eur_sqm,
+                "expected_resale_eur_sqm": bundle.expected_resale_eur_sqm,
+                "expected_rent_eur_sqm": bundle.expected_rent_eur_sqm,
+            },
+        })
+        conn.close()
+
+
 def make_app() -> tornado.web.Application:
     return tornado.web.Application(
         [
             (r"/api/listings",              ListingsHandler),
-            (r"/api/listings/(\d+)/deal-score",       DealScoreHandler),
-            (r"/api/listings/(\d+)/property-score",  PropertyScoreHandler),
+            (r"/api/listings/(\d+)/score-preview",   FlipRentPreviewHandler),
             (r"/api/listings/(\d+)/compare",         ComparisonHandler),
             (r"/api/listings/(\d+)/address-history",  AddressHistoryHandler),
             (r"/api/listings/(\d+)",        ListingDetailHandler),

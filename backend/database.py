@@ -462,6 +462,137 @@ def init_db():
         if "feature_chips" not in existing:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN feature_chips TEXT")
             logger.info(f"[DB] Added feature_chips column to {tbl}")
+
+        # -- Flip/Rent scoring engine columns (April 2026 redesign) ---------
+        # Top-level outputs
+        if "flip_score" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN flip_score REAL")
+            logger.info(f"[DB] Added flip_score column to {tbl}")
+        if "flip_factors" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN flip_factors TEXT")  # JSON
+            logger.info(f"[DB] Added flip_factors column to {tbl}")
+        if "rent_score" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN rent_score REAL")
+            logger.info(f"[DB] Added rent_score column to {tbl}")
+        if "rent_factors" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN rent_factors TEXT")  # JSON
+            logger.info(f"[DB] Added rent_factors column to {tbl}")
+        if "region_profile" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN region_profile TEXT")
+            logger.info(f"[DB] Added region_profile column to {tbl}")
+        if "reno_cost_estimate" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN reno_cost_estimate REAL")
+            logger.info(f"[DB] Added reno_cost_estimate column to {tbl}")
+
+        # Cached signal values (avoid recomputing from raw sources each score)
+        if "noise_score" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN noise_score REAL")
+            logger.info(f"[DB] Added noise_score column to {tbl}")
+        if "light_score" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN light_score REAL")
+            logger.info(f"[DB] Added light_score column to {tbl}")
+        if "layout_openness_score" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN layout_openness_score REAL")
+            logger.info(f"[DB] Added layout_openness_score column to {tbl}")
+        if "social_housing_adj_score" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN social_housing_adj_score REAL")
+            logger.info(f"[DB] Added social_housing_adj_score column to {tbl}")
+        if "dev_momentum_score" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN dev_momentum_score REAL")
+            logger.info(f"[DB] Added dev_momentum_score column to {tbl}")
+
+        # Text-extracted signals
+        if "building_year" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN building_year INTEGER")
+            logger.info(f"[DB] Added building_year column to {tbl}")
+        if "orientation" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN orientation TEXT")
+            logger.info(f"[DB] Added orientation column to {tbl}")
+        if "condominium_fee" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN condominium_fee REAL")
+            logger.info(f"[DB] Added condominium_fee column to {tbl}")
+        if "energy_class" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN energy_class TEXT")
+            logger.info(f"[DB] Added energy_class column to {tbl}")
+        if "days_on_market" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN days_on_market INTEGER")
+            logger.info(f"[DB] Added days_on_market column to {tbl}")
+        if "price_drop_count" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN price_drop_count INTEGER")
+            logger.info(f"[DB] Added price_drop_count column to {tbl}")
+
+        # Vision enrichment (Phase 3) — stored as JSON blob
+        if "photo_analysis" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN photo_analysis TEXT")
+            logger.info(f"[DB] Added photo_analysis column to {tbl}")
+
+        # Renovation classifier columns (PR #85)
+        if "renovation_class" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN renovation_class TEXT")
+            logger.info(f"[DB] Added renovation_class column to {tbl}")
+        if "renovation_confidence" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN renovation_confidence REAL")
+            logger.info(f"[DB] Added renovation_confidence column to {tbl}")
+        if "renovation_cost_estimate_eur_per_sqm" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN renovation_cost_estimate_eur_per_sqm INTEGER")
+            logger.info(f"[DB] Added renovation_cost_estimate_eur_per_sqm column to {tbl}")
+        if "renovation_evidence" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN renovation_evidence TEXT")
+            logger.info(f"[DB] Added renovation_evidence column to {tbl}")
+        if "renovation_needs" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN renovation_needs TEXT")
+            logger.info(f"[DB] Added renovation_needs column to {tbl}")
+        if "renovation_classified_at" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN renovation_classified_at TEXT")
+            logger.info(f"[DB] Added renovation_classified_at column to {tbl}")
+        if "renovation_model" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN renovation_model TEXT")
+            logger.info(f"[DB] Added renovation_model column to {tbl}")
+
+        # building_stage: approved_project / full_remodel / needs_reno / turnkey (from description text)
+        if "building_stage" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN building_stage TEXT")
+            logger.info(f"[DB] Added building_stage column to {tbl}")
+    conn.commit()
+
+    # Classification for construction_projects (private_dev / public_dev / renovation / minor)
+    proj_cols = {r[1] for r in conn.execute("PRAGMA table_info(construction_projects)").fetchall()}
+    if "classification" not in proj_cols:
+        conn.execute("ALTER TABLE construction_projects ADD COLUMN classification TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_projects_classification "
+                     "ON construction_projects(classification)")
+        logger.info("[DB] Added classification column to construction_projects")
+    conn.commit()
+
+    # -- New signal-layer tables (Phase 1) --------------------------------------
+    # Social housing estates — imported one-off from CML / municipal data.
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS social_housing (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            name TEXT,
+            municipality TEXT,
+            parish TEXT,
+            category TEXT,            -- e.g. 'bairro_municipal', 'phr', 'private_social'
+            lat REAL,
+            lon REAL,
+            polygon_geojson TEXT,     -- optional footprint
+            fetched_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_social_housing_coords
+            ON social_housing(lat, lon);
+
+        -- Major road / rail segments extracted from OSM, used for noise proxy.
+        CREATE TABLE IF NOT EXISTS noise_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,     -- 'osm_road', 'osm_rail', 'airport_corridor'
+            osm_id TEXT,
+            kind TEXT,                -- road class ('motorway','trunk',...) / rail / airport
+            geometry_geojson TEXT NOT NULL,
+            fetched_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_noise_sources_source ON noise_sources(source);
+    """)
     conn.commit()
 
     # -- Backfill hash_cross for existing rows ------------------------------------
@@ -744,6 +875,9 @@ def get_listings(
     grant_eligible: Optional[bool] = None,
     min_deal_score: Optional[float] = None,
     min_rarity_score: Optional[float] = None,
+    min_flip_score: Optional[float] = None,
+    min_rent_score: Optional[float] = None,
+    region_profile: Optional[str] = None,
     limit: int = 500,
     offset: int = 0,
 ) -> List[dict]:
@@ -797,6 +931,12 @@ def get_listings(
         clauses.append("deal_score>=?"); params.append(min_deal_score)
     if min_rarity_score is not None:
         clauses.append("rarity_score>=?"); params.append(min_rarity_score)
+    if min_flip_score is not None:
+        clauses.append("flip_score>=?"); params.append(min_flip_score)
+    if min_rent_score is not None:
+        clauses.append("rent_score>=?"); params.append(min_rent_score)
+    if region_profile:
+        clauses.append("region_profile=?"); params.append(region_profile)
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
@@ -806,7 +946,15 @@ def get_listings(
         "size_sqm, gross_area_sqm, rooms, bedrooms, bathrooms, floor, property_type, condition, "
         "title, address, postal_code, neighborhood, parish, district, city, "
         "lat, lon, images, hash_dedupe, hash_cross, hash_location, "
-        "missing_since, previous_listing_id, description, scraped_at"
+        "missing_since, previous_listing_id, description, scraped_at, "
+        "flip_score, rent_score, region_profile, reno_cost_estimate, "
+        "noise_score, light_score, layout_openness_score, "
+        "social_housing_adj_score, dev_momentum_score, "
+        "orientation, building_year, condominium_fee, energy_class, "
+        "days_on_market, price_drop_count, photo_analysis, "
+        "renovation_class, renovation_confidence, "
+        "renovation_cost_estimate_eur_per_sqm, renovation_evidence, "
+        "renovation_needs, building_stage"
     )
 
     if table:

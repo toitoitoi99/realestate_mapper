@@ -1,43 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { useLanguage } from '../LanguageContext'
-import RarityBadge from './RarityBadge'
+import { FlipRentBadges } from './FlipRentScorecard'
 import GrantBadge from './GrantBadge'
 import SourceLogo from './SourceLogo'
-import { fetchDealScore } from '../api'
-
-// Module-level cache so re-opening a popup doesn't re-fetch.
-const yieldCache = new Map()
-
-function ratingLetter(score) {
-  if (score == null) return null
-  if (score >= 80) return 'A'
-  if (score >= 60) return 'B'
-  if (score >= 40) return 'C'
-  return 'D'
-}
-
-function ratingClasses(letter) {
-  if (letter === 'A') return 'bg-emerald-600 text-white'
-  if (letter === 'B') return 'bg-green-600 text-white'
-  if (letter === 'C') return 'bg-amber-600 text-white'
-  if (letter === 'D') return 'bg-red-600 text-white'
-  return 'bg-gray-300 text-gray-700'
-}
-
-function ScorePill({ label, score }) {
-  const letter = ratingLetter(score)
-  return (
-    <div className="flex items-center gap-1">
-      <span className="text-[10px] text-gray-500 uppercase tracking-wide">{label}</span>
-      <span className={`text-[10px] font-bold px-1 rounded ${ratingClasses(letter)}`}>
-        {letter || '—'}
-      </span>
-      <span className="text-xs font-semibold text-gray-800 tabular-nums">
-        {score != null ? Math.round(score) : '—'}
-      </span>
-    </div>
-  )
-}
 
 export default function ListingPopupCard({ listing: l }) {
   const { t } = useLanguage()
@@ -57,43 +22,6 @@ export default function ListingPopupCard({ listing: l }) {
     } catch { return null }
   })()
   const [imgError, setImgError] = useState(false)
-
-  // Lazy-fetch gross yield (not stored on the listing row).
-  const cacheKey = `${listingType}:${l.id}`
-  const [yieldPct, setYieldPct] = useState(() => yieldCache.get(cacheKey) ?? null)
-  const [yieldLoading, setYieldLoading] = useState(false)
-  const cancelledRef = useRef(false)
-
-  useEffect(() => {
-    cancelledRef.current = false
-    // Only sales have a meaningful yield calc.
-    if (isRent) return
-    if (yieldCache.has(cacheKey)) {
-      setYieldPct(yieldCache.get(cacheKey))
-      return
-    }
-    setYieldLoading(true)
-    fetchDealScore(l.id, listingType, 500)
-      .then(result => {
-        if (cancelledRef.current) return
-        const y = result?.dimensions?.yield?.detail
-        // detail looks like "5.2% gross yield, est. €1,234/mo rent"
-        let pct = null
-        if (typeof y === 'string') {
-          const m = y.match(/([\d.]+)%/)
-          if (m) pct = parseFloat(m[1])
-        }
-        yieldCache.set(cacheKey, pct)
-        setYieldPct(pct)
-      })
-      .catch(() => {
-        if (!cancelledRef.current) setYieldPct(null)
-      })
-      .finally(() => {
-        if (!cancelledRef.current) setYieldLoading(false)
-      })
-    return () => { cancelledRef.current = true }
-  }, [cacheKey, isRent, l.id, listingType])
 
   const typeLabel = l.property_type
     ? l.property_type.charAt(0).toUpperCase() + l.property_type.slice(1)
@@ -140,17 +68,8 @@ export default function ListingPopupCard({ listing: l }) {
       </div>
 
       {/* Scores row */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5 my-1 border-y border-gray-100">
-        <ScorePill label="Deal" score={l.deal_score} />
-        <ScorePill label="Property" score={l.property_score} />
-        {!isRent && (
-          <div className="flex items-center gap-1">
-            <span className="text-[10px] text-gray-500 uppercase tracking-wide">Yield</span>
-            <span className="text-xs font-semibold text-gray-800 tabular-nums">
-              {yieldLoading ? '…' : (yieldPct != null ? `${yieldPct.toFixed(1)}%` : '—')}
-            </span>
-          </div>
-        )}
+      <div className="py-1.5 my-1 border-y border-gray-100">
+        <FlipRentBadges flip={l.flip_score} rent={l.rent_score} />
       </div>
 
       {/* Condition + location */}
@@ -164,7 +83,6 @@ export default function ListingPopupCard({ listing: l }) {
 
       {/* Badges */}
       <div className="flex flex-wrap items-center gap-1 mt-1">
-        <RarityBadge score={l.rarity_score} factors={l.rarity_factors} compact />
         <GrantBadge eligible={l.grant_eligible} />
       </div>
 

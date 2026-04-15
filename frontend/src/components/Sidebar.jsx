@@ -211,8 +211,8 @@ export default function Sidebar({
             className="border border-gray-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
           >
             <option value="default">{t.sortDefault}</option>
-            <option value="rating">{t.sortRating}</option>
-            <option value="rarity">{t.sortRarity}</option>
+            <option value="flip">Flip score</option>
+            <option value="rent_score">Rent score</option>
             <option value="price_asc">{t.sortPriceAsc}</option>
             <option value="price_desc">{t.sortPriceDesc}</option>
             <option value="psm_gross_asc">{t.sortPsmGrossAsc}</option>
