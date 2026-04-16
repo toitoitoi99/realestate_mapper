@@ -1,0 +1,17 @@
+{
+  "name": "visual-regression",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Visual regression suite for the Lisbon real estate frontend.",
+  "scripts": {
+    "baseline": "node run.mjs --mode baseline",
+    "check": "node run.mjs --mode check",
+    "approve": "node approve.mjs"
+  },
+  "dependencies": {
+    "pixelmatch": "^6.0.0",
+    "playwright": "^1.47.0",
+    "pngjs": "^7.0.0"
+  }
+}
