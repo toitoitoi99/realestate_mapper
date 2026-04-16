@@ -1,13 +1,21 @@
 #!/bin/bash
-# Daily scheduled idealista scrape, invoked by launchd.
+# Daily scheduled multi-scraper batch, invoked by launchd.
+#
+# Runs (in order): idealista → remax → era. These three are chosen over
+# the full 6-scraper set because the aggregators (imovirtual, casa_sapo)
+# largely duplicate idealista's catalog, and OLX's unique non-cross-post
+# volume is marginal. Idealista carries per-listing lat/lon and the richest
+# feature data; remax + era cover agency-exclusive inventory.
 #
 # Behavior:
 #   - Writes rolling log to backend/data/scrape.log (rotated at 10 MB)
-#   - Skips the run if the last successful scrape was < 20 hours ago
-#     (prevents double-runs after the Mac wakes from sleep past 3am)
-#   - Tracks consecutive failures; sends a macOS notification after
-#     2+ failures in a row (usually means DataDome session expired and
-#     needs a manual `python3 backend/scrapers/idealista_playwright.py --setup`)
+#   - Skips the batch if the last attempt was < 20 hours ago (prevents
+#     double-runs after the Mac wakes from sleep past 3am)
+#   - Log-and-continue on failure: one scraper failing doesn't block the
+#     others. Per-scraper consecutive-failure counts are tracked; any
+#     scraper hitting 2+ consecutive failures triggers a macOS notification
+#     (typically means idealista's DataDome session expired — run:
+#     `python3 backend/scrapers/idealista_playwright.py --setup`)
 #
 # To adjust schedule: edit the StartCalendarInterval in
 # ~/Library/LaunchAgents/com.lisbon-realestate.scrape.plist and
@@ -17,10 +25,13 @@ set -u
 REPO_DIR="/Users/tord/Claude_projects/lisbon-realestate"
 DATA_DIR="$REPO_DIR/backend/data"
 LOG_FILE="$DATA_DIR/scrape.log"
-LAST_SUCCESS_FILE="$DATA_DIR/.last_scrape_success"
-FAIL_COUNT_FILE="$DATA_DIR/.scrape_fail_count"
+LAST_ATTEMPT_FILE="$DATA_DIR/.last_scrape_attempt"
 MIN_INTERVAL_SECONDS=$((20 * 3600))  # 20 hours
 PYTHON="/usr/bin/python3"
+
+# Ordered list of scrapers to run. Each <name> maps to
+# backend/scrapers/<name>_playwright.py.
+SCRAPERS=(idealista remax era)
 
 mkdir -p "$DATA_DIR"
 
@@ -40,40 +51,76 @@ notify() {
     /usr/bin/osascript -e "display notification \"$1\" with title \"Lisbon Scraper\"" 2>/dev/null || true
 }
 
-# Debounce: skip if last successful run is recent
-if [ -f "$LAST_SUCCESS_FILE" ]; then
-    last=$(cat "$LAST_SUCCESS_FILE" 2>/dev/null || echo 0)
+# Debounce: skip if last batch attempt is recent
+if [ -f "$LAST_ATTEMPT_FILE" ]; then
+    last=$(cat "$LAST_ATTEMPT_FILE" 2>/dev/null || echo 0)
     now=$(date +%s)
     age=$((now - last))
     if [ "$age" -lt "$MIN_INTERVAL_SECONDS" ]; then
-        log "Skipping: last successful run was $((age / 3600))h ago (< 20h)"
+        log "Skipping: last batch attempt was $((age / 3600))h ago (< 20h)"
         exit 0
     fi
 fi
 
-log "=== Starting scheduled scrape ==="
+date +%s > "$LAST_ATTEMPT_FILE"
 
 cd "$REPO_DIR" || { log "ERROR: cannot cd to $REPO_DIR"; exit 1; }
 
-# Run scraper (stdout + stderr appended to the log)
-"$PYTHON" backend/scrapers/idealista_playwright.py >> "$LOG_FILE" 2>&1
-rc=$?
+log "=== Starting scheduled batch: ${SCRAPERS[*]} ==="
 
-if [ "$rc" -eq 0 ]; then
-    date +%s > "$LAST_SUCCESS_FILE"
-    echo 0 > "$FAIL_COUNT_FILE"
-    log "=== Scrape finished successfully ==="
-else
-    fails=0
-    if [ -f "$FAIL_COUNT_FILE" ]; then
-        fails=$(cat "$FAIL_COUNT_FILE" 2>/dev/null || echo 0)
+failed_scrapers=()
+
+for scraper in "${SCRAPERS[@]}"; do
+    script="backend/scrapers/${scraper}_playwright.py"
+    fail_file="$DATA_DIR/.scrape_fail_count_${scraper}"
+
+    if [ ! -f "$script" ]; then
+        log "--- SKIP $scraper: $script not found ---"
+        continue
     fi
-    fails=$((fails + 1))
-    echo "$fails" > "$FAIL_COUNT_FILE"
-    log "=== Scrape FAILED (exit $rc, consecutive failures: $fails) ==="
-    if [ "$fails" -ge 2 ]; then
-        notify "Scraper failed $fails times in a row. DataDome session may be expired — run: python3 backend/scrapers/idealista_playwright.py --setup"
+
+    log "--- Running $scraper ---"
+    "$PYTHON" "$script" >> "$LOG_FILE" 2>&1
+    rc=$?
+
+    if [ "$rc" -eq 0 ]; then
+        echo 0 > "$fail_file"
+        log "--- $scraper: OK ---"
+    else
+        fails=0
+        if [ -f "$fail_file" ]; then
+            fails=$(cat "$fail_file" 2>/dev/null || echo 0)
+        fi
+        fails=$((fails + 1))
+        echo "$fails" > "$fail_file"
+        failed_scrapers+=("$scraper(exit=$rc, ${fails}x)")
+        log "--- $scraper: FAILED (exit $rc, consecutive: $fails) ---"
     fi
+done
+
+if [ "${#failed_scrapers[@]}" -eq 0 ]; then
+    log "=== Batch finished: all ${#SCRAPERS[@]} scrapers succeeded ==="
+    exit 0
 fi
 
-exit "$rc"
+log "=== Batch finished with failures: ${failed_scrapers[*]} ==="
+
+# Notify on any scraper with 2+ consecutive failures
+repeat_failures=()
+for scraper in "${SCRAPERS[@]}"; do
+    fail_file="$DATA_DIR/.scrape_fail_count_${scraper}"
+    if [ -f "$fail_file" ]; then
+        fails=$(cat "$fail_file" 2>/dev/null || echo 0)
+        if [ "$fails" -ge 2 ]; then
+            repeat_failures+=("$scraper(${fails}x)")
+        fi
+    fi
+done
+
+if [ "${#repeat_failures[@]}" -gt 0 ]; then
+    notify "Persistent failures: ${repeat_failures[*]}. If idealista, run: python3 backend/scrapers/idealista_playwright.py --setup"
+fi
+
+# Exit 0 so launchd doesn't treat partial-failure batches as a hard error
+# (the notification + log already surface the problem).
+exit 0
