@@ -1,11 +1,16 @@
 #!/bin/bash
 # Daily scheduled multi-scraper batch, invoked by launchd.
 #
-# Runs (in order): idealista → remax → era. These three are chosen over
-# the full 6-scraper set because the aggregators (imovirtual, casa_sapo)
-# largely duplicate idealista's catalog, and OLX's unique non-cross-post
-# volume is marginal. Idealista carries per-listing lat/lon and the richest
-# feature data; remax + era cover agency-exclusive inventory.
+# Runs (in order): idealista → remax → era, each in both sale and rent
+# mode. These three scrapers are chosen over the full 6-scraper set
+# because the aggregators (imovirtual, casa_sapo) largely duplicate
+# idealista's catalog, and OLX's unique non-cross-post volume is
+# marginal. Idealista carries per-listing lat/lon and the richest feature
+# data; remax + era cover agency-exclusive inventory.
+#
+# Each (scraper, type) leg runs independently: a sale failure does not
+# skip the rent leg, and consecutive-failure counts are tracked per leg
+# (so a persistent rent-only failure surfaces even if sale is healthy).
 #
 # Behavior:
 #   - Writes rolling log to backend/data/scrape.log (rotated at 10 MB)
@@ -40,6 +45,11 @@ PYTHON="/usr/bin/python3"
 # Ordered list of scrapers to run. Each <name> maps to
 # backend/scrapers/<name>_playwright.py.
 SCRAPERS=(idealista remax era)
+
+# Listing types to scrape for each scraper. Passed through as --type.
+# All three scrapers support both; rental volume on idealista is
+# substantial, remax and era rentals cover agency-exclusive inventory.
+TYPES=(sale rent)
 
 # Regex patterns that indicate a failure is transient and worth retrying.
 # Kept loose — false positives just cost one retry, false negatives skip
@@ -110,30 +120,32 @@ is_transient_failure() {
     return 1
 }
 
-# Run one scraper, with up to one retry on transient failure.
-# Sets global $LAST_RC to the final exit code.
+# Run one scraper for one listing type, with up to one retry on transient
+# failure. Sets global $LAST_RC to the final exit code.
 run_scraper() {
     local scraper="$1"
+    local type="$2"
     local script="backend/scrapers/${scraper}_playwright.py"
+    local label="${scraper}/${type}"
 
-    log "--- Running $scraper ---"
-    "$PYTHON" "$script" >> "$LOG_FILE" 2>&1
+    log "--- Running $label ---"
+    "$PYTHON" "$script" --type "$type" >> "$LOG_FILE" 2>&1
     LAST_RC=$?
     if [ "$LAST_RC" -eq 0 ]; then
         return 0
     fi
 
     if is_transient_failure 400; then
-        log "--- $scraper: transient failure (exit $LAST_RC), retrying in $((RETRY_DELAY_SECONDS / 60))m ---"
+        log "--- $label: transient failure (exit $LAST_RC), retrying in $((RETRY_DELAY_SECONDS / 60))m ---"
         sleep "$RETRY_DELAY_SECONDS"
-        log "--- Retrying $scraper ---"
-        "$PYTHON" "$script" >> "$LOG_FILE" 2>&1
+        log "--- Retrying $label ---"
+        "$PYTHON" "$script" --type "$type" >> "$LOG_FILE" 2>&1
         LAST_RC=$?
         if [ "$LAST_RC" -eq 0 ]; then
-            log "--- $scraper: OK on retry ---"
+            log "--- $label: OK on retry ---"
         fi
     else
-        log "--- $scraper: persistent failure (exit $LAST_RC), no retry ---"
+        log "--- $label: persistent failure (exit $LAST_RC), no retry ---"
     fi
     return "$LAST_RC"
 }
@@ -154,73 +166,80 @@ date +%s > "$LAST_ATTEMPT_FILE"
 cd "$REPO_DIR" || { log "ERROR: cannot cd to $REPO_DIR"; exit 1; }
 
 batch_start_ts=$(date +%s)
-log "=== Starting scheduled batch: ${SCRAPERS[*]} ==="
+log "=== Starting scheduled batch: ${SCRAPERS[*]} × ${TYPES[*]} ==="
 
-succeeded_scrapers=()
-failed_scrapers=()
+succeeded_legs=()
+failed_legs=()
 
 for scraper in "${SCRAPERS[@]}"; do
     script="backend/scrapers/${scraper}_playwright.py"
-    fail_file="$DATA_DIR/.scrape_fail_count_${scraper}"
 
     if [ ! -f "$script" ]; then
         log "--- SKIP $scraper: $script not found ---"
         continue
     fi
 
-    LAST_RC=0
-    run_scraper "$scraper"
+    for type in "${TYPES[@]}"; do
+        label="${scraper}/${type}"
+        fail_file="$DATA_DIR/.scrape_fail_count_${scraper}_${type}"
 
-    if [ "$LAST_RC" -eq 0 ]; then
-        echo 0 > "$fail_file"
-        succeeded_scrapers+=("$scraper")
-        log "--- $scraper: OK ---"
-    else
-        fails=0
-        if [ -f "$fail_file" ]; then
-            fails=$(cat "$fail_file" 2>/dev/null || echo 0)
+        LAST_RC=0
+        run_scraper "$scraper" "$type"
+
+        if [ "$LAST_RC" -eq 0 ]; then
+            echo 0 > "$fail_file"
+            succeeded_legs+=("$label")
+            log "--- $label: OK ---"
+        else
+            fails=0
+            if [ -f "$fail_file" ]; then
+                fails=$(cat "$fail_file" 2>/dev/null || echo 0)
+            fi
+            fails=$((fails + 1))
+            echo "$fails" > "$fail_file"
+            failed_legs+=("${label}(exit=$LAST_RC, ${fails}x)")
+            log "--- $label: FAILED (exit $LAST_RC, consecutive: $fails) ---"
         fi
-        fails=$((fails + 1))
-        echo "$fails" > "$fail_file"
-        failed_scrapers+=("$scraper(exit=$LAST_RC, ${fails}x)")
-        log "--- $scraper: FAILED (exit $LAST_RC, consecutive: $fails) ---"
-    fi
+    done
 done
 
 batch_duration=$(( $(date +%s) - batch_start_ts ))
 duration_str="$((batch_duration / 60))m$((batch_duration % 60))s"
+total_legs=$(( ${#SCRAPERS[@]} * ${#TYPES[@]} ))
 
 # Build Slack summary
 host_label=$(/bin/hostname -s 2>/dev/null || echo "unknown-host")
 summary="Lisbon scrape batch on \`${host_label}\` finished in ${duration_str}."
-if [ "${#succeeded_scrapers[@]}" -gt 0 ]; then
+if [ "${#succeeded_legs[@]}" -gt 0 ]; then
     summary="${summary}
-✅ OK: ${succeeded_scrapers[*]}"
+✅ OK: ${succeeded_legs[*]}"
 fi
-if [ "${#failed_scrapers[@]}" -gt 0 ]; then
+if [ "${#failed_legs[@]}" -gt 0 ]; then
     summary="${summary}
-❌ FAIL: ${failed_scrapers[*]}"
+❌ FAIL: ${failed_legs[*]}"
 fi
 
-if [ "${#failed_scrapers[@]}" -eq 0 ]; then
-    log "=== Batch finished: all ${#SCRAPERS[@]} scrapers succeeded (${duration_str}) ==="
+if [ "${#failed_legs[@]}" -eq 0 ]; then
+    log "=== Batch finished: all ${total_legs} legs succeeded (${duration_str}) ==="
     # All-success: Slack only (no Mac notification for routine success)
     notify_slack "$summary"
     exit 0
 fi
 
-log "=== Batch finished with failures: ${failed_scrapers[*]} (${duration_str}) ==="
+log "=== Batch finished with failures: ${failed_legs[*]} (${duration_str}) ==="
 
-# Surface repeat failures (2+ consecutive) more loudly
+# Surface repeat failures (2+ consecutive) more loudly — tracked per (scraper, type).
 repeat_failures=()
 for scraper in "${SCRAPERS[@]}"; do
-    fail_file="$DATA_DIR/.scrape_fail_count_${scraper}"
-    if [ -f "$fail_file" ]; then
-        fails=$(cat "$fail_file" 2>/dev/null || echo 0)
-        if [ "$fails" -ge 2 ]; then
-            repeat_failures+=("$scraper(${fails}x)")
+    for type in "${TYPES[@]}"; do
+        fail_file="$DATA_DIR/.scrape_fail_count_${scraper}_${type}"
+        if [ -f "$fail_file" ]; then
+            fails=$(cat "$fail_file" 2>/dev/null || echo 0)
+            if [ "$fails" -ge 2 ]; then
+                repeat_failures+=("${scraper}/${type}(${fails}x)")
+            fi
         fi
-    fi
+    done
 done
 
 if [ "${#repeat_failures[@]}" -gt 0 ]; then
