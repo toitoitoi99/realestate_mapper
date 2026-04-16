@@ -7,11 +7,13 @@ for flip potential and rental potential, plus a breakdown of inputs.
 Design notes:
   * All signals are normalized to 0..100 (higher = better for that listing).
   * Blockers are separate 0..100 penalty signals (higher = worse).
-  * The scoring formula is:
-        score = 0.5 * weighted_positive + 0.5 * (100 - weighted_blocker)
-    — i.e. positive signals and blocker-freeness contribute equally.
-    Rationale: a listing with great signals AND crippling blockers should not
-    score A; conversely, a clean listing with only OK positives should not score D.
+  * The scoring formula is ASYMMETRIC — blockers subtract, they don't add:
+        score = weighted_positive - weighted_blocker * BLOCKER_PENALTY_SCALE
+    with BLOCKER_PENALTY_SCALE = 0.4 (a worst-case blocker cuts 40 points).
+    When no blockers fire, score = weighted_positive — no free floor. This
+    fixes a prior bug where `final = 0.5 * pos + 0.5 * (100 - blk)` gave
+    every listing a +50 baseline from "freeness" regardless of positives,
+    compressing the distribution into the B band.
   * Weights per profile need not sum to 1; we normalize inside the roll-up.
   * Signals that cannot be computed (e.g. no photos yet) are simply absent
     from the weighted average — the remaining weights renormalize. This keeps
@@ -37,6 +39,14 @@ from region_profiles import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Worst-case blocker reduces the final score by this many points.
+# 0.4 means a fully-saturated blocker (weighted_blocker = 100) subtracts 40.
+# Chosen so a structural red flag + heavy noise can push a listing from A
+# to C but not from A to D by blockers alone — that would require a very
+# weak positive set on top.
+BLOCKER_PENALTY_SCALE: float = 0.4
 
 
 # -- Public dataclasses --------------------------------------------------------
@@ -78,11 +88,26 @@ class ScoreResult:
 # -- Helpers -------------------------------------------------------------------
 
 def _rating(score: float) -> str:
-    if score >= 80:
-        return "A"
+    """Map final score to A/B/C/D bands.
+
+    Thresholds calibrated against the actual score distribution produced by
+    the asymmetric roll-up formula above (mean ≈ 40, sd ≈ 15 on AML sales):
+      A — top ~10%  (score ≥ 60)
+      B — next ~25% (score ≥ 45)
+      C — next ~40% (score ≥ 30)
+      D — bottom ~25%
+
+    Absolute, not percentile-based — an A listing has objectively strong
+    positive signals net of blockers, not merely better than others in DB.
+    Earlier bands (80/60/40) were calibrated for a flawed roll-up that
+    gave every listing a +50 floor from "blocker-freeness"; see module
+    docstring.
+    """
     if score >= 60:
+        return "A"
+    if score >= 45:
         return "B"
-    if score >= 40:
+    if score >= 30:
         return "C"
     return "D"
 
@@ -246,17 +271,18 @@ def compute_score(
     positives = {k: (None if k in disabled else v) for k, v in bundle.positives.items()}
     blockers = {k: (None if k in disabled else v) for k, v in bundle.blockers.items()}
 
-    pos_score, _, pos_contribs, pos_missing = _weighted_average(
+    pos_score, pos_total_w, pos_contribs, pos_missing = _weighted_average(
         positives, weights,
     )
-    blk_score, _, blk_contribs, blk_missing = _weighted_average(
+    blk_score, blk_total_w, blk_contribs, blk_missing = _weighted_average(
         blockers, blocker_weights,
     )
-    # Blocker signals are penalties: higher blocker_score = WORSE listing.
-    # Convert to "blocker-freeness" before averaging with positives.
-    blocker_freeness = 100.0 - blk_score
-
-    final = 0.5 * pos_score + 0.5 * blocker_freeness
+    # Asymmetric rollup: blockers subtract from positives; their absence is
+    # neutral, not rewarding. See module docstring for rationale.
+    # When EVERY blocker is missing (no data at all), treat penalty as 0 —
+    # we can't penalize what we can't measure.
+    penalty = (blk_score * BLOCKER_PENALTY_SCALE) if blk_total_w > 0 else 0.0
+    final = max(0.0, min(100.0, pos_score - penalty))
 
     return ScoreResult(
         score=round(final, 1),

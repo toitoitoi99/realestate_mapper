@@ -374,12 +374,23 @@ def score_one(
         cost_per_sqm_override=effective_reno_per_sqm,
     )
 
+    # Gate market-derived signals on comparable count. With fewer than
+    # MIN_COMPARABLES comps the parish median (and especially the p75 used
+    # by expected_resale) are too noisy to distinguish a real discount
+    # from sampling variance, so we treat the signals as missing and let
+    # the roll-up renormalize rather than letting a noisy ratio dominate
+    # the weighted average.
+    MIN_COMPARABLES = 10
+    comps_reliable = comp_n >= MIN_COMPARABLES
+
     market_disc = compute_market_discount_signal(
         row.get("price_amount"), row.get("size_sqm"), median_psqm,
-    )
+    ) if comps_reliable else None
+
     yield_signal = compute_yield_gross_signal(
         row.get("price_amount"), row.get("size_sqm"), rent_psqm,
-    )
+    )  # yield uses rent-side comps; gate separately if/when we track that.
+
     # Condition-aware expected resale: turnkey → market-growth only (no reno uplift);
     # cosmetic → modest bump; full_renovation → p75. See scoring_engine.py.
     # Use the synthesized class from _renovation_signals (combines vision-derived
@@ -391,7 +402,7 @@ def score_one(
         parish_p75_psqm=post_reno_psqm,
         reno_cost_estimate=reno_cost,
         renovation_class=reno["renovation_class"] or row.get("renovation_class"),
-    )
+    ) if comps_reliable else None
 
     # Amenity score (reuse cached amenity_ratings if present; else leave None)
     amenity = None
