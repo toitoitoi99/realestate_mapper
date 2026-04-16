@@ -91,6 +91,19 @@ Do NOT start `backend` and `frontend` as separate preview configs — the fronte
 - **Area switching**: When switching areas (e.g. AML → Porto), the map may not re-center correctly and the app title / search placeholder remain Lisbon-specific.
 - **Backend root route**: The Tornado backend has no handler for `GET /` — health-check probes log 404 warnings. Not a functional issue.
 
+## Visual regression — mandatory for UI tasks
+
+**You MUST run the visual regression suite before declaring any UI task complete.** The suite lives at `tests/visual/` and the workflow is described in `.claude/skills/visual-regression/SKILL.md`.
+
+Minimum flow after any change to `frontend/src/`:
+
+1. `preview_start("app")` — confirm the app is running, note the URL.
+2. `cd tests/visual && npm run check -- --url http://localhost:<port>`
+3. Read `tests/visual/diffs/report.json`. For each non-`pass` state: either fix the code (regression) or promote the baseline with `node approve.mjs <name>` and explain why to the user.
+4. In your final summary, state which baselines you updated and why.
+
+The only excuse for skipping the suite is "the change is not browser-observable" (e.g. deleting unused CSS, editing comments) — and you must say so explicitly rather than silently skipping.
+
 ## Key constraints
 
 - **Python 3.9**: No `str | None` union syntax — use `Optional[str]` from `typing`
