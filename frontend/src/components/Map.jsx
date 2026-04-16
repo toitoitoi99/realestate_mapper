@@ -194,6 +194,7 @@ export default function Map({
   showSoldTrends, soldTrendsData,
   selectedParishes,
   onLookupResult,
+  listingTypeFilter = 'sale',
 }) {
   const isParishVisible = (name) => {
     if (!showNeighborhoods || !name) return true
@@ -300,15 +301,17 @@ export default function Map({
             } else if (isSold || isReserved) {
               markerColor = { color: '#000000', fillColor: '#1f2937' }
             } else {
-              // Color by flip_score when available — greener = better flip candidate.
+              // Pick score based on view: rent_score for rentals, flip_score for sales.
+              // In 'all' mode, use each listing's own type.
+              const useRent = listingTypeFilter === 'rent' || (listingTypeFilter === 'all' && isRent)
+              const score = useRent ? l.rent_score : l.flip_score
               // Band thresholds match backend/scoring_engine.py _rating():
               // A ≥ 60, B ≥ 45, C ≥ 30, D < 30.
-              const fs = l.flip_score
-              if (fs != null) {
-                if (fs >= 60)      markerColor = { color: '#065f46', fillColor: '#10b981' }  // A — emerald
-                else if (fs >= 45) markerColor = { color: '#166534', fillColor: '#22c55e' }  // B — green
-                else if (fs >= 30) markerColor = { color: '#854d0e', fillColor: '#f59e0b' }  // C — amber
-                else               markerColor = { color: '#991b1b', fillColor: '#ef4444' }  // D — red
+              if (score != null) {
+                if (score >= 60)      markerColor = { color: '#065f46', fillColor: '#10b981' }  // A — emerald
+                else if (score >= 45) markerColor = { color: '#166534', fillColor: '#22c55e' }  // B — green
+                else if (score >= 30) markerColor = { color: '#854d0e', fillColor: '#f59e0b' }  // C — amber
+                else                  markerColor = { color: '#991b1b', fillColor: '#ef4444' }  // D — red
               } else if (isRent) {
                 markerColor = { color: '#6b21a8', fillColor: '#a855f7' }
               } else {
@@ -390,6 +393,7 @@ export default function Map({
       <MapLegend
         baseMap={baseMap}
         onChangeBaseMap={onChangeBaseMap}
+        listingTypeFilter={listingTypeFilter}
       />
     </div>
   )
