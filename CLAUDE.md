@@ -11,6 +11,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
+# One-time setup for a fresh clone or worktree (idempotent; auto-run by preview_start)
+./scripts/bootstrap.sh                 # Python deps + Playwright chromium + frontend deps
+
 # Backend (from backend/)
 python3 api.py                         # Start API server on port 8000
 
