@@ -333,6 +333,7 @@ export default function App() {
           baseMap={baseMap}
           onChangeBaseMap={setBaseMap}
           listings={filteredListings}
+          listingTypeFilter={filters.listing_type || 'sale'}
           neighborhoods={neighborhoods}
           onSelectNeighborhood={handleSelectNeighborhood}
           selectedNeighborhood={selectedNeighborhood}

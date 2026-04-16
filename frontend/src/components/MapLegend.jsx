@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useLanguage } from '../LanguageContext'
 import { BASE_MAPS } from '../baseMaps'
 
-export default function MapLegend({ baseMap, onChangeBaseMap }) {
+export default function MapLegend({ baseMap, onChangeBaseMap, listingTypeFilter = 'sale' }) {
   const { t } = useLanguage()
   const [collapsed, setCollapsed] = useState(false)
   const [baseMapExpanded, setBaseMapExpanded] = useState(false)
@@ -47,14 +47,33 @@ export default function MapLegend({ baseMap, onChangeBaseMap }) {
         )}
       </div>
 
-      {/* Listings key */}
-      <div className="flex items-center gap-2">
-        <span className="w-3 h-3 rounded-full shrink-0" style={{ background: '#3b82f6' }} />
-        <span className="text-gray-600">{t.forSale}</span>
-        <span className="w-3 h-3 rounded-full shrink-0 ml-1" style={{ background: '#a855f7' }} />
-        <span className="text-gray-600">{t.rentLabel}</span>
-        <span className="w-3 h-3 rounded-full shrink-0 ml-1" style={{ background: '#1f2937' }} />
-        <span className="text-gray-600">{t.soldLabel}</span>
+      {/* Score color bands */}
+      <div className="mb-1">
+        <span className="text-gray-700 font-medium">
+          {listingTypeFilter === 'rent' ? t.rentScoreLabel
+            : listingTypeFilter === 'all' ? t.listingScoreLabel
+            : t.flipScoreLabel}
+        </span>
+      </div>
+      <div className="flex flex-col gap-0.5">
+        <div className="flex items-center gap-2">
+          <span className="w-3 h-3 rounded-full shrink-0" style={{ background: '#10b981' }} />
+          <span className="text-gray-600">A (≥60)</span>
+          <span className="w-3 h-3 rounded-full shrink-0 ml-1" style={{ background: '#22c55e' }} />
+          <span className="text-gray-600">B (≥45)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-3 h-3 rounded-full shrink-0" style={{ background: '#f59e0b' }} />
+          <span className="text-gray-600">C (≥30)</span>
+          <span className="w-3 h-3 rounded-full shrink-0 ml-1" style={{ background: '#ef4444' }} />
+          <span className="text-gray-600">D (&lt;30)</span>
+        </div>
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className="w-3 h-3 rounded-full shrink-0" style={{ background: '#94a3b8' }} />
+          <span className="text-gray-600">{t.unscoredLabel}</span>
+          <span className="w-3 h-3 rounded-full shrink-0 ml-1" style={{ background: '#1f2937' }} />
+          <span className="text-gray-600">{t.soldLabel}</span>
+        </div>
       </div>
 
       </>}

@@ -28,26 +28,28 @@ function ProjectHeatmap({ points }) {
       map.removeLayer(heatLayerRef.current)
     }
 
-    if (points.length === 0) {
+    if (points.length === 0 || typeof L.heatLayer !== 'function') {
       heatLayerRef.current = null
       return
     }
 
-    heatLayerRef.current = L.heatLayer(points, {
-      radius: 14,
-      blur: 26,
-      maxZoom: 16,
-      max: 1.0,
-      minOpacity: 0.15,
-      gradient: {
-        0.0: 'rgba(0,255,255,0)',
-        0.2: '#e0f7fa',
-        0.4: '#4dd0e1',
-        0.6: '#0097a7',
-        0.8: '#01579b',
-        1.0: '#0d1b5e',
-      },
-    }).addTo(map)
+    try {
+      heatLayerRef.current = L.heatLayer(points, {
+        radius: 14,
+        blur: 26,
+        maxZoom: 16,
+        max: 1.0,
+        minOpacity: 0.15,
+        gradient: {
+          0.0: 'rgba(0,255,255,0)',
+          0.2: '#e0f7fa',
+          0.4: '#4dd0e1',
+          0.6: '#0097a7',
+          0.8: '#01579b',
+          1.0: '#0d1b5e',
+        },
+      }).addTo(map)
+    } catch { heatLayerRef.current = null }
 
     return () => {
       if (heatLayerRef.current) {
