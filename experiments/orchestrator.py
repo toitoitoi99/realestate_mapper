@@ -103,12 +103,26 @@ def create_worktree(repo: Path, slug: str, base: str) -> tuple[Path, str]:
     wt_path = repo / ".claude" / "worktrees" / f"exp-{slug}"
     if wt_path.exists():
         print(f"  [{slug}] worktree already exists at {wt_path} — reusing")
-        return wt_path, branch
-    # Create a fresh branch off base and a worktree pointing at it.
-    subprocess.run(
-        ["git", "-C", str(repo), "worktree", "add", "-b", branch, str(wt_path), base],
-        check=True,
-    )
+    else:
+        subprocess.run(
+            ["git", "-C", str(repo), "worktree", "add", "-b", branch, str(wt_path), base],
+            check=True,
+        )
+    # Stage the production DB into the worktree so the agent's clone_db call
+    # finds it at the documented relative path. The DB is gitignored, so
+    # worktrees otherwise start with an empty backend/data/. We use SQLite's
+    # backup API (via lib.scratch_db.clone_db) for a consistent snapshot —
+    # safe even if another process is writing to the source.
+    src_db = repo / "backend" / "data" / "lisboa_realestate.db"
+    dst_db = wt_path / "backend" / "data" / "lisboa_realestate.db"
+    if src_db.exists() and not dst_db.exists():
+        sys.path.insert(0, str(repo))
+        from experiments.lib.scratch_db import clone_db
+        clone_db(src_db, dst_db)
+        print(f"  [{slug}] staged DB → {dst_db.relative_to(repo)} "
+              f"({dst_db.stat().st_size / 1e6:.1f} MB)")
+    elif not src_db.exists():
+        print(f"  [{slug}] WARNING: no source DB at {src_db} — agent will fail at clone_db")
     return wt_path, branch
 
 
