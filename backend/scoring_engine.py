@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import dataclass, field, asdict
 from typing import Dict, Optional, Any
 
@@ -39,6 +40,37 @@ from region_profiles import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# -- Log1p concave scaling for fat-tailed positive signals -------------------
+# Steepness parameter. k=3 boosts a midpoint signal (50) to ~66 while
+# preserving 0 and 100. Applied to market_discount, expected_resale,
+# yield_gross, and dev_momentum before the weighted roll-up — see
+# signal_batch.py where it's called.
+LOG1P_K: float = 3.0
+
+# Signals that receive the log1p boost at bundle-construction time.
+LOG1P_SIGNALS = frozenset({
+    "market_discount", "expected_resale", "yield_gross", "dev_momentum",
+})
+
+
+def log1p_scale(v: float, k: float = LOG1P_K) -> float:
+    """Apply concave log1p mapping [0, 100] → [0, 100].
+
+    f(t) = log1p(t*k) / log1p(k), where t = v/100.
+    Concave: boosts moderate values, preserves endpoints, largest lift near
+    the midpoint. Corrects for fat right tails in price-derived signals
+    that compress genuine standouts under linear normalization.
+    """
+    if v is None:
+        return None
+    if v <= 0.0:
+        return 0.0
+    if v >= 100.0:
+        return 100.0
+    t = v / 100.0
+    return math.log1p(t * k) / math.log1p(k) * 100.0
 
 
 # Worst-case blocker reduces the final score by this many points.
@@ -382,6 +414,9 @@ __all__ = [
     "compute_expected_resale_signal",
     "compute_yield_gross_signal",
     "persist_scores",
+    "log1p_scale",
+    "LOG1P_K",
+    "LOG1P_SIGNALS",
     # re-exports for callers
     "resolve_profile",
     "estimate_reno_cost",

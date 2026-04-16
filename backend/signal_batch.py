@@ -39,6 +39,8 @@ from scoring_engine import (
     compute_market_discount_signal,
     compute_expected_resale_signal,
     compute_yield_gross_signal,
+    log1p_scale,
+    LOG1P_SIGNALS,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -415,21 +417,29 @@ def score_one(
         if cached:
             amenity = cached["overall_score"]
 
+    # Build raw positives, then apply concave log1p scaling to
+    # fat-tailed signals before the roll-up. See scoring_engine.LOG1P_SIGNALS.
+    raw_positives = {
+        "market_discount":   market_disc,
+        "amenity":           amenity,
+        "transit":           None,   # Phase 2
+        "light":             light,             # vision + orientation + floor + hint
+        "outdoor_space":     vis_outdoor,       # vision only for now
+        "outdoor_space":     None,   # Phase 2/3
+        "layout_openness":   layout,
+        "dev_momentum":      dev_mom,
+        "sea_view":          None,   # Phase 2
+        "demand_durability": None,   # Phase 2
+        "expected_resale":   resale_signal,
+        "yield_gross":       yield_signal,
+    }
+    positives = {
+        k: (log1p_scale(v) if k in LOG1P_SIGNALS else v)
+        for k, v in raw_positives.items()
+    }
+
     bundle = SignalBundle(
-        positives={
-            "market_discount":   market_disc,
-            "amenity":           amenity,
-            "transit":           None,   # Phase 2
-            "light":             light,             # vision + orientation + floor + hint
-            "outdoor_space":     vis_outdoor,       # vision only for now
-            "outdoor_space":     None,   # Phase 2/3
-            "layout_openness":   layout,
-            "dev_momentum":      dev_mom,
-            "sea_view":          None,   # Phase 2
-            "demand_durability": None,   # Phase 2
-            "expected_resale":   resale_signal,
-            "yield_gross":       yield_signal,
-        },
+        positives=positives,
         blockers={
             "noise":                noise,
             "social_housing_adj":   social_adj,
