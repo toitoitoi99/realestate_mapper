@@ -40,6 +40,7 @@ LAST_ATTEMPT_FILE="$DATA_DIR/.last_scrape_attempt"
 WEBHOOK_FILE="$DATA_DIR/.slack_webhook"
 MIN_INTERVAL_SECONDS=$((20 * 3600))  # 20 hours
 RETRY_DELAY_SECONDS=$((5 * 60))      # 5 minutes
+LEG_COOLDOWN_SECONDS=$((3 * 60))     # 3 minutes between sale→rent for the same scraper
 PYTHON="/usr/bin/python3"
 
 # Ordered list of scrapers to run. Each <name> maps to
@@ -179,9 +180,19 @@ for scraper in "${SCRAPERS[@]}"; do
         continue
     fi
 
+    leg_index=0
     for type in "${TYPES[@]}"; do
         label="${scraper}/${type}"
         fail_file="$DATA_DIR/.scrape_fail_count_${scraper}_${type}"
+
+        # Cool down between legs of the same scraper so bot-detection
+        # heuristics (especially idealista's DataDome) don't flag the
+        # combined sale+rent volume as a single burst.
+        if [ "$leg_index" -gt 0 ] && [ "$LEG_COOLDOWN_SECONDS" -gt 0 ]; then
+            log "--- Cooling down ${LEG_COOLDOWN_SECONDS}s before $label ---"
+            sleep "$LEG_COOLDOWN_SECONDS"
+        fi
+        leg_index=$((leg_index + 1))
 
         LAST_RC=0
         run_scraper "$scraper" "$type"
