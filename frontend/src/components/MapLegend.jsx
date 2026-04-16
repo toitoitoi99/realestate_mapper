@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useLanguage } from '../LanguageContext'
 import { BASE_MAPS } from '../baseMaps'
 
-export default function MapLegend({ baseMap, onChangeBaseMap, listingTypeFilter = 'sale' }) {
+export default function MapLegend({ baseMap, onChangeBaseMap, listingTypeFilter = 'sale', showDisliked, onToggleShowDisliked }) {
   const { t } = useLanguage()
   const [collapsed, setCollapsed] = useState(false)
   const [baseMapExpanded, setBaseMapExpanded] = useState(false)
@@ -74,7 +74,28 @@ export default function MapLegend({ baseMap, onChangeBaseMap, listingTypeFilter 
           <span className="w-3 h-3 rounded-full shrink-0 ml-1" style={{ background: '#1f2937' }} />
           <span className="text-gray-600">{t.soldLabel}</span>
         </div>
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className="w-3 h-3 rounded-full shrink-0" style={{ background: '#10b981', borderRadius: '9999px', boxShadow: '0 0 0 1px #14532d' }} />
+          <span className="text-gray-600">Liked</span>
+          <span className="w-3 h-3 rounded-full shrink-0 ml-1" style={{ background: '#cbd5e1' }} />
+          <span className="text-gray-600">Disliked</span>
+        </div>
       </div>
+
+      {/* Disliked listings toggle */}
+      {onToggleShowDisliked && (
+        <div className="mt-2 pt-2 border-t border-gray-100">
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={!!showDisliked}
+              onChange={onToggleShowDisliked}
+              className="cursor-pointer"
+            />
+            <span className="text-gray-700">Show disliked</span>
+          </label>
+        </div>
+      )}
 
       </>}
     </div>

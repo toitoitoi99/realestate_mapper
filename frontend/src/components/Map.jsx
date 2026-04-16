@@ -193,6 +193,9 @@ export default function Map({
   selectedListing,
   showSoldTrends, soldTrendsData,
   selectedParishes,
+  reactionFor,
+  showDisliked,
+  onToggleShowDisliked,
   onLookupResult,
   listingTypeFilter = 'sale',
 }) {
@@ -292,12 +295,19 @@ export default function Map({
             const isRent = l.listing_type === 'rent'
             const isSold = l.status === 'sold'
             const isReserved = l.status === 'reserved'
+            const userReaction = reactionFor?.(l)?.reaction
 
             const isSelected = selectedListing && selectedListing.id === l.id
 
             let markerColor
             if (isSelected) {
               markerColor = { color: '#991b1b', fillColor: '#ef4444' }
+            } else if (userReaction === 'dislike') {
+              // Disliked listings render in muted grey when shown.
+              markerColor = { color: '#475569', fillColor: '#cbd5e1' }
+            } else if (userReaction === 'like') {
+              // Liked listings get a vivid green ring regardless of score.
+              markerColor = { color: '#14532d', fillColor: '#10b981' }
             } else if (isSold || isReserved) {
               markerColor = { color: '#000000', fillColor: '#1f2937' }
             } else {
@@ -343,12 +353,15 @@ export default function Map({
             }
 
             const mSize = listingMarkerSize(mapZoom)
+            const fillOpacity = userReaction === 'dislike' ? 0.35
+              : (isSold || isReserved) ? 0.85
+              : 0.6
             return (
               <CircleMarker
                 key={l.id}
                 center={[l.lat, l.lon]}
                 radius={mSize.radius}
-                pathOptions={{ ...markerColor, fillOpacity: (isSold || isReserved) ? 0.85 : 0.6, weight: (isSold || isReserved) ? mSize.weight + 1 : mSize.weight }}
+                pathOptions={{ ...markerColor, fillOpacity, weight: (isSold || isReserved) ? mSize.weight + 1 : mSize.weight }}
                 eventHandlers={{ click: handleClick }}
               >
                 {popupContent}
@@ -394,6 +407,8 @@ export default function Map({
         baseMap={baseMap}
         onChangeBaseMap={onChangeBaseMap}
         listingTypeFilter={listingTypeFilter}
+        showDisliked={showDisliked}
+        onToggleShowDisliked={onToggleShowDisliked}
       />
     </div>
   )
