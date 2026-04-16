@@ -301,11 +301,13 @@ export default function Map({
               markerColor = { color: '#000000', fillColor: '#1f2937' }
             } else {
               // Color by flip_score when available — greener = better flip candidate.
+              // Band thresholds match backend/scoring_engine.py _rating():
+              // A ≥ 60, B ≥ 45, C ≥ 30, D < 30.
               const fs = l.flip_score
               if (fs != null) {
-                if (fs >= 80)      markerColor = { color: '#065f46', fillColor: '#10b981' }  // A — emerald
-                else if (fs >= 60) markerColor = { color: '#166534', fillColor: '#22c55e' }  // B — green
-                else if (fs >= 40) markerColor = { color: '#854d0e', fillColor: '#f59e0b' }  // C — amber
+                if (fs >= 60)      markerColor = { color: '#065f46', fillColor: '#10b981' }  // A — emerald
+                else if (fs >= 45) markerColor = { color: '#166534', fillColor: '#22c55e' }  // B — green
+                else if (fs >= 30) markerColor = { color: '#854d0e', fillColor: '#f59e0b' }  // C — amber
                 else               markerColor = { color: '#991b1b', fillColor: '#ef4444' }  // D — red
               } else if (isRent) {
                 markerColor = { color: '#6b21a8', fillColor: '#a855f7' }

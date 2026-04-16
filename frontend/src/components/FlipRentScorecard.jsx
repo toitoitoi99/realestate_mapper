@@ -50,8 +50,9 @@ export function FlipRentBadges({ flip, rent }) {
   if (flip == null && rent == null) return null
   const f = Math.round(flip || 0)
   const r = Math.round(rent || 0)
-  const fRating = flip == null ? null : (flip >= 80 ? 'A' : flip >= 60 ? 'B' : flip >= 40 ? 'C' : 'D')
-  const rRating = rent == null ? null : (rent >= 80 ? 'A' : rent >= 60 ? 'B' : rent >= 40 ? 'C' : 'D')
+  // Band thresholds match backend/scoring_engine.py _rating(): A ≥ 60, B ≥ 45, C ≥ 30.
+  const fRating = flip == null ? null : (flip >= 60 ? 'A' : flip >= 45 ? 'B' : flip >= 30 ? 'C' : 'D')
+  const rRating = rent == null ? null : (rent >= 60 ? 'A' : rent >= 45 ? 'B' : rent >= 30 ? 'C' : 'D')
   return (
     <div className="flex gap-1.5 mt-1.5">
       {flip != null && (
@@ -135,11 +136,13 @@ export default function FlipRentScorecard({ listing }) {
 
   const currentFlip = preview?.flip?.score ?? baselineFlip
   const currentRent = preview?.rent?.score ?? baselineRent
+  // Fallback rating (used only when preview hasn't resolved) mirrors
+  // backend/scoring_engine.py _rating(): A ≥ 60, B ≥ 45, C ≥ 30.
   const currentFlipRating = preview?.flip?.rating ?? (
-    baselineFlip >= 80 ? 'A' : baselineFlip >= 60 ? 'B' : baselineFlip >= 40 ? 'C' : 'D'
+    baselineFlip >= 60 ? 'A' : baselineFlip >= 45 ? 'B' : baselineFlip >= 30 ? 'C' : 'D'
   )
   const currentRentRating = preview?.rent?.rating ?? (
-    baselineRent >= 80 ? 'A' : baselineRent >= 60 ? 'B' : baselineRent >= 40 ? 'C' : 'D'
+    baselineRent >= 60 ? 'A' : baselineRent >= 45 ? 'B' : baselineRent >= 30 ? 'C' : 'D'
   )
 
   const dFlip = preview ? (currentFlip - baselineFlip) : 0
