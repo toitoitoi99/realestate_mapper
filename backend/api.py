@@ -596,6 +596,41 @@ class AddressHistoryHandler(BaseHandler):
         self.write_json({"count": len(matches), "matches": matches})
 
 
+class ReactionsHandler(BaseHandler):
+    """GET /api/reactions — list all like/dislike reactions."""
+
+    def get(self):
+        reactions = db.get_reactions()
+        self.write_json({"count": len(reactions), "reactions": reactions})
+
+
+class ReactionDetailHandler(BaseHandler):
+    """PUT /api/reactions/:kind/:id   set like/dislike (+ optional comment)
+       DELETE /api/reactions/:kind/:id  clear reaction"""
+
+    def put(self, listing_kind, listing_id):
+        try:
+            payload = json.loads(self.request.body or b"{}")
+        except json.JSONDecodeError:
+            self.write_error_json("invalid JSON body", 400)
+            return
+        reaction = payload.get("reaction")
+        comment = payload.get("comment")
+        try:
+            row = db.set_reaction(listing_kind, int(listing_id), reaction, comment)
+        except ValueError as e:
+            self.write_error_json(str(e), 400)
+            return
+        self.write_json(row)
+
+    def delete(self, listing_kind, listing_id):
+        if listing_kind not in ("sale", "rent"):
+            self.write_error_json(f"invalid listing_kind: {listing_kind}", 400)
+            return
+        removed = db.delete_reaction(listing_kind, int(listing_id))
+        self.write_json({"removed": removed})
+
+
 class NeighbourhoodTypologiesHandler(BaseHandler):
     """GET /api/neighbourhood-typologies"""
 
@@ -1042,6 +1077,8 @@ def make_app() -> tornado.web.Application:
             (r"/api/parish-stats",          ParishStatsHandler),
             (r"/api/nearby-projects",       NearbyProjectsHandler),
             (r"/api/address-lookup",        AddressLookupHandler),
+            (r"/api/reactions",             ReactionsHandler),
+            (r"/api/reactions/(sale|rent)/(\d+)", ReactionDetailHandler),
         ],
         debug=False,
     )

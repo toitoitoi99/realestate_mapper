@@ -592,6 +592,23 @@ def init_db():
             fetched_at TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_noise_sources_source ON noise_sources(source);
+
+        -- User like/dislike + free-text note per listing.
+        -- Single-user app: no user_id column.
+        CREATE TABLE IF NOT EXISTS listing_reactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            listing_kind TEXT NOT NULL,           -- 'sale' | 'rent'
+            listing_id INTEGER NOT NULL,
+            reaction TEXT NOT NULL,               -- 'like' | 'dislike'
+            comment TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(listing_kind, listing_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_reactions_kind_id
+            ON listing_reactions(listing_kind, listing_id);
+        CREATE INDEX IF NOT EXISTS idx_reactions_reaction
+            ON listing_reactions(reaction);
     """)
     conn.commit()
 
@@ -1013,6 +1030,55 @@ def get_listing_history(listing_id: int, listing_type: str = "sale") -> List[dic
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_reactions() -> List[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT listing_kind, listing_id, reaction, comment, created_at, updated_at "
+        "FROM listing_reactions"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def set_reaction(listing_kind: str, listing_id: int, reaction: str, comment: Optional[str]) -> dict:
+    if listing_kind not in ("sale", "rent"):
+        raise ValueError(f"invalid listing_kind: {listing_kind}")
+    if reaction not in ("like", "dislike"):
+        raise ValueError(f"invalid reaction: {reaction}")
+    now = datetime.utcnow().isoformat()
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO listing_reactions (listing_kind, listing_id, reaction, comment, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(listing_kind, listing_id) DO UPDATE SET
+                reaction=excluded.reaction,
+                comment=excluded.comment,
+                updated_at=excluded.updated_at
+            """,
+            (listing_kind, listing_id, reaction, comment, now, now),
+        )
+        row = conn.execute(
+            "SELECT listing_kind, listing_id, reaction, comment, created_at, updated_at "
+            "FROM listing_reactions WHERE listing_kind=? AND listing_id=?",
+            (listing_kind, listing_id),
+        ).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def delete_reaction(listing_kind: str, listing_id: int) -> bool:
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            "DELETE FROM listing_reactions WHERE listing_kind=? AND listing_id=?",
+            (listing_kind, listing_id),
+        )
+    conn.close()
+    return cur.rowcount > 0
 
 
 def get_radius_comparison(

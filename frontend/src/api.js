@@ -144,6 +144,22 @@ export async function fetchFlipRentPreview(id, {
   return api(`${BASE}/listings/${id}/score-preview?${params}`)
 }
 
+export async function fetchReactions() {
+  return api(`${BASE}/reactions`)
+}
+
+export async function setReaction(listingKind, listingId, reaction, comment = null) {
+  return api(`${BASE}/reactions/${listingKind}/${listingId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reaction, comment }),
+  })
+}
+
+export async function clearReaction(listingKind, listingId) {
+  return api(`${BASE}/reactions/${listingKind}/${listingId}`, { method: 'DELETE' })
+}
+
 export async function addressLookup(address, lat, lon, listingType = 'sale') {
   return api(`${BASE}/address-lookup`, {
     method: 'POST',
