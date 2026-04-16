@@ -1,6 +1,9 @@
 # Scraper session cookies (contain live auth tokens)
 backend/idealista_cookies.json
 
+# Slack incoming webhook URL for scheduled-scrape notifications
+backend/data/.slack_webhook
+
 # Python
 __pycache__/
 *.py[cod]
