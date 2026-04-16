@@ -1,0 +1,21 @@
+{
+  "_schema": "Ground truth for scoring experiments. Split by listing_type: flip_labels grade sale listings (used by flip_score variants), rent_labels grade rental listings (used by rent_score variants). Never mix — rent outcomes must not grade flip and vice versa. Each entry: {source, source_id, label ('good'|'neutral'|'bad'), source_of_label ('manual'|'derived'), notes, labeled_at (ISO date)}.",
+  "_example_flip": {
+    "source": "idealista",
+    "source_id": "33123456",
+    "label": "good",
+    "source_of_label": "derived",
+    "notes": "status→sold within 18 days, no price cuts",
+    "labeled_at": "2026-04-15"
+  },
+  "_example_rent": {
+    "source": "idealista",
+    "source_id": "44987654",
+    "label": "good",
+    "source_of_label": "manual",
+    "notes": "Below-market yield, T1 Arroios, found tenant in 1 week",
+    "labeled_at": "2026-04-15"
+  },
+  "flip_labels": [],
+  "rent_labels": []
+}
