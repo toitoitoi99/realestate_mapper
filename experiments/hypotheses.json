@@ -1,0 +1,25 @@
+{
+  "_description": "Default hypotheses for the parallel scoring experiment. Each entry becomes one worktree + one Claude Code agent. Edit / extend freely before running orchestrator.py. `slug` is used for the branch name and worktree dir, so keep it kebab-case and short.",
+  "hypotheses": [
+    {
+      "slug": "log-scaling",
+      "title": "Logarithmic feature scaling",
+      "brief": "Replace the current linear 0..100 normalization of heavy-tailed positive signals (market_discount, expected_resale, yield_gross, dev_momentum) with a log1p-based mapping. Rationale: price and rent features have fat right tails; linear clipping flattens the upper decile and compresses genuine standouts into the B band. Apply log scaling inside `scoring_engine.py` (or at the signal-computation boundary in `signal_batch.py`), keep blockers linear, keep profile weights unchanged."
+    },
+    {
+      "slug": "type-matched-comps",
+      "title": "Property-type-matched comparables only",
+      "brief": "Today's `market_discount` / `expected_resale` signals compare every listing against all sales in the same parish. Restrict the comparable set to listings matching the subject on (a) property sub-type (T0/T1/T2 bucket from `rooms`) and (b) size band (±25% sqm). Require a minimum of 6 comparables; if fewer, fall back to the current parish median but mark the signal as low-confidence and halve its weight."
+    },
+    {
+      "slug": "bayesian-shrinkage",
+      "title": "Bayesian shrinkage toward neighborhood mean",
+      "brief": "Each positive signal is currently treated as a point estimate. Apply James-Stein-style shrinkage: for each signal, estimate the neighborhood-level mean and variance, then shrink individual listing scores toward the neighborhood mean with weight proportional to within-neighborhood sample size. Thin-data parishes get pulled strongly toward the AML median; dense parishes keep their raw signals. Goal: reduce single-listing noise without flattening genuine local outliers."
+    },
+    {
+      "slug": "gradient-weights",
+      "title": "Learned weights via gradient descent on labeled deals",
+      "brief": "Replace hand-tuned per-profile weights in region_profiles.py with weights learned from `data/labeled_deals.json`. Use a simple logistic regression (sklearn or hand-rolled numpy) mapping the existing SignalBundle vectors to the label (good/bad deal). Train per profile if data allows, else one global model. Persist learned weights to `experiments/<branch>/weights.json` and load them in the variant scorer. If labels are sparse (<30), document that and fall back to a regularized ridge fit toward current weights."
+    }
+  ]
+}
