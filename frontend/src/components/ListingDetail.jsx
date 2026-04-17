@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useLanguage } from '../LanguageContext'
 import { translateDescription, fetchListingDetail, fetchNearbyProjects } from '../api'
 import FlipRentScorecard from './FlipRentScorecard'
+import PersonaInsightCard from './PersonaInsightCard'
 import AmenityRating from './AmenityRating'
 import ListingComparison from './ListingComparison'
 import SourceLogo from './SourceLogo'
@@ -47,7 +48,7 @@ function PctBadge({ pct, invert = false }) {
   return <span className={`text-xs font-semibold ${color}`}>{sign}{pct.toFixed(0)}%</span>
 }
 
-export default function ListingDetail({ listing, onBack, parishStats, ineStats, reaction, onSetReaction, onClearReaction }) {
+export default function ListingDetail({ listing, onBack, parishStats, ineStats, reaction, onSetReaction, onClearReaction, personaId }) {
   const { lang, t } = useLanguage()
   const [descriptionEn, setDescriptionEn] = useState(null)
   const [translating, setTranslating] = useState(false)
@@ -358,6 +359,9 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats, 
               </div>
             )}
           </div>
+
+          {/* Persona-specific KPI breakdown — only when a persona is active */}
+          {personaId && <PersonaInsightCard listing={listing} personaId={personaId} />}
 
           {/* Flip + Rent scorecard (replaces Deal Score / Property Score / Rarity) */}
           <FlipRentScorecard listing={listing} />

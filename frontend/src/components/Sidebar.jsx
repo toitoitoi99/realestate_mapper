@@ -124,6 +124,7 @@ export default function Sidebar({
             reaction={reactionFor?.(selectedListing)}
             onSetReaction={onSetReaction}
             onClearReaction={onClearReaction}
+            personaId={personaId}
           />
         </div>
       </div>
