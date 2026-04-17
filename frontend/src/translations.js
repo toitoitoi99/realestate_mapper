@@ -43,7 +43,7 @@ export const translations = {
     // StatsBar
     appTitle:        'Lisbon Real Estate',
     listings:        'listings',
-    avgAsk:          'avg ask',
+    medianAsk:       'median ask',
     perSqmAsk:       '/m² ask',
     perSqmSold:      '/m² sold',
     neighborhoods:   'neighborhoods',
@@ -256,7 +256,7 @@ export const translations = {
     // StatsBar
     appTitle:        'Imobiliário de Lisboa',
     listings:        'anúncios',
-    avgAsk:          'preço médio',
+    medianAsk:       'mediana',
     perSqmAsk:       '/m² pedido',
     perSqmSold:      '/m² vendido',
     neighborhoods:   'bairros',

@@ -34,6 +34,7 @@ export default function Sidebar({
   soldDateRange, onSoldDateRangeChange, soldTrendsData,
   showSecurity, onToggleSecurity, securityPois,
   selectedParishes, onToggleSelectedParish, onClearSelectedParishes,
+  reactionFor, onSetReaction, onClearReaction,
 }) {
   const { t } = useLanguage()
   const [collapsed, setCollapsed] = useState(false)
@@ -114,7 +115,15 @@ export default function Sidebar({
       <div className="relative w-80 shrink-0">
         {toggleBtn}
         <div className="flex flex-col bg-white border-r border-gray-200 overflow-hidden h-full">
-          <ListingDetail listing={selectedListing} onBack={() => onSelectListing(null)} parishStats={parishStats} ineStats={ineStats} />
+          <ListingDetail
+            listing={selectedListing}
+            onBack={() => onSelectListing(null)}
+            parishStats={parishStats}
+            ineStats={ineStats}
+            reaction={reactionFor?.(selectedListing)}
+            onSetReaction={onSetReaction}
+            onClearReaction={onClearReaction}
+          />
         </div>
       </div>
     )
@@ -249,7 +258,14 @@ export default function Sidebar({
         {!loading && highlightedListing && (
           <>
             <div className="relative">
-              <ListingCard listing={highlightedListing} onSelect={onSelectListing} highlighted />
+              <ListingCard
+                listing={highlightedListing}
+                onSelect={onSelectListing}
+                highlighted
+                reaction={reactionFor?.(highlightedListing)}
+                onSetReaction={onSetReaction}
+                onClearReaction={onClearReaction}
+              />
               <button
                 onClick={onClearHighlight}
                 className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded-full bg-blue-100 text-blue-500 hover:bg-blue-200 hover:text-blue-700 text-xs cursor-pointer"
@@ -274,7 +290,13 @@ export default function Sidebar({
                   <div className="flex flex-col gap-1.5 p-2 bg-gray-50/50">
                     {similarListings.map(l => (
                       <div key={l.id} className="relative">
-                        <ListingCard listing={l} onSelect={onSelectListing} />
+                        <ListingCard
+                          listing={l}
+                          onSelect={onSelectListing}
+                          reaction={reactionFor?.(l)}
+                          onSetReaction={onSetReaction}
+                          onClearReaction={onClearReaction}
+                        />
                         <span className="absolute top-1 right-1 text-[10px] text-gray-400 bg-white/80 rounded px-1">
                           {l._dist < 1 ? `${Math.round(l._dist * 1000)}m` : `${l._dist.toFixed(1)}km`}
                         </span>
@@ -290,7 +312,16 @@ export default function Sidebar({
         {!loading && listings?.slice(0, visibleCount).map(l => {
           if (highlightedListing?.id === l.id) return null
           if (similarListings.some(s => s.id === l.id)) return null
-          return <ListingCard key={l.id} listing={l} onSelect={onSelectListing} />
+          return (
+            <ListingCard
+              key={l.id}
+              listing={l}
+              onSelect={onSelectListing}
+              reaction={reactionFor?.(l)}
+              onSetReaction={onSetReaction}
+              onClearReaction={onClearReaction}
+            />
+          )
         })}
         {!loading && listings?.length > visibleCount && (
           <button

@@ -10,6 +10,7 @@ import MapLegend from './MapLegend'
 import AddressSearch from './AddressSearch'
 import SoldTrendsLayer from './SoldTrendsLayer'
 import { BASE_MAPS } from '../baseMaps'
+import { useScoreBands } from '../ScoreBandsContext'
 import ListingPopupCard from './ListingPopupCard'
 
 const DEFAULT_CENTRE = [38.68, -9.10]
@@ -193,9 +194,13 @@ export default function Map({
   selectedListing,
   showSoldTrends, soldTrendsData,
   selectedParishes,
+  reactionFor,
+  showDisliked,
+  onToggleShowDisliked,
   onLookupResult,
   listingTypeFilter = 'sale',
 }) {
+  const { bands } = useScoreBands()
   const isParishVisible = (name) => {
     if (!showNeighborhoods || !name) return true
     const group = parishToGroup?.[name]
@@ -292,12 +297,19 @@ export default function Map({
             const isRent = l.listing_type === 'rent'
             const isSold = l.status === 'sold'
             const isReserved = l.status === 'reserved'
+            const userReaction = reactionFor?.(l)?.reaction
 
             const isSelected = selectedListing && selectedListing.id === l.id
 
             let markerColor
             if (isSelected) {
               markerColor = { color: '#991b1b', fillColor: '#ef4444' }
+            } else if (userReaction === 'dislike') {
+              // Disliked listings render in muted grey when shown.
+              markerColor = { color: '#475569', fillColor: '#cbd5e1' }
+            } else if (userReaction === 'like') {
+              // Liked listings get a vivid green ring regardless of score.
+              markerColor = { color: '#14532d', fillColor: '#10b981' }
             } else if (isSold || isReserved) {
               markerColor = { color: '#000000', fillColor: '#1f2937' }
             } else {
@@ -306,13 +318,11 @@ export default function Map({
               const useRent = listingTypeFilter === 'rent' || (listingTypeFilter === 'all' && isRent)
               const fallback = useRent ? l.rent_score : l.flip_score
               const score = l.persona_score != null ? l.persona_score : fallback
-              // Band thresholds match backend/scoring_engine.py _rating():
-              // A ≥ 60, B ≥ 45, C ≥ 30, D < 30.
               if (score != null) {
-                if (score >= 60)      markerColor = { color: '#065f46', fillColor: '#10b981' }  // A — emerald
-                else if (score >= 45) markerColor = { color: '#166534', fillColor: '#22c55e' }  // B — green
-                else if (score >= 30) markerColor = { color: '#854d0e', fillColor: '#f59e0b' }  // C — amber
-                else                  markerColor = { color: '#991b1b', fillColor: '#ef4444' }  // D — red
+                if      (score >= bands.A.min) markerColor = { color: '#065f46', fillColor: '#10b981' }  // A — emerald
+                else if (score >= bands.B.min) markerColor = { color: '#166534', fillColor: '#22c55e' }  // B — green
+                else if (score >= bands.C.min) markerColor = { color: '#854d0e', fillColor: '#f59e0b' }  // C — amber
+                else                           markerColor = { color: '#991b1b', fillColor: '#ef4444' }  // D — red
               } else if (isRent) {
                 markerColor = { color: '#6b21a8', fillColor: '#a855f7' }
               } else {
@@ -344,12 +354,15 @@ export default function Map({
             }
 
             const mSize = listingMarkerSize(mapZoom)
+            const fillOpacity = userReaction === 'dislike' ? 0.35
+              : (isSold || isReserved) ? 0.85
+              : 0.6
             return (
               <CircleMarker
                 key={l.id}
                 center={[l.lat, l.lon]}
                 radius={mSize.radius}
-                pathOptions={{ ...markerColor, fillOpacity: (isSold || isReserved) ? 0.85 : 0.6, weight: (isSold || isReserved) ? mSize.weight + 1 : mSize.weight }}
+                pathOptions={{ ...markerColor, fillOpacity, weight: (isSold || isReserved) ? mSize.weight + 1 : mSize.weight }}
                 eventHandlers={{ click: handleClick }}
               >
                 {popupContent}
@@ -395,6 +408,8 @@ export default function Map({
         baseMap={baseMap}
         onChangeBaseMap={onChangeBaseMap}
         listingTypeFilter={listingTypeFilter}
+        showDisliked={showDisliked}
+        onToggleShowDisliked={onToggleShowDisliked}
       />
     </div>
   )

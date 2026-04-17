@@ -5,6 +5,7 @@ import FlipRentScorecard from './FlipRentScorecard'
 import AmenityRating from './AmenityRating'
 import ListingComparison from './ListingComparison'
 import SourceLogo from './SourceLogo'
+import ReactionButtons from './ReactionButtons'
 
 function PriceDiff({ current, other }) {
   if (!current || !other) return null
@@ -46,7 +47,7 @@ function PctBadge({ pct, invert = false }) {
   return <span className={`text-xs font-semibold ${color}`}>{sign}{pct.toFixed(0)}%</span>
 }
 
-export default function ListingDetail({ listing, onBack, parishStats, ineStats }) {
+export default function ListingDetail({ listing, onBack, parishStats, ineStats, reaction, onSetReaction, onClearReaction }) {
   const { lang, t } = useLanguage()
   const [descriptionEn, setDescriptionEn] = useState(null)
   const [translating, setTranslating] = useState(false)
@@ -286,6 +287,18 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats }
               </div>
             )}
           </div>
+
+          {/* Like / dislike + comment */}
+          {onSetReaction && (
+            <div className="bg-white border border-gray-200 rounded-lg p-3">
+              <ReactionButtons
+                reaction={reaction}
+                onSet={(r, c) => onSetReaction(listing, r, c)}
+                onClear={() => onClearReaction(listing)}
+                variant="full"
+              />
+            </div>
+          )}
 
           {/* ============ VALUE SUMMARY CARD ============ */}
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">

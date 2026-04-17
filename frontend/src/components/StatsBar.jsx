@@ -47,6 +47,7 @@ export default function StatsBar({
   stats, ineStats, onScrape, scraping,
   areas, currentArea, onChangeArea,
   selectedScraper, onSelectScraper, scrapeStatus,
+  onOpenAdmin,
 }) {
   const { lang, toggle, t } = useLanguage()
   if (!stats) return null
@@ -69,8 +70,8 @@ export default function StatsBar({
       )}
       <div className="flex gap-4 text-gray-600">
         <span><b className="text-gray-900">{fmt(stats.total_listings)}</b> {t.listings}</span>
-        <span><b className="text-gray-900">€{fmt(stats.avg_price_eur)}</b> {t.avgAsk}</span>
-        <span><b className="text-gray-900">€{fmt(stats.avg_price_per_sqm)}</b>{t.perSqmAsk}</span>
+        <span><b className="text-gray-900">€{fmt(stats.median_price_eur)}</b> {t.medianAsk}</span>
+        <span><b className="text-gray-900">€{fmt(stats.median_price_per_sqm)}</b>{t.perSqmAsk}</span>
         {ineStats && (
           <span title={`INE median transaction price · ${ineStats.period_label}`}>
             <b className="text-emerald-700">€{fmt(ineStats.median_price_per_sqm)}</b>
@@ -102,26 +103,17 @@ export default function StatsBar({
         ))}
       </div>
 
-      {/* Scraper picker + status + trigger */}
+      {/* Compact scrape status + admin entry point.
+          Full picker, history, and per-source controls live in the admin page. */}
       <div className="flex items-center gap-2">
         <ScrapeStatus status={scrapeStatus} t={t} />
-        <select
-          value={selectedScraper}
-          onChange={e => onSelectScraper(e.target.value)}
-          disabled={scraping}
-          aria-label={t.scraperPickerAria}
-          className="px-2 py-1 text-xs border border-gray-300 rounded bg-white text-gray-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {SCRAPER_OPTIONS.map(s => (
-            <option key={s.key} value={s.key}>{s.label}</option>
-          ))}
-        </select>
         <button
-          onClick={onScrape}
-          disabled={scraping}
-          className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+          onClick={onOpenAdmin}
+          aria-label="Open admin"
+          title="Admin"
+          className="px-2 py-1 text-xs border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 cursor-pointer"
         >
-          {scraping ? t.scraping : t.runScraper}
+          ⚙️ Admin
         </button>
       </div>
     </div>

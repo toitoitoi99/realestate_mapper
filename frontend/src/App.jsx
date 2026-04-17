@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { fetchAreas, fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes, fetchSoldTrends, fetchNeighbourhoodTypologies, fetchParishStats, fetchScrapeRuns } from './api'
+import { fetchAreas, fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes, fetchSoldTrends, fetchNeighbourhoodTypologies, fetchParishStats, fetchScrapeRuns, fetchReactions, setReaction as apiSetReaction, clearReaction as apiClearReaction } from './api'
 import { useAuth } from './contexts/AuthContext'
 import { getPersona } from './lib/personas'
 import { preferencesToFilters } from './lib/preferences'
@@ -12,6 +12,7 @@ import StatsBar from './components/StatsBar'
 import Sidebar from './components/Sidebar'
 import Map from './components/Map'
 import PersonaBar from './components/PersonaBar'
+import AdminPage from './components/AdminPage'
 import './index.css'
 
 export default function App() {
@@ -49,6 +50,10 @@ export default function App() {
   const [neighbourhoodTypologies, setNeighbourhoodTypologies] = useState({})
   const [parishStats, setParishStats] = useState({})
   const [selectedParishes, setSelectedParishes] = useState(new Set())
+  // Map of `${kind}-${id}` → { reaction, comment }
+  const [reactions, setReactions] = useState({})
+  const [showDisliked, setShowDisliked] = useState(false)
+  const [view, setView] = useState('map')  // 'map' | 'admin'
 
   const { filters, setFilter, reset } = useFilters()
 
@@ -84,6 +89,13 @@ export default function App() {
     }).catch(console.error)
     fetchNeighbourhoodTypologies().then(d => setNeighbourhoodTypologies(d.typologies ?? {})).catch(console.error)
     fetchParishStats(currentArea).then(d => setParishStats(d.stats ?? {})).catch(console.error)
+    fetchReactions().then(d => {
+      const map = {}
+      for (const r of (d.reactions ?? [])) {
+        map[`${r.listing_kind}-${r.listing_id}`] = { reaction: r.reaction, comment: r.comment }
+      }
+      setReactions(map)
+    }).catch(console.error)
   }, [])
 
   useEffect(() => {
@@ -254,8 +266,21 @@ export default function App() {
     if (fadeRef.current) clearTimeout(fadeRef.current)
   }, [stopPolling])
 
+  const reactionFor = useCallback((listing) => {
+    if (!listing) return null
+    return reactions[`${listing.listing_type || 'sale'}-${listing.id}`] || null
+  }, [reactions])
+
   const filteredListings = useMemo(() => {
-    const base = listings
+    let base = listings
+    // Hide disliked listings by default — toggle in MapLegend brings them back.
+    if (!showDisliked) {
+      base = base.filter(l => {
+        const r = reactions[`${l.listing_type || 'sale'}-${l.id}`]
+        return r?.reaction !== 'dislike'
+      })
+    }
+
     if (!showNeighborhoods) return base
 
     // If parishes selected for comparison, show only those
@@ -271,7 +296,35 @@ export default function App() {
       if (hiddenParishes.has(l.neighborhood)) return false
       return true
     })
-  }, [listings, showNeighborhoods, hiddenParishes, parishToGroup, visibleGroups, selectedParishes])
+  }, [listings, reactions, showDisliked, showNeighborhoods, hiddenParishes, parishToGroup, visibleGroups, selectedParishes])
+
+  const handleSetReaction = useCallback(async (listing, reaction, comment) => {
+    const kind = listing.listing_type || 'sale'
+    const key = `${kind}-${listing.id}`
+    // Optimistic update
+    setReactions(prev => ({ ...prev, [key]: { reaction, comment: comment ?? null } }))
+    try {
+      const row = await apiSetReaction(kind, listing.id, reaction, comment ?? null)
+      setReactions(prev => ({ ...prev, [key]: { reaction: row.reaction, comment: row.comment } }))
+    } catch (e) {
+      console.error('setReaction failed', e)
+    }
+  }, [])
+
+  const handleClearReaction = useCallback(async (listing) => {
+    const kind = listing.listing_type || 'sale'
+    const key = `${kind}-${listing.id}`
+    setReactions(prev => {
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+    try {
+      await apiClearReaction(kind, listing.id)
+    } catch (e) {
+      console.error('clearReaction failed', e)
+    }
+  }, [])
 
   const toggleGroup = useCallback((key) => {
     setVisibleGroups(prev => ({ ...prev, [key]: !prev[key] }))
@@ -304,6 +357,32 @@ export default function App() {
   }, [])
 
   const { user } = useAuth()
+
+  if (view === 'admin') {
+    return (
+      <AdminPage
+        onBack={() => setView('map')}
+        selectedScraper={selectedScraper}
+        onSelectScraper={setSelectedScraper}
+        scraping={scraping}
+        scrapeStatus={scrapeStatus}
+        onScrape={handleScrape}
+        onViewListing={(listing) => {
+          // Seed into the current listings array if not present so the pin
+          // renders even when the active filters would exclude it.
+          setListings(prev => {
+            const key = `${listing.id}-${listing.listing_type}`
+            if (prev.some(l => `${l.id}-${l.listing_type}` === key)) return prev
+            return [...prev, listing]
+          })
+          setSelectedListing(listing)
+          setHighlightedListing(listing)
+          setView('map')
+        }}
+      />
+    )
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <PersonaBar
@@ -331,6 +410,7 @@ export default function App() {
         selectedScraper={selectedScraper}
         onSelectScraper={setSelectedScraper}
         scrapeStatus={scrapeStatus}
+        onOpenAdmin={() => setView('admin')}
       />
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <Sidebar
@@ -376,6 +456,9 @@ export default function App() {
           selectedParishes={selectedParishes}
           onToggleSelectedParish={toggleSelectedParish}
           onClearSelectedParishes={clearSelectedParishes}
+          reactionFor={reactionFor}
+          onSetReaction={handleSetReaction}
+          onClearReaction={handleClearReaction}
         />
         <Map
           areaConfig={areas[currentArea]}
@@ -405,6 +488,9 @@ export default function App() {
           showSoldTrends={showSoldTrends}
           soldTrendsData={soldTrendsData}
           selectedParishes={selectedParishes}
+          reactionFor={reactionFor}
+          showDisliked={showDisliked}
+          onToggleShowDisliked={() => setShowDisliked(p => !p)}
           onLookupResult={(newListings) => {
             setListings(prev => {
               const ids = new Set(prev.map(l => `${l.id}-${l.listing_type}`))

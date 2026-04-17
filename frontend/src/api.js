@@ -162,6 +162,47 @@ export async function extractPreferences(message, currentPrefs = null) {
   })
 }
 
+export async function fetchReactions({ details = false } = {}) {
+  const params = details ? '?details=true' : ''
+  return api(`${BASE}/reactions${params}`)
+}
+
+export async function setReaction(listingKind, listingId, reaction, comment = null) {
+  return api(`${BASE}/reactions/${listingKind}/${listingId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reaction, comment }),
+  })
+}
+
+export async function clearReaction(listingKind, listingId) {
+  return api(`${BASE}/reactions/${listingKind}/${listingId}`, { method: 'DELETE' })
+}
+
+export async function fetchAdminTuning() {
+  return api(`${BASE}/admin/tuning`)
+}
+
+export async function fetchAdminHealth() {
+  return api(`${BASE}/admin/health`)
+}
+
+export async function fetchScoreBands() {
+  return api(`${BASE}/settings/score-bands`)
+}
+
+export async function saveScoreBands(bands) {
+  return api(`${BASE}/admin/tuning/score-bands`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ score_bands: bands }),
+  })
+}
+
+export async function resetScoreBands() {
+  return api(`${BASE}/admin/tuning/score-bands`, { method: 'DELETE' })
+}
+
 export async function addressLookup(address, lat, lon, listingType = 'sale') {
   return api(`${BASE}/address-lookup`, {
     method: 'POST',
