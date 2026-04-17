@@ -7,6 +7,7 @@ import { buildGroups } from './neighborhoodGroups'
 import StatsBar from './components/StatsBar'
 import Sidebar from './components/Sidebar'
 import Map from './components/Map'
+import AdminPage from './components/AdminPage'
 import './index.css'
 
 export default function App() {
@@ -47,6 +48,7 @@ export default function App() {
   // Map of `${kind}-${id}` → { reaction, comment }
   const [reactions, setReactions] = useState({})
   const [showDisliked, setShowDisliked] = useState(false)
+  const [view, setView] = useState('map')  // 'map' | 'admin'
 
   const { filters, setFilter, reset } = useFilters()
 
@@ -320,6 +322,31 @@ export default function App() {
     setSelectedParishes(new Set())
   }, [])
 
+  if (view === 'admin') {
+    return (
+      <AdminPage
+        onBack={() => setView('map')}
+        selectedScraper={selectedScraper}
+        onSelectScraper={setSelectedScraper}
+        scraping={scraping}
+        scrapeStatus={scrapeStatus}
+        onScrape={handleScrape}
+        onViewListing={(listing) => {
+          // Seed into the current listings array if not present so the pin
+          // renders even when the active filters would exclude it.
+          setListings(prev => {
+            const key = `${listing.id}-${listing.listing_type}`
+            if (prev.some(l => `${l.id}-${l.listing_type}` === key)) return prev
+            return [...prev, listing]
+          })
+          setSelectedListing(listing)
+          setHighlightedListing(listing)
+          setView('map')
+        }}
+      />
+    )
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <StatsBar
@@ -333,6 +360,7 @@ export default function App() {
         selectedScraper={selectedScraper}
         onSelectScraper={setSelectedScraper}
         scrapeStatus={scrapeStatus}
+        onOpenAdmin={() => setView('admin')}
       />
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <Sidebar

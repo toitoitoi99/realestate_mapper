@@ -609,6 +609,12 @@ def init_db():
             ON listing_reactions(listing_kind, listing_id);
         CREATE INDEX IF NOT EXISTS idx_reactions_reaction
             ON listing_reactions(reaction);
+
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
     """)
     conn.commit()
 
@@ -1042,6 +1048,50 @@ def get_reactions() -> List[dict]:
     return [dict(r) for r in rows]
 
 
+def get_reactions_with_listings() -> List[dict]:
+    """Return every reaction joined with a subset of listing columns (for admin UI)."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT listing_kind, listing_id, reaction, comment, created_at, updated_at "
+        "FROM listing_reactions"
+    ).fetchall()
+    reactions = [dict(r) for r in rows]
+    if not reactions:
+        conn.close()
+        return []
+
+    sale_ids = [r["listing_id"] for r in reactions if r["listing_kind"] == "sale"]
+    rent_ids = [r["listing_id"] for r in reactions if r["listing_kind"] == "rent"]
+
+    cols = (
+        "id, title, url, source, source_id, price_amount, price_per_sqm, "
+        "size_sqm, rooms, neighborhood, parish, city, lat, lon, status, "
+        "scraped_at, flip_score, rent_score, deal_score, rarity_score"
+    )
+    # rentals has no rarity_score — select NULL to keep columns aligned
+    rent_cols = cols.replace("rarity_score", "NULL as rarity_score")
+
+    details: dict = {}
+    if sale_ids:
+        placeholders = ",".join("?" * len(sale_ids))
+        for r in conn.execute(f"SELECT {cols} FROM sales WHERE id IN ({placeholders})", sale_ids).fetchall():
+            details[("sale", r["id"])] = dict(r)
+    if rent_ids:
+        placeholders = ",".join("?" * len(rent_ids))
+        for r in conn.execute(f"SELECT {rent_cols} FROM rentals WHERE id IN ({placeholders})", rent_ids).fetchall():
+            details[("rent", r["id"])] = dict(r)
+    conn.close()
+
+    for r in reactions:
+        d = details.get((r["listing_kind"], r["listing_id"]))
+        if d:
+            d["listing_type"] = r["listing_kind"]
+            r["listing"] = d
+        else:
+            r["listing"] = None
+    return reactions
+
+
 def set_reaction(listing_kind: str, listing_id: int, reaction: str, comment: Optional[str]) -> dict:
     if listing_kind not in ("sale", "rent"):
         raise ValueError(f"invalid listing_kind: {listing_kind}")
@@ -1068,6 +1118,46 @@ def set_reaction(listing_kind: str, listing_id: int, reaction: str, comment: Opt
         ).fetchone()
     conn.close()
     return dict(row)
+
+
+def get_setting(key: str, default=None):
+    """Return the JSON-decoded value for `key`, or `default` if absent."""
+    conn = get_connection()
+    row = conn.execute("SELECT value_json FROM app_settings WHERE key=?", (key,)).fetchone()
+    conn.close()
+    if row is None:
+        return default
+    try:
+        return json.loads(row["value_json"])
+    except (json.JSONDecodeError, TypeError):
+        return default
+
+
+def set_setting(key: str, value) -> dict:
+    """Upsert a setting. `value` is JSON-serialized."""
+    now = datetime.utcnow().isoformat()
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO app_settings (key, value_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value_json=excluded.value_json,
+                updated_at=excluded.updated_at
+            """,
+            (key, json.dumps(value), now),
+        )
+    conn.close()
+    return {"key": key, "value": value, "updated_at": now}
+
+
+def delete_setting(key: str) -> bool:
+    conn = get_connection()
+    with conn:
+        cur = conn.execute("DELETE FROM app_settings WHERE key=?", (key,))
+    conn.close()
+    return cur.rowcount > 0
 
 
 def delete_reaction(listing_kind: str, listing_id: int) -> bool:

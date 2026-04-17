@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { useLanguage } from '../LanguageContext'
 import { BASE_MAPS } from '../baseMaps'
+import { useScoreBands } from '../ScoreBandsContext'
 
 export default function MapLegend({ baseMap, onChangeBaseMap, listingTypeFilter = 'sale', showDisliked, onToggleShowDisliked }) {
   const { t } = useLanguage()
+  const { bands } = useScoreBands()
   const [collapsed, setCollapsed] = useState(false)
   const [baseMapExpanded, setBaseMapExpanded] = useState(false)
 
@@ -58,15 +60,15 @@ export default function MapLegend({ baseMap, onChangeBaseMap, listingTypeFilter 
       <div className="flex flex-col gap-0.5">
         <div className="flex items-center gap-2">
           <span className="w-3 h-3 rounded-full shrink-0" style={{ background: '#10b981' }} />
-          <span className="text-gray-600">A (≥60)</span>
+          <span className="text-gray-600">A (≥{bands.A.min})</span>
           <span className="w-3 h-3 rounded-full shrink-0 ml-1" style={{ background: '#22c55e' }} />
-          <span className="text-gray-600">B (≥45)</span>
+          <span className="text-gray-600">B (≥{bands.B.min})</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-3 h-3 rounded-full shrink-0" style={{ background: '#f59e0b' }} />
-          <span className="text-gray-600">C (≥30)</span>
+          <span className="text-gray-600">C (≥{bands.C.min})</span>
           <span className="w-3 h-3 rounded-full shrink-0 ml-1" style={{ background: '#ef4444' }} />
-          <span className="text-gray-600">D (&lt;30)</span>
+          <span className="text-gray-600">D (&lt;{bands.C.min})</span>
         </div>
         <div className="flex items-center gap-2 mt-0.5">
           <span className="w-3 h-3 rounded-full shrink-0" style={{ background: '#94a3b8' }} />
