@@ -69,8 +69,8 @@ export default function StatsBar({
       )}
       <div className="flex gap-4 text-gray-600">
         <span><b className="text-gray-900">{fmt(stats.total_listings)}</b> {t.listings}</span>
-        <span><b className="text-gray-900">€{fmt(stats.avg_price_eur)}</b> {t.avgAsk}</span>
-        <span><b className="text-gray-900">€{fmt(stats.avg_price_per_sqm)}</b>{t.perSqmAsk}</span>
+        <span><b className="text-gray-900">€{fmt(stats.median_price_eur)}</b> {t.medianAsk}</span>
+        <span><b className="text-gray-900">€{fmt(stats.median_price_per_sqm)}</b>{t.perSqmAsk}</span>
         {ineStats && (
           <span title={`INE median transaction price · ${ineStats.period_label}`}>
             <b className="text-emerald-700">€{fmt(ineStats.median_price_per_sqm)}</b>

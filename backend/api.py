@@ -379,15 +379,25 @@ class StatsHandler(BaseHandler):
             for r in conn.execute(f"SELECT source, COUNT(*) as count FROM {table} GROUP BY source").fetchall():
                 by_source[r["source"]] = by_source.get(r["source"], 0) + r["count"]
 
-        avg_price = conn.execute(
-            "SELECT AVG(price_amount) as avg FROM sales WHERE price_amount IS NOT NULL"
-        ).fetchone()["avg"]
-        avg_psqm = conn.execute(
-            "SELECT AVG(price_per_sqm) as avg FROM sales WHERE price_per_sqm IS NOT NULL"
-        ).fetchone()["avg"]
-        avg_rent = conn.execute(
-            "SELECT AVG(price_amount) as avg FROM rentals WHERE price_amount IS NOT NULL"
-        ).fetchone()["avg"]
+        import statistics
+
+        # Median is robust to outliers from scraper glitches (e.g. prices
+        # parsed as concatenated digits), which can blow AVG up by orders
+        # of magnitude and make the banner unreadable.
+        sale_prices = [r["p"] for r in conn.execute(
+            "SELECT price_amount AS p FROM sales WHERE price_amount IS NOT NULL"
+        ).fetchall()]
+        sale_psqm = [r["p"] for r in conn.execute(
+            "SELECT price_per_sqm AS p FROM sales WHERE price_per_sqm IS NOT NULL"
+        ).fetchall()]
+        rent_prices = [r["p"] for r in conn.execute(
+            "SELECT price_amount AS p FROM rentals WHERE price_amount IS NOT NULL"
+        ).fetchall()]
+
+        median_price = statistics.median(sale_prices) if sale_prices else None
+        median_psqm = statistics.median(sale_psqm) if sale_psqm else None
+        median_rent = statistics.median(rent_prices) if rent_prices else None
+
         neighborhoods = conn.execute(
             "SELECT COUNT(*) as c FROM neighborhoods"
         ).fetchone()["c"]
@@ -401,9 +411,9 @@ class StatsHandler(BaseHandler):
             "sales_count": sales_count,
             "rentals_count": rentals_count,
             "by_source": by_source,
-            "avg_price_eur": round(avg_price, 2) if avg_price else None,
-            "avg_price_per_sqm": round(avg_psqm, 2) if avg_psqm else None,
-            "avg_rent_eur": round(avg_rent, 2) if avg_rent else None,
+            "median_price_eur": round(median_price, 2) if median_price else None,
+            "median_price_per_sqm": round(median_psqm, 2) if median_psqm else None,
+            "median_rent_eur": round(median_rent, 2) if median_rent else None,
             "neighborhood_count": neighborhoods,
             "last_scrape": last_scrape,
         })
