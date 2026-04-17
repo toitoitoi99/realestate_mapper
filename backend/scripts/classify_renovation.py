@@ -91,7 +91,9 @@ def _process_table(tbl: str, workers: int, skip_if_staged: bool,
         conn.close()
         return
 
-    client = anthropic.Anthropic()
+    # max_retries bumped well above the SDK default of 2 because vision
+    # calls are cheap-but-bursty and the 429 backoff windows are wide.
+    client = anthropic.Anthropic(max_retries=8)
     db_lock = threading.Lock()
     t0 = time.time()
     done = 0
@@ -102,12 +104,23 @@ def _process_table(tbl: str, workers: int, skip_if_staged: bool,
         image_urls = _parse_images(row["images"])
         if not image_urls:
             return row["id"], None, "no_images"
-        result = classify_listing(
-            image_urls=image_urls,
-            description=row["description"],
-            client=client,
-        )
-        return row["id"], result, result.error
+        # Outer retry loop: the SDK's built-in retries cover transient 429s
+        # within a single call, but if the pool hits the rate ceiling the
+        # SDK may still surface a 429. Back off and try again a few times.
+        last_err = None
+        for attempt in range(3):
+            result = classify_listing(
+                image_urls=image_urls,
+                description=row["description"],
+                client=client,
+            )
+            err = result.error or ""
+            if "429" not in err and "rate" not in err.lower():
+                return row["id"], result, result.error
+            last_err = err
+            # exponential backoff: 5s, 20s, 60s
+            time.sleep(5 * (4 ** attempt))
+        return row["id"], result, last_err
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(work, r) for r in rows]
@@ -146,8 +159,9 @@ def main():
     parser.add_argument("--listing-id", type=int, default=None,
                         help="Classify a single listing id (for debugging)")
     parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument("--workers", type=int, default=4,
-                        help="Concurrent API calls (default: 4)")
+    parser.add_argument("--workers", type=int, default=2,
+                        help="Concurrent API calls (default: 2). Raise "
+                             "carefully — 4+ tends to trip the 429 limit.")
     parser.add_argument("--skip-if-staged", action="store_true",
                         help="Skip listings whose building_stage is already "
                              "confidently set from text — saves API cost.")
