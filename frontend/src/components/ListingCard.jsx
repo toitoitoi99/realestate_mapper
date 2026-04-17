@@ -3,13 +3,16 @@ import GrantBadge from './GrantBadge'
 import { FlipRentBadges } from './FlipRentScorecard'
 import SourceLogo from './SourceLogo'
 import ReactionButtons from './ReactionButtons'
+import { matchBadges } from '../lib/matchBadges'
+import { personaInsight } from '../lib/personaInsight'
 
-export default function ListingCard({ listing, onSelect, highlighted, reaction, onSetReaction, onClearReaction }) {
+export default function ListingCard({ listing, onSelect, highlighted, reaction, onSetReaction, onClearReaction, preferences, personaId }) {
   const { t } = useLanguage()
   const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
 
   const isDisliked = reaction?.reaction === 'dislike'
   const isLiked = reaction?.reaction === 'like'
+  const insight = personaInsight(listing, personaId)
 
   return (
     <div
@@ -47,7 +50,9 @@ export default function ListingCard({ listing, onSelect, highlighted, reaction, 
       </div>
 
       <FlipRentBadges flip={listing.flip_score} rent={listing.rent_score} />
+      {insight && <PersonaInsightBadge insight={insight} />}
       <GrantBadge eligible={listing.grant_eligible} />
+      <MatchBadges badges={matchBadges(listing, preferences)} />
 
       {onSetReaction && (
         <div className="mt-2 flex items-center justify-between">
@@ -64,6 +69,42 @@ export default function ListingCard({ listing, onSelect, highlighted, reaction, 
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function PersonaInsightBadge({ insight }) {
+  const cls = insight.tone === 'good'
+    ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+    : insight.tone === 'bad'
+      ? 'bg-red-100 text-red-800 border-red-300'
+      : 'bg-blue-50 text-blue-800 border-blue-200'
+  return (
+    <div className="mt-1.5">
+      <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded border ${cls}`}>
+        <span className="uppercase tracking-wider text-[10px] opacity-75">{insight.label}</span>
+        <span>{insight.value}</span>
+      </span>
+    </div>
+  )
+}
+
+function MatchBadges({ badges }) {
+  if (!badges?.length) return null
+  return (
+    <div className="flex flex-wrap gap-1 mt-1.5">
+      {badges.map(b => (
+        <span
+          key={b.key}
+          className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200"
+          title="Matches your preferences"
+        >
+          <svg width="9" height="9" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+          </svg>
+          {b.label}
+        </span>
+      ))}
     </div>
   )
 }

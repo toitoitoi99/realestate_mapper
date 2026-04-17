@@ -419,6 +419,8 @@ export default function App() {
           reset={reset}
           listings={filteredListings}
           loading={loading}
+          preferences={profile?.preferences}
+          personaId={activePersonaId}
           selectedNeighborhood={selectedNeighborhood}
           onClearNeighborhood={() => setSelectedNeighborhood(null)}
           selectedListing={selectedListing}
