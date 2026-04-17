@@ -99,6 +99,7 @@ def _process_table(tbl: str, workers: int, skip_if_staged: bool,
     done = 0
     failed = 0
     class_counts: dict = {}
+    error_counts: dict = {}
 
     def work(row):
         image_urls = _parse_images(row["images"])
@@ -134,23 +135,30 @@ def _process_table(tbl: str, workers: int, skip_if_staged: bool,
             done += 1
             if err:
                 failed += 1
-                logger.debug(f"[{tbl}] id={lid} error: {err}")
+                # Bucket errors by the first word (the prefix emitted by
+                # renovation_classifier.py: api_error, json_parse_failed,
+                # invalid_class, no_images, all_image_downloads_failed).
+                kind = err.split(":", 1)[0].strip() or "unknown"
+                error_counts[kind] = error_counts.get(kind, 0) + 1
+                logger.warning(f"[{tbl}] id={lid} FAIL ({kind}): {err[:200]}")
             elif result is not None:
                 class_counts[result.renovation_class] = (
                     class_counts.get(result.renovation_class, 0) + 1
                 )
                 with db_lock:
                     save_result(conn, lid, result, table=tbl)
-            if done % 50 == 0:
+            if done % 25 == 0:
                 elapsed = time.time() - t0
                 rate = done / elapsed if elapsed > 0 else 0
                 logger.info(f"[{tbl}] {done}/{len(rows)} "
-                            f"({rate:.1f}/s, {failed} failed)")
+                            f"({rate:.1f}/s, {failed} failed, "
+                            f"errors={error_counts})")
 
     conn.close()
     elapsed = time.time() - t0
     logger.info(f"[{tbl}] done: {done}/{len(rows)} in {elapsed:.0f}s "
-                f"({failed} failed); classes: {class_counts}")
+                f"({failed} failed); classes: {class_counts}; "
+                f"errors: {error_counts}")
 
 
 def main():
