@@ -553,6 +553,30 @@ def init_db():
         if "building_stage" not in existing:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN building_stage TEXT")
             logger.info(f"[DB] Added building_stage column to {tbl}")
+
+        # Photo style/feature tags (persona feature, April 2026) — populated by
+        # backend/scorers/photo_tagger.py in the same Haiku call as renovation.
+        if "style_primary" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN style_primary TEXT")
+            logger.info(f"[DB] Added style_primary column to {tbl}")
+        if "style_secondary" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN style_secondary TEXT")
+            logger.info(f"[DB] Added style_secondary column to {tbl}")
+        if "light_level" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN light_level TEXT")
+            logger.info(f"[DB] Added light_level column to {tbl}")
+        if "color_palette" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN color_palette TEXT")
+            logger.info(f"[DB] Added color_palette column to {tbl}")
+        if "outdoor_type" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN outdoor_type TEXT")
+            logger.info(f"[DB] Added outdoor_type column to {tbl}")
+        if "floor_material" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN floor_material TEXT")
+            logger.info(f"[DB] Added floor_material column to {tbl}")
+        if "standout_features" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN standout_features TEXT")  # JSON array
+            logger.info(f"[DB] Added standout_features column to {tbl}")
     conn.commit()
 
     # Classification for construction_projects (private_dev / public_dev / renovation / minor)
@@ -878,6 +902,11 @@ def get_listings(
     min_flip_score: Optional[float] = None,
     min_rent_score: Optional[float] = None,
     region_profile: Optional[str] = None,
+    persona: Optional[str] = None,
+    bedrooms_min: Optional[int] = None,
+    style_primary: Optional[str] = None,
+    outdoor_required: bool = False,
+    max_renovation: Optional[str] = None,
     limit: int = 500,
     offset: int = 0,
 ) -> List[dict]:
@@ -938,16 +967,38 @@ def get_listings(
     if region_profile:
         clauses.append("region_profile=?"); params.append(region_profile)
 
+    # --- Persona-preference filters (NULL-tolerant: untagged listings remain) ---
+    if bedrooms_min is not None:
+        clauses.append("bedrooms>=?"); params.append(bedrooms_min)
+    if style_primary:
+        clauses.append("(style_primary IS NULL OR style_primary=?)")
+        params.append(style_primary)
+    if outdoor_required:
+        # Only exclude listings explicitly tagged as having no outdoor space.
+        clauses.append("(outdoor_type IS NULL OR outdoor_type<>'none')")
+    if max_renovation:
+        # Allow turnkey, then cosmetic, then full_renovation in order.
+        order = ["turnkey", "cosmetic", "full_renovation"]
+        if max_renovation in order:
+            allowed = order[: order.index(max_renovation) + 1]
+            placeholders = ",".join("?" * len(allowed))
+            clauses.append(f"(renovation_class IS NULL OR renovation_class IN ({placeholders}))")
+            params.extend(allowed)
+
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
-    # Shared columns for union queries (excludes sales-only rarity columns)
+    # Shared columns for union queries (excludes sales-only rarity columns).
+    # flip_factors/rent_factors are pulled so the persona engine can read the
+    # bundled positives; they're shipped to the client as well so the
+    # scorecard's signal panel has a fallback before its preview resolves.
     _shared_cols = (
         "id, source, source_id, url, status, price_amount, price_per_sqm, "
         "size_sqm, gross_area_sqm, rooms, bedrooms, bathrooms, floor, property_type, condition, "
         "title, address, postal_code, neighborhood, parish, district, city, "
         "lat, lon, images, hash_dedupe, hash_cross, hash_location, "
         "missing_since, previous_listing_id, description, scraped_at, "
-        "flip_score, rent_score, region_profile, reno_cost_estimate, "
+        "flip_score, rent_score, flip_factors, rent_factors, "
+        "region_profile, reno_cost_estimate, "
         "noise_score, light_score, layout_openness_score, "
         "social_housing_adj_score, dev_momentum_score, "
         "orientation, building_year, condominium_fee, energy_class, "
@@ -976,6 +1027,16 @@ def get_listings(
 
     conn.close()
     _load_low_density_territories()
+
+    # Compute per-listing persona_score if a known persona was passed.
+    # Imported lazily so this module stays free of the dependency for callers
+    # that don't use persona ranking.
+    persona_compute = None
+    if persona:
+        from persona_engine import is_known_persona, compute_persona_score
+        if is_known_persona(persona):
+            persona_compute = compute_persona_score
+
     result = []
     for r in rows:
         row = dict(r)
@@ -984,6 +1045,8 @@ def get_listings(
         row["grant_eligible"] = is_grant_eligible(row.get("city"), row.get("parish"))
         if grant_eligible and not row["grant_eligible"]:
             continue
+        if persona_compute is not None:
+            row["persona_score"] = persona_compute(row, persona)
         result.append(row)
     return result
 

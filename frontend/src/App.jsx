@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { fetchAreas, fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes, fetchSoldTrends, fetchNeighbourhoodTypologies, fetchParishStats, fetchScrapeRuns } from './api'
+import { useAuth } from './contexts/AuthContext'
+import { getPersona } from './lib/personas'
+import { preferencesToFilters } from './lib/preferences'
 import { useFilters } from './useFilters'
 import { CATEGORIES } from './projectCategories'
 import { DEFAULT_BASE_MAP } from './baseMaps'
@@ -7,6 +11,7 @@ import { buildGroups } from './neighborhoodGroups'
 import StatsBar from './components/StatsBar'
 import Sidebar from './components/Sidebar'
 import Map from './components/Map'
+import PersonaBar from './components/PersonaBar'
 import './index.css'
 
 export default function App() {
@@ -46,6 +51,23 @@ export default function App() {
   const [selectedParishes, setSelectedParishes] = useState(new Set())
 
   const { filters, setFilter, reset } = useFilters()
+
+  // Auth + persona — when a user is signed in with a persona, listings get
+  // a `persona_score` column and the map ranks/colors by that.
+  const { profile, signOut } = useAuth()
+  const navigate = useNavigate()
+  const activePersonaId = profile?.persona ?? null
+  const activePersona = getPersona(activePersonaId)
+  const lastAppliedPersona = useRef(null)
+
+  // When the persona changes, default the listing_type filter to its preferred view.
+  // Only fires on actual persona change, so the user can still toggle freely after.
+  useEffect(() => {
+    if (activePersona && lastAppliedPersona.current !== activePersonaId) {
+      setFilter('listing_type', activePersona.defaultView === 'rent' ? 'rent' : 'sale')
+      lastAppliedPersona.current = activePersonaId
+    }
+  }, [activePersonaId, activePersona, setFilter])
 
   useEffect(() => {
     fetchAreas().then(setAreas).catch(console.error)
@@ -95,12 +117,24 @@ export default function App() {
     if (min_flip_score > 0) apiFilters.min_flip_score = min_flip_score
     if (min_rent_score > 0) apiFilters.min_rent_score = min_rent_score
     if (selectedNeighborhood) apiFilters.neighborhood = selectedNeighborhood
+    if (activePersonaId) apiFilters.persona = activePersonaId
+    // Persona preferences (saved on profile) layer in as additional filters.
+    // UI filters always win — only fill in keys the UI hasn't set.
+    const prefFilters = preferencesToFilters(profile?.preferences)
+    for (const [k, v] of Object.entries(prefFilters)) {
+      if (apiFilters[k] === undefined || apiFilters[k] === '') apiFilters[k] = v
+    }
     fetchListings(apiFilters)
       .then(d => {
         let all = d.listings ?? []
         if (show_sold === 'active' || !show_sold) all = all.filter(l => l.status === 'active' || !l.status)
         else if (show_sold === 'sold') all = all.filter(l => l.status === 'sold' || l.status === 'reserved')
-        if (sort_by === 'flip') all = [...all].sort((a, b) => (b.flip_score ?? 0) - (a.flip_score ?? 0))
+        // When a persona is active and user hasn't picked a sort, default to persona_score desc
+        if (!sort_by && activePersonaId) {
+          all = [...all].sort((a, b) => (b.persona_score ?? -1) - (a.persona_score ?? -1))
+        }
+        if (sort_by === 'persona') all = [...all].sort((a, b) => (b.persona_score ?? -1) - (a.persona_score ?? -1))
+        else if (sort_by === 'flip') all = [...all].sort((a, b) => (b.flip_score ?? 0) - (a.flip_score ?? 0))
         else if (sort_by === 'rent_score') all = [...all].sort((a, b) => (b.rent_score ?? 0) - (a.rent_score ?? 0))
         else if (sort_by === 'price_asc') all = [...all].sort((a, b) => (a.price_amount ?? 0) - (b.price_amount ?? 0))
         else if (sort_by === 'price_desc') all = [...all].sort((a, b) => (b.price_amount ?? 0) - (a.price_amount ?? 0))
@@ -134,7 +168,7 @@ export default function App() {
       })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [filters, selectedNeighborhood])
+  }, [filters, selectedNeighborhood, activePersonaId, profile?.preferences])
 
   // Poll a single source's latest scrape_runs row; transition UI state
   // when it reaches a terminal status.
@@ -269,8 +303,23 @@ export default function App() {
     setSelectedParishes(new Set())
   }, [])
 
+  const { user } = useAuth()
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <PersonaBar
+        persona={activePersona}
+        preferences={profile?.preferences}
+        userEmail={user?.email}
+        listingCount={filteredListings.length}
+        totalCount={
+          // Match the active listing_type — sale/rent/all — so the ratio is meaningful.
+          filters.listing_type === 'rent' ? stats?.rentals_count
+            : filters.listing_type === 'all' ? stats?.total_listings
+            : stats?.sales_count
+        }
+        onEditProfile={() => navigate('/onboarding')}
+        onSignOut={async () => { await signOut(); navigate('/') }}
+      />
       <StatsBar
         stats={stats}
         ineStats={ineStats}

@@ -144,6 +144,24 @@ export async function fetchFlipRentPreview(id, {
   return api(`${BASE}/listings/${id}/score-preview?${params}`)
 }
 
+export async function extractImageTags(file) {
+  const fd = new FormData()
+  fd.append('file', file)
+  // Skip the JSON wrapper of `api()` — it sets headers we don't want for FormData.
+  const res = await fetch(`${BASE}/extract-image-tags`, { method: 'POST', body: fd })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body.error || `API ${res.status}`)
+  return body
+}
+
+export async function extractPreferences(message, currentPrefs = null) {
+  return api(`${BASE}/extract-preferences`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, current_prefs: currentPrefs }),
+  })
+}
+
 export async function addressLookup(address, lat, lon, listingType = 'sale') {
   return api(`${BASE}/address-lookup`, {
     method: 'POST',

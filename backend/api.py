@@ -134,6 +134,11 @@ class ListingsHandler(BaseHandler):
             min_flip_score=self.get_float_arg("min_flip_score"),
             min_rent_score=self.get_float_arg("min_rent_score"),
             region_profile=self.get_argument("region_profile", None),
+            persona=self.get_argument("persona", None),
+            bedrooms_min=self.get_int_arg("bedrooms_min"),
+            style_primary=self.get_argument("style_primary", None),
+            outdoor_required=self.get_argument("outdoor_required", None) == "true",
+            max_renovation=self.get_argument("max_renovation", None),
             limit=self.get_int_arg("limit", 10000),
             offset=self.get_int_arg("offset", 0),
         )
@@ -1017,10 +1022,68 @@ class FlipRentPreviewHandler(BaseHandler):  # noqa
         conn.close()
 
 
+class ExtractImageTagsHandler(BaseHandler):
+    """POST /api/extract-image-tags  (multipart: file=<image>)
+
+    Returns structured style tags extracted by Claude vision.
+    Used by the onboarding wizard to auto-fill preference chips from a
+    user-supplied reference image (mood board, magazine clip, etc.).
+    """
+
+    MAX_BYTES = 6 * 1024 * 1024  # 6 MB cap
+
+    async def post(self):
+        files = self.request.files.get("file") or []
+        if not files:
+            self.write_error_json("missing 'file' upload", 400); return
+        f = files[0]
+        if len(f.body) > self.MAX_BYTES:
+            self.write_error_json(
+                f"image too large (>{self.MAX_BYTES // (1024*1024)} MB)", 413
+            ); return
+
+        ctype = (f.content_type or "image/jpeg").split(";")[0].strip().lower()
+        # Lazy import — keeps module load light when feature unused.
+        from scorers.style_extractor import extract_style_tags
+        result = extract_style_tags(f.body, media_type=ctype)
+        if result.error:
+            status = 502 if result.error.startswith("api_error") else 400
+            self.write_error_json(result.error, status); return
+        self.write_json(result.to_dict())
+
+
+class ExtractPreferencesHandler(BaseHandler):
+    """POST /api/extract-preferences  body: {message: str, current_prefs?: dict}
+
+    Returns only the preference fields the user explicitly mentioned, plus a
+    one-line summary echo. The frontend shallow-merges these into the existing
+    wizard state so the user can keep refining.
+    """
+
+    def post(self):
+        try:
+            body = json.loads(self.request.body or b"{}")
+        except json.JSONDecodeError:
+            self.write_error_json("invalid JSON body", 400); return
+
+        message = (body.get("message") or "").strip()
+        if not message:
+            self.write_error_json("missing 'message'", 400); return
+
+        from scorers.preference_chat import extract_preferences
+        result = extract_preferences(message, current_prefs=body.get("current_prefs"))
+        if result.error:
+            status = 502 if result.error.startswith("api_error") else 400
+            self.write_error_json(result.error, status); return
+        self.write_json(result.to_dict())
+
+
 def make_app() -> tornado.web.Application:
     return tornado.web.Application(
         [
             (r"/api/listings",              ListingsHandler),
+            (r"/api/extract-image-tags",    ExtractImageTagsHandler),
+            (r"/api/extract-preferences",   ExtractPreferencesHandler),
             (r"/api/listings/(\d+)/score-preview",   FlipRentPreviewHandler),
             (r"/api/listings/(\d+)/compare",         ComparisonHandler),
             (r"/api/listings/(\d+)/address-history",  AddressHistoryHandler),
