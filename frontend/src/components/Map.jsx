@@ -10,6 +10,7 @@ import MapLegend from './MapLegend'
 import AddressSearch from './AddressSearch'
 import SoldTrendsLayer from './SoldTrendsLayer'
 import { BASE_MAPS } from '../baseMaps'
+import { useScoreBands } from '../ScoreBandsContext'
 import ListingPopupCard from './ListingPopupCard'
 
 const DEFAULT_CENTRE = [38.68, -9.10]
@@ -199,6 +200,7 @@ export default function Map({
   onLookupResult,
   listingTypeFilter = 'sale',
 }) {
+  const { bands } = useScoreBands()
   const isParishVisible = (name) => {
     if (!showNeighborhoods || !name) return true
     const group = parishToGroup?.[name]
@@ -315,13 +317,11 @@ export default function Map({
               // In 'all' mode, use each listing's own type.
               const useRent = listingTypeFilter === 'rent' || (listingTypeFilter === 'all' && isRent)
               const score = useRent ? l.rent_score : l.flip_score
-              // Band thresholds match backend/scoring_engine.py _rating():
-              // A ≥ 60, B ≥ 45, C ≥ 30, D < 30.
               if (score != null) {
-                if (score >= 60)      markerColor = { color: '#065f46', fillColor: '#10b981' }  // A — emerald
-                else if (score >= 45) markerColor = { color: '#166534', fillColor: '#22c55e' }  // B — green
-                else if (score >= 30) markerColor = { color: '#854d0e', fillColor: '#f59e0b' }  // C — amber
-                else                  markerColor = { color: '#991b1b', fillColor: '#ef4444' }  // D — red
+                if      (score >= bands.A.min) markerColor = { color: '#065f46', fillColor: '#10b981' }  // A — emerald
+                else if (score >= bands.B.min) markerColor = { color: '#166534', fillColor: '#22c55e' }  // B — green
+                else if (score >= bands.C.min) markerColor = { color: '#854d0e', fillColor: '#f59e0b' }  // C — amber
+                else                           markerColor = { color: '#991b1b', fillColor: '#ef4444' }  // D — red
               } else if (isRent) {
                 markerColor = { color: '#6b21a8', fillColor: '#a855f7' }
               } else {

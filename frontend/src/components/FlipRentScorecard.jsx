@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { fetchFlipRentPreview } from '../api'
+import { useScoreBands, ratingFor } from '../ScoreBandsContext'
 
 // Signal display metadata.
 const SIGNAL_LABELS = {
@@ -48,11 +49,11 @@ function ratingBarWidth(score) {
 /** Compact inline badge pair for the listing card. */
 export function FlipRentBadges({ flip, rent }) {
   if (flip == null && rent == null) return null
+  const { bands } = useScoreBands()
   const f = Math.round(flip || 0)
   const r = Math.round(rent || 0)
-  // Band thresholds match backend/scoring_engine.py _rating(): A ≥ 60, B ≥ 45, C ≥ 30.
-  const fRating = flip == null ? null : (flip >= 60 ? 'A' : flip >= 45 ? 'B' : flip >= 30 ? 'C' : 'D')
-  const rRating = rent == null ? null : (rent >= 60 ? 'A' : rent >= 45 ? 'B' : rent >= 30 ? 'C' : 'D')
+  const fRating = ratingFor(flip, bands)
+  const rRating = ratingFor(rent, bands)
   return (
     <div className="flex gap-1.5 mt-1.5">
       {flip != null && (
@@ -101,6 +102,7 @@ export default function FlipRentScorecard({ listing }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [expanded, setExpanded] = useState(false)
+  const { bands } = useScoreBands()
 
   const listingType = listing.listing_type || 'sale'
 
@@ -136,14 +138,8 @@ export default function FlipRentScorecard({ listing }) {
 
   const currentFlip = preview?.flip?.score ?? baselineFlip
   const currentRent = preview?.rent?.score ?? baselineRent
-  // Fallback rating (used only when preview hasn't resolved) mirrors
-  // backend/scoring_engine.py _rating(): A ≥ 60, B ≥ 45, C ≥ 30.
-  const currentFlipRating = preview?.flip?.rating ?? (
-    baselineFlip >= 60 ? 'A' : baselineFlip >= 45 ? 'B' : baselineFlip >= 30 ? 'C' : 'D'
-  )
-  const currentRentRating = preview?.rent?.rating ?? (
-    baselineRent >= 60 ? 'A' : baselineRent >= 45 ? 'B' : baselineRent >= 30 ? 'C' : 'D'
-  )
+  const currentFlipRating = preview?.flip?.rating ?? ratingFor(baselineFlip, bands)
+  const currentRentRating = preview?.rent?.rating ?? ratingFor(baselineRent, bands)
 
   const dFlip = preview ? (currentFlip - baselineFlip) : 0
   const dRent = preview ? (currentRent - baselineRent) : 0

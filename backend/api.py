@@ -597,11 +597,258 @@ class AddressHistoryHandler(BaseHandler):
 
 
 class ReactionsHandler(BaseHandler):
-    """GET /api/reactions — list all like/dislike reactions."""
+    """GET /api/reactions — list all like/dislike reactions.
+       Pass ?details=true to include the joined listing row."""
 
     def get(self):
-        reactions = db.get_reactions()
+        details = self.get_argument("details", "false").lower() in ("1", "true", "yes")
+        reactions = db.get_reactions_with_listings() if details else db.get_reactions()
         self.write_json({"count": len(reactions), "reactions": reactions})
+
+
+class AdminHealthHandler(BaseHandler):
+    """GET /api/admin/health — aggregate DB/source health snapshot."""
+
+    def get(self):
+        import os
+        import time
+        from datetime import datetime, timedelta
+
+        conn = db.get_connection()
+
+        def count(table):
+            try:
+                return conn.execute(f"SELECT COUNT(*) AS c FROM {table}").fetchone()["c"]
+            except Exception:
+                return None
+
+        tables = {t: count(t) for t in [
+            "sales", "rentals", "neighborhoods", "construction_projects",
+            "security_pois", "ine_stats", "listing_history",
+            "sold_transactions", "listing_reactions", "scrape_runs",
+            "amenity_ratings",
+        ]}
+
+        # DB file sizes (main + WAL + SHM)
+        db_path = str(db.DB_PATH)
+        def fsize(p):
+            try: return os.path.getsize(p)
+            except OSError: return 0
+        db_info = {
+            "path": db_path,
+            "size_bytes": fsize(db_path),
+            "wal_bytes":  fsize(db_path + "-wal"),
+            "shm_bytes":  fsize(db_path + "-shm"),
+        }
+
+        # Last scraped_at per source for sales and rentals
+        def per_source_last(table):
+            rows = conn.execute(
+                f"SELECT source, MAX(scraped_at) AS last_at, COUNT(*) AS n "
+                f"FROM {table} WHERE source IS NOT NULL GROUP BY source ORDER BY last_at DESC"
+            ).fetchall()
+            return [{"source": r["source"], "last_at": r["last_at"], "count": r["n"]} for r in rows]
+
+        last_updated = {
+            "sales_by_source":   per_source_last("sales"),
+            "rentals_by_source": per_source_last("rentals"),
+        }
+
+        # Construction + security POIs + INE latest
+        try:
+            row = conn.execute("SELECT MAX(fetched_at) AS t FROM construction_projects").fetchone()
+            last_updated["construction_projects"] = row["t"] if row else None
+        except Exception:
+            last_updated["construction_projects"] = None
+
+        try:
+            row = conn.execute("SELECT MAX(fetched_at) AS t FROM security_pois").fetchone()
+            last_updated["security_pois"] = row["t"] if row else None
+        except Exception:
+            last_updated["security_pois"] = None
+
+        try:
+            row = conn.execute(
+                "SELECT period_label, MAX(fetched_at) AS t FROM ine_stats WHERE is_latest=1"
+            ).fetchone()
+            last_updated["ine_stats"] = {
+                "period": row["period_label"] if row else None,
+                "fetched_at": row["t"] if row else None,
+            }
+        except Exception:
+            last_updated["ine_stats"] = None
+
+        # Stale active listings: scraped_at older than N days, status='active'
+        now = datetime.utcnow()
+        stale = {"sales": {}, "rentals": {}}
+        for table in ("sales", "rentals"):
+            for days in (7, 14, 30):
+                cutoff = (now - timedelta(days=days)).isoformat()
+                try:
+                    c = conn.execute(
+                        f"SELECT COUNT(*) AS c FROM {table} "
+                        f"WHERE (status IS NULL OR status='active') AND scraped_at < ?",
+                        (cutoff,),
+                    ).fetchone()["c"]
+                except Exception:
+                    c = None
+                stale[table][f"gt_{days}d"] = c
+
+        # Recent price changes from listing_history (price_amount only)
+        try:
+            rows = conn.execute(
+                "SELECT listing_id, listing_type, source, field, old_value, new_value, changed_at "
+                "FROM listing_history WHERE field='price_amount' "
+                "ORDER BY changed_at DESC LIMIT 25"
+            ).fetchall()
+            price_changes = []
+            for r in rows:
+                try:
+                    old_v = float(r["old_value"]) if r["old_value"] not in (None, "") else None
+                    new_v = float(r["new_value"]) if r["new_value"] not in (None, "") else None
+                    delta = (new_v - old_v) if (old_v is not None and new_v is not None) else None
+                except (ValueError, TypeError):
+                    old_v = new_v = delta = None
+                price_changes.append({
+                    **dict(r),
+                    "old_value_num": old_v,
+                    "new_value_num": new_v,
+                    "delta": delta,
+                })
+        except Exception:
+            price_changes = []
+
+        # Recent sold transactions
+        try:
+            rows = conn.execute(
+                "SELECT id, parish, price_amount, price_per_sqm, size_sqm, rooms, "
+                "property_type, sold_date, created_at "
+                "FROM sold_transactions "
+                "ORDER BY sold_date DESC, created_at DESC LIMIT 25"
+            ).fetchall()
+            recent_sold = [dict(r) for r in rows]
+        except Exception:
+            recent_sold = []
+
+        conn.close()
+
+        self.write_json({
+            "db": db_info,
+            "tables": tables,
+            "last_updated": last_updated,
+            "stale": stale,
+            "recent_price_changes": price_changes,
+            "recent_sold": recent_sold,
+            "generated_at": datetime.utcnow().isoformat(),
+        })
+
+
+DEFAULT_SCORE_BANDS = {
+    "A": {"min": 60, "label": "Top ~10%"},
+    "B": {"min": 45, "label": "Next ~25%"},
+    "C": {"min": 30, "label": "Next ~40%"},
+    "D": {"min":  0, "label": "Bottom ~25%"},
+}
+
+
+def _effective_score_bands():
+    """Merge any saved override into the defaults. Always returns all 4 bands."""
+    override = db.get_setting("score_bands") or {}
+    out = {}
+    for letter, cfg in DEFAULT_SCORE_BANDS.items():
+        merged = dict(cfg)
+        if isinstance(override.get(letter), dict) and "min" in override[letter]:
+            try:
+                merged["min"] = int(override[letter]["min"])
+            except (TypeError, ValueError):
+                pass
+        out[letter] = merged
+    return out
+
+
+def _validate_score_bands(bands):
+    """Ensure A_min > B_min > C_min >= 0, all integers in [0, 100]. Raises ValueError."""
+    if not isinstance(bands, dict):
+        raise ValueError("bands must be an object")
+    mins = {}
+    for letter in ("A", "B", "C"):
+        cfg = bands.get(letter)
+        if not isinstance(cfg, dict) or "min" not in cfg:
+            raise ValueError(f"band {letter} must have a 'min'")
+        try:
+            v = int(cfg["min"])
+        except (TypeError, ValueError):
+            raise ValueError(f"band {letter}.min must be an integer")
+        if v < 0 or v > 100:
+            raise ValueError(f"band {letter}.min out of range [0,100]")
+        mins[letter] = v
+    if not (mins["A"] > mins["B"] > mins["C"] >= 0):
+        raise ValueError(f"must satisfy A_min > B_min > C_min >= 0 (got {mins})")
+    return {L: {"min": mins[L], "label": DEFAULT_SCORE_BANDS[L]["label"]} for L in ("A", "B", "C")}
+
+
+class AdminTuningHandler(BaseHandler):
+    """GET /api/admin/tuning — read-only snapshot of all scoring/tuning constants.
+
+    Introspects the backend modules so the admin page never drifts from code.
+    """
+
+    def get(self):
+        import region_profiles as rp
+        import scoring_engine as se
+
+        payload = {
+            "score_bands": _effective_score_bands(),
+            "rarity_weights": {
+                "price_dev":      0.25,
+                "typology":       0.15,
+                "size_dev":       0.10,
+                "condition":      0.20,
+                "scarcity":       0.10,
+                "prop_type":      0.05,
+                "vs_sold":        0.10,
+                "new_build_prox": 0.05,
+            },
+            "log1p_scale": {
+                "k": se.LOG1P_K,
+                "signals": sorted(list(se.LOG1P_SIGNALS)),
+                "description": "Concave log1p transform applied to fat-tailed signals before weighting.",
+            },
+            "blocker_penalty_scale": se.BLOCKER_PENALTY_SCALE,
+            "profiles": rp.PROFILES,
+            "reno_cost_tiers": rp.RENO_COST_TIERS,
+            "scraper_cooldown_sec": 3 * 60,
+        }
+        self.write_json(payload)
+
+
+class ScoreBandsHandler(BaseHandler):
+    """GET  /api/settings/score-bands — public, lightweight (frontend consumes this).
+       PUT  /api/admin/tuning/score-bands — save override (admin).
+       DELETE /api/admin/tuning/score-bands — reset to defaults (admin).
+    """
+
+    def get(self):
+        self.write_json({"score_bands": _effective_score_bands()})
+
+    def put(self):
+        try:
+            payload = json.loads(self.request.body or b"{}")
+        except json.JSONDecodeError:
+            self.write_error_json("invalid JSON body", 400)
+            return
+        bands = payload.get("score_bands") or payload
+        try:
+            cleaned = _validate_score_bands(bands)
+        except ValueError as e:
+            self.write_error_json(str(e), 400)
+            return
+        db.set_setting("score_bands", cleaned)
+        self.write_json({"score_bands": _effective_score_bands()})
+
+    def delete(self):
+        db.delete_setting("score_bands")
+        self.write_json({"score_bands": _effective_score_bands()})
 
 
 class ReactionDetailHandler(BaseHandler):
@@ -1079,6 +1326,10 @@ def make_app() -> tornado.web.Application:
             (r"/api/address-lookup",        AddressLookupHandler),
             (r"/api/reactions",             ReactionsHandler),
             (r"/api/reactions/(sale|rent)/(\d+)", ReactionDetailHandler),
+            (r"/api/admin/tuning",          AdminTuningHandler),
+            (r"/api/admin/health",          AdminHealthHandler),
+            (r"/api/admin/tuning/score-bands", ScoreBandsHandler),
+            (r"/api/settings/score-bands",  ScoreBandsHandler),
         ],
         debug=False,
     )
