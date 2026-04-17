@@ -5,7 +5,7 @@ import { getPersona, PERSONAS } from '../lib/personas'
 import {
   EMPTY_PREFERENCES, STYLE_OPTIONS, RENOVATION_OPTIONS, BEDROOM_OPTIONS,
 } from '../lib/preferences'
-import { extractImageTags, extractPreferences } from '../api'
+import { extractImageTags, extractPreferences, fetchPreferenceDeck } from '../api'
 import { supabase } from '../lib/supabase'
 
 // Single-page preference wizard. Persona at top, then chips/ranges for the
@@ -30,6 +30,14 @@ export default function Onboarding() {
   const [chatBusy, setChatBusy] = useState(false)
   const [chatSummary, setChatSummary] = useState(null)
   const [chatError, setChatError] = useState(null)
+
+  // Swipe deck state — loaded lazily once a persona is picked.
+  const [deck, setDeck] = useState(null)               // array of items, or null until loaded
+  const [deckIndex, setDeckIndex] = useState(0)
+  const [deckLoading, setDeckLoading] = useState(false)
+  const [deckError, setDeckError] = useState(null)
+  const [swipeCounts, setSwipeCounts] = useState({ like: 0, dislike: 0, skip: 0 })
+  const lastDeckPersonaRef = useRef(null)
 
   async function sendChat() {
     const msg = chatInput.trim()
@@ -107,6 +115,51 @@ export default function Onboarding() {
   useEffect(() => {
     if (!loading && !user) navigate('/')
   }, [loading, user, navigate])
+
+  // Fetch a fresh deck whenever the persona changes (don't refetch on every
+  // chip nudge — would be jarring mid-swipe).
+  useEffect(() => {
+    if (!personaId) return
+    if (lastDeckPersonaRef.current === personaId) return
+    lastDeckPersonaRef.current = personaId
+    setDeckLoading(true); setDeckError(null)
+    fetchPreferenceDeck({
+      persona: personaId,
+      n: 12,
+      minPrice: prefs.budget?.min ?? undefined,
+      maxPrice: prefs.budget?.max ?? undefined,
+      minSqm:   prefs.size?.min ?? undefined,
+      maxSqm:   prefs.size?.max ?? undefined,
+    }).then(res => {
+      setDeck(res.items || [])
+      setDeckIndex(0)
+      setSwipeCounts({ like: 0, dislike: 0, skip: 0 })
+    }).catch(e => {
+      setDeckError(e.message || 'Could not load deck')
+    }).finally(() => setDeckLoading(false))
+  }, [personaId])
+
+  async function recordSwipe(item, action) {
+    if (!item) return
+    setSwipeCounts(prev => ({ ...prev, [action]: prev[action] + 1 }))
+    setDeckIndex(i => i + 1)
+    if (!user) return
+    // Fire-and-forget; conflict on (user_id, listing_source, listing_id)
+    // means this listing was already swiped — overwrite the action.
+    try {
+      await supabase.from('profile_swipes').upsert({
+        user_id:        user.id,
+        listing_id:     item.id,
+        listing_source: item.source,
+        listing_type:   item.listing_type,
+        action,
+        persona:        personaId || null,
+        axis_bins:      item.axis_bins || {},
+      }, { onConflict: 'user_id,listing_source,listing_id' })
+    } catch (e) {
+      console.warn('swipe save failed:', e)
+    }
+  }
 
   const persona = getPersona(personaId)
 
@@ -350,6 +403,22 @@ export default function Onboarding() {
           />
         </Section>
 
+        {/* Swipe deck — only after a persona is picked, since axes depend on it */}
+        {personaId && (
+          <Section
+            title="Quick swipes"
+            subtitle="Tap like or skip on a few listings — helps us understand what you're drawn to.">
+            <SwipeDeck
+              loading={deckLoading}
+              error={deckError}
+              deck={deck}
+              index={deckIndex}
+              counts={swipeCounts}
+              onAction={recordSwipe}
+            />
+          </Section>
+        )}
+
         {error && <p className="mt-6 text-sm text-red-600">{error}</p>}
 
         <div className="mt-8 flex items-center gap-3">
@@ -413,6 +482,96 @@ function Tag({ children }) {
     <span className="inline-block px-2 py-0.5 rounded-full text-[11px] bg-blue-100 text-blue-800">
       {children}
     </span>
+  )
+}
+
+function SwipeDeck({ loading, error, deck, index, counts, onAction }) {
+  if (loading) {
+    return <div className="text-sm text-gray-500">Loading listings\u2026</div>
+  }
+  if (error) {
+    return <div className="text-sm text-red-600">{error}</div>
+  }
+  if (!deck || deck.length === 0) {
+    return <div className="text-sm text-gray-500">No matching listings to swipe on yet.</div>
+  }
+  if (index >= deck.length) {
+    const total = counts.like + counts.dislike + counts.skip
+    return (
+      <div className="text-center py-6">
+        <div className="text-3xl">🎉</div>
+        <div className="mt-2 text-sm font-medium text-gray-900">All done</div>
+        <div className="mt-1 text-xs text-gray-500">
+          {counts.like} liked &middot; {counts.dislike} passed &middot; {counts.skip} skipped &nbsp;({total} total)
+        </div>
+      </div>
+    )
+  }
+
+  const item = deck[index]
+  const fmt = (n) => (n == null ? '—' : new Intl.NumberFormat('en-US').format(Math.round(n)))
+  const priceLabel = item.listing_type === 'rent'
+    ? `€${fmt(item.price_amount)}/mo`
+    : `€${fmt(item.price_amount)}`
+
+  return (
+    <div>
+      <div className="rounded-lg overflow-hidden border border-gray-200 bg-white">
+        {item.image_url ? (
+          <img
+            src={item.image_url}
+            alt={item.neighborhood || 'Listing'}
+            className="w-full h-56 object-cover"
+            loading="lazy"
+          />
+        ) : (
+          <div className="w-full h-56 bg-gray-100 grid place-items-center text-gray-400 text-sm">
+            No photo
+          </div>
+        )}
+        <div className="p-4">
+          <div className="flex items-baseline justify-between">
+            <div className="text-lg font-semibold text-gray-900">{priceLabel}</div>
+            <div className="text-xs text-gray-500">{item.parish || item.neighborhood || ''}</div>
+          </div>
+          <div className="mt-1 text-xs text-gray-600">
+            {item.size_sqm ? `${Math.round(item.size_sqm)} m²` : ''}
+            {item.bedrooms != null ? ` \u00b7 ${item.bedrooms}-bed` : ''}
+            {item.style_primary ? ` \u00b7 ${item.style_primary}` : ''}
+            {item.outdoor_type && item.outdoor_type !== 'none' ? ` \u00b7 ${item.outdoor_type}` : ''}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => onAction(item, 'dislike')}
+          className="flex-1 rounded-md border border-gray-300 bg-white hover:bg-red-50 hover:border-red-400 hover:text-red-700 px-3 py-2 text-sm font-medium text-gray-700"
+        >
+          ✕ Pass
+        </button>
+        <button
+          type="button"
+          onClick={() => onAction(item, 'skip')}
+          className="rounded-md border border-gray-300 bg-white hover:bg-gray-50 px-3 py-2 text-sm text-gray-500"
+        >
+          Skip
+        </button>
+        <button
+          type="button"
+          onClick={() => onAction(item, 'like')}
+          className="flex-1 rounded-md border border-blue-300 bg-blue-50 hover:bg-blue-100 hover:border-blue-500 px-3 py-2 text-sm font-medium text-blue-700"
+        >
+          ♥ Like
+        </button>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+        <span>{index + 1} of {deck.length}</span>
+        <span>{counts.like} liked &middot; {counts.dislike} passed</span>
+      </div>
+    </div>
   )
 }
 

@@ -1344,6 +1344,35 @@ class ExtractImageTagsHandler(BaseHandler):
         self.write_json(result.to_dict())
 
 
+class PreferenceDeckHandler(BaseHandler):
+    """GET /api/preference-deck
+
+    Returns a stratified list of listings for the onboarding swipe deck.
+    Persona drives both the sale/rent table choice and the axes used to
+    maximise variety across consecutive cards.
+    """
+
+    MAX_N = 20
+    DEFAULT_N = 12
+
+    def get(self):
+        from preference_deck import build_deck
+        n = self.get_int_arg("n", self.DEFAULT_N) or self.DEFAULT_N
+        n = max(4, min(n, self.MAX_N))
+        items = build_deck(
+            persona=self.get_argument("persona", None),
+            n=n,
+            city=self.get_argument("city", None),
+            parish=self.get_argument("parish", None),
+            min_price=self.get_float_arg("min_price"),
+            max_price=self.get_float_arg("max_price"),
+            min_sqm=self.get_float_arg("min_sqm"),
+            max_sqm=self.get_float_arg("max_sqm"),
+            seed=self.get_int_arg("seed"),
+        )
+        self.write_json({"count": len(items), "items": items})
+
+
 class ExtractPreferencesHandler(BaseHandler):
     """POST /api/extract-preferences  body: {message: str, current_prefs?: dict}
 
@@ -1376,6 +1405,7 @@ def make_app() -> tornado.web.Application:
             (r"/api/listings",              ListingsHandler),
             (r"/api/extract-image-tags",    ExtractImageTagsHandler),
             (r"/api/extract-preferences",   ExtractPreferencesHandler),
+            (r"/api/preference-deck",       PreferenceDeckHandler),
             (r"/api/listings/(\d+)/score-preview",   FlipRentPreviewHandler),
             (r"/api/listings/(\d+)/compare",         ComparisonHandler),
             (r"/api/listings/(\d+)/address-history",  AddressHistoryHandler),
