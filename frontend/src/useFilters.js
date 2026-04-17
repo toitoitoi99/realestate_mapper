@@ -38,5 +38,11 @@ export function useFilters() {
 
   const reset = useCallback(() => setFilters(DEFAULT_FILTERS), [])
 
-  return { filters, setFilter, reset }
+  // Replace the whole filter object — used by saved searches to swap an
+  // entire stored filter set in one go. Unspecified keys fall back to defaults.
+  const replaceAll = useCallback((next) => {
+    setFilters({ ...DEFAULT_FILTERS, ...(next || {}) })
+  }, [])
+
+  return { filters, setFilter, reset, replaceAll }
 }

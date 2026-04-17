@@ -3,8 +3,11 @@
 //   - the preference chips that are actually filtering the map (so the user
 //     can see WHY they're seeing what they're seeing)
 //   - a "matching N of M" count so the impact is concrete
+//   - Saved searches dropdown
 //   - Edit profile + Sign out
 // Returns null when no persona is set.
+
+import SavedSearches from './SavedSearches'
 
 const RENO_LABEL = {
   turnkey: 'Turnkey only',
@@ -36,6 +39,8 @@ function activeChips(prefs) {
 export default function PersonaBar({
   persona, preferences, userEmail, listingCount, totalCount,
   onEditProfile, onSignOut,
+  // Saved-searches plumbing
+  filters, area, onApplySavedSearch,
 }) {
   if (!persona) return null
   const chips = activeChips(preferences)
@@ -73,6 +78,12 @@ export default function PersonaBar({
       )}
 
       <span className="ml-auto flex items-center gap-3">
+        <SavedSearches
+          filters={filters}
+          area={area}
+          onApply={onApplySavedSearch}
+        />
+        <span className="text-gray-400">|</span>
         <button
           onClick={onEditProfile}
           className="text-blue-700 hover:underline"

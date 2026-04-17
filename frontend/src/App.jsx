@@ -55,11 +55,11 @@ export default function App() {
   const [showDisliked, setShowDisliked] = useState(false)
   const [view, setView] = useState('map')  // 'map' | 'admin'
 
-  const { filters, setFilter, reset } = useFilters()
+  const { filters, setFilter, reset, replaceAll: replaceAllFilters } = useFilters()
 
   // Auth + persona — when a user is signed in with a persona, listings get
   // a `persona_score` column and the map ranks/colors by that.
-  const { profile, signOut } = useAuth()
+  const { profile, user, signOut } = useAuth()
   const navigate = useNavigate()
   const activePersonaId = profile?.persona ?? null
   const activePersona = getPersona(activePersonaId)
@@ -356,8 +356,6 @@ export default function App() {
     setSelectedParishes(new Set())
   }, [])
 
-  const { user } = useAuth()
-
   if (view === 'admin') {
     return (
       <AdminPage
@@ -396,6 +394,12 @@ export default function App() {
             : filters.listing_type === 'all' ? stats?.total_listings
             : stats?.sales_count
         }
+        filters={filters}
+        area={currentArea}
+        onApplySavedSearch={({ filters: f, area }) => {
+          replaceAllFilters(f)
+          if (area) setCurrentArea(area)
+        }}
         onEditProfile={() => navigate('/onboarding')}
         onSignOut={async () => { await signOut(); navigate('/') }}
       />
