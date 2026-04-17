@@ -414,9 +414,14 @@ def estimate_reno_cost(
 
     # Condition → tier
     cond = (condition or "").lower()
-    if cond in ("new", "novo"):
+    if cond in ("new", "novo", "renovated"):
         return 0.0
-    if "refurb" in cond or "ruína" in cond or "needs_work" in cond:
+    if (
+        "refurb" in cond
+        or "ruína" in cond
+        or "needs_work" in cond
+        or cond == "to_renovate"
+    ):
         tier = "gut"
     elif cond in ("used", "usado", "good", "bom"):
         tier = "mid"
