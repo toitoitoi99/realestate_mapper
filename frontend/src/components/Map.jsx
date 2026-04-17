@@ -313,10 +313,11 @@ export default function Map({
             } else if (isSold || isReserved) {
               markerColor = { color: '#000000', fillColor: '#1f2937' }
             } else {
-              // Pick score based on view: rent_score for rentals, flip_score for sales.
-              // In 'all' mode, use each listing's own type.
+              // Persona score wins when present (server-computed). Otherwise:
+              // rent_score for rentals, flip_score for sales (in 'all' mode use the listing's own type).
               const useRent = listingTypeFilter === 'rent' || (listingTypeFilter === 'all' && isRent)
-              const score = useRent ? l.rent_score : l.flip_score
+              const fallback = useRent ? l.rent_score : l.flip_score
+              const score = l.persona_score != null ? l.persona_score : fallback
               if (score != null) {
                 if      (score >= bands.A.min) markerColor = { color: '#065f46', fillColor: '#10b981' }  // A — emerald
                 else if (score >= bands.B.min) markerColor = { color: '#166534', fillColor: '#22c55e' }  // B — green
