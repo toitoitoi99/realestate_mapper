@@ -41,6 +41,8 @@ export default function PersonaBar({
   onEditProfile, onSignOut,
   // Saved-searches plumbing
   filters, area, onApplySavedSearch,
+  // Onboarding-swipe override is influencing the rank — 0 when not active
+  swipeCount = 0,
 }) {
   if (!persona) return null
   const chips = activeChips(preferences)
@@ -74,6 +76,17 @@ export default function PersonaBar({
           <span className="text-gray-400">·</span>{' '}
           <span className="font-medium text-gray-700">{listingCount.toLocaleString('pt-PT')}</span>
           <span className="text-gray-400"> of {totalCount.toLocaleString('pt-PT')}</span> matching
+        </span>
+      )}
+
+      {swipeCount > 0 && (
+        <span
+          className="inline-flex items-center gap-1 text-purple-700"
+          title={`${swipeCount} of your onboarding swipes are nudging the persona ranking`}
+        >
+          <span className="text-gray-400">·</span>
+          <span aria-hidden="true">✨</span>
+          <span>Personalized by {swipeCount}&nbsp;swipe{swipeCount === 1 ? '' : 's'}</span>
         </span>
       )}
 
