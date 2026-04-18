@@ -207,6 +207,10 @@ export default function Map({
   onToggleShowDisliked,
   onLookupResult,
   listingTypeFilter = 'sale',
+  // True when the persona-weight override is active (>= MIN_SWIPES_FOR_OVERRIDE
+  // signals). Switches the band-stroke color to purple so users see the
+  // ranking has been personalized by their swipes/reactions.
+  personalized = false,
 }) {
   const { bands } = useScoreBands()
   const isParishVisible = (name) => {
@@ -327,10 +331,14 @@ export default function Map({
               const fallback = useRent ? l.rent_score : l.flip_score
               const score = l.persona_score != null ? l.persona_score : fallback
               if (score != null) {
-                if      (score >= bands.A.min) markerColor = { color: '#065f46', fillColor: '#10b981' }  // A — emerald
-                else if (score >= bands.B.min) markerColor = { color: '#166534', fillColor: '#22c55e' }  // B — green
-                else if (score >= bands.C.min) markerColor = { color: '#854d0e', fillColor: '#f59e0b' }  // C — amber
-                else                           markerColor = { color: '#991b1b', fillColor: '#ef4444' }  // D — red
+                // Personalised mode: keep the band fill so ranking quality
+                // is still visible, but swap the stroke for a strong purple
+                // ring — signals "this score reflects YOUR preferences."
+                const personalStroke = '#7c3aed'  // violet-600
+                if      (score >= bands.A.min) markerColor = { color: personalized ? personalStroke : '#065f46', fillColor: '#10b981' }
+                else if (score >= bands.B.min) markerColor = { color: personalized ? personalStroke : '#166534', fillColor: '#22c55e' }
+                else if (score >= bands.C.min) markerColor = { color: personalized ? personalStroke : '#854d0e', fillColor: '#f59e0b' }
+                else                           markerColor = { color: personalized ? personalStroke : '#991b1b', fillColor: '#ef4444' }
               } else if (isRent) {
                 markerColor = { color: '#6b21a8', fillColor: '#a855f7' }
               } else {
@@ -370,7 +378,13 @@ export default function Map({
                 key={l.id}
                 center={[l.lat, l.lon]}
                 radius={mSize.radius}
-                pathOptions={{ ...markerColor, fillOpacity, weight: (isSold || isReserved) ? mSize.weight + 1 : mSize.weight }}
+                pathOptions={{
+                  ...markerColor,
+                  fillOpacity,
+                  // Thicker stroke when personalised so the purple ring is
+                  // actually visible at typical zoom levels.
+                  weight: (isSold || isReserved) ? mSize.weight + 1 : (personalized ? mSize.weight + 1 : mSize.weight),
+                }}
                 eventHandlers={{ click: handleClick }}
               >
                 {popupContent}
