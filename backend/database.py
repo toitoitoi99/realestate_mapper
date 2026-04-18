@@ -926,6 +926,7 @@ def get_listings(
     min_rent_score: Optional[float] = None,
     region_profile: Optional[str] = None,
     persona: Optional[str] = None,
+    weights_override: Optional[dict] = None,
     bedrooms_min: Optional[int] = None,
     style_primary: Optional[str] = None,
     outdoor_required: bool = False,
@@ -1073,7 +1074,7 @@ def get_listings(
         if grant_eligible and not row["grant_eligible"]:
             continue
         if persona_compute is not None:
-            row["persona_score"] = persona_compute(row, persona)
+            row["persona_score"] = persona_compute(row, persona, weights_override=weights_override)
         result.append(row)
     return result
 

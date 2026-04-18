@@ -18,6 +18,7 @@ import sqlite3
 from typing import Iterable, List, Optional
 
 import database as db
+from persona_engine import PERSONA_BUNDLE_SOURCE
 
 # How many candidates to pull from SQLite before stratifying. Larger = better
 # axis coverage; smaller = faster. 600 is plenty for a 12-card deck.
@@ -221,7 +222,21 @@ def _first_image(images_field) -> Optional[str]:
     return None
 
 
-def _shape_for_response(row: dict, bins: dict, listing_type: str) -> dict:
+def _factor_positives(row: dict, persona_id: Optional[str]) -> dict:
+    """Pull the per-signal positives bundle the persona will score on. Stored
+    on each swipe so we can later derive weight deltas (signals that were high
+    on liked listings get boosted, vice versa for dislikes)."""
+    src_col = PERSONA_BUNDLE_SOURCE.get(persona_id or "", "flip_factors")
+    raw = row.get(src_col)
+    if not raw:
+        return {}
+    try:
+        return (json.loads(raw).get("bundle") or {}).get("positives") or {}
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _shape_for_response(row: dict, bins: dict, listing_type: str, persona_id: Optional[str]) -> dict:
     """Return only what the deck card needs to render + log a swipe."""
     return {
         "id":             row["id"],
@@ -243,6 +258,7 @@ def _shape_for_response(row: dict, bins: dict, listing_type: str) -> dict:
         "outdoor_type":   row.get("outdoor_type"),
         "renovation_class": row.get("renovation_class"),
         "axis_bins":      {k: v for k, v in bins.items() if v is not None},
+        "factor_positives": _factor_positives(row, persona_id),
     }
 
 
@@ -321,7 +337,7 @@ def build_deck(
                 # Put it back at the bottom; try later.
                 cells[key].insert(0, (row, bins))
                 continue
-            picked.append(_shape_for_response(row, bins, listing_type))
+            picked.append(_shape_for_response(row, bins, listing_type, persona))
             picked_bins.append(bins)
             seen_ids.add(row["id"])
             progressed = True
@@ -343,7 +359,7 @@ def build_deck(
         for row, bins in remaining:
             if len(picked) >= n:
                 break
-            picked.append(_shape_for_response(row, bins, listing_type))
+            picked.append(_shape_for_response(row, bins, listing_type, persona))
             seen_ids.add(row["id"])
 
     return picked

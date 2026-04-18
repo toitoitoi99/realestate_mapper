@@ -155,6 +155,7 @@ export default function Onboarding() {
         action,
         persona:        personaId || null,
         axis_bins:      item.axis_bins || {},
+        factor_positives: item.factor_positives || {},
       }, { onConflict: 'user_id,listing_source,listing_id' })
     } catch (e) {
       console.warn('swipe save failed:', e)
