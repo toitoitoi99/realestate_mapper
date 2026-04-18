@@ -546,6 +546,7 @@ export default function App() {
           onChangeBaseMap={setBaseMap}
           listings={filteredListings}
           listingTypeFilter={filters.listing_type || 'sale'}
+          personalized={Boolean(personaWeights)}
           neighborhoods={neighborhoods}
           onSelectNeighborhood={handleSelectNeighborhood}
           selectedNeighborhood={selectedNeighborhood}
