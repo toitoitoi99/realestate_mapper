@@ -945,6 +945,7 @@ def get_listings(
     min_rent_score: Optional[float] = None,
     region_profile: Optional[str] = None,
     persona: Optional[str] = None,
+    weights_override: Optional[dict] = None,
     bedrooms_min: Optional[int] = None,
     style_primary: Optional[str] = None,
     outdoor_required: bool = False,
@@ -1047,7 +1048,11 @@ def get_listings(
         "days_on_market, price_drop_count, photo_analysis, "
         "renovation_class, renovation_confidence, "
         "renovation_cost_estimate_eur_per_sqm, renovation_evidence, "
-        "renovation_needs, building_stage"
+        "renovation_needs, building_stage, "
+        # Photo style tags (persona feature) — needed client-side so cards
+        # can render "Modern \u2713 / Terrace \u2713" match badges.
+        "style_primary, style_secondary, light_level, color_palette, "
+        "outdoor_type, floor_material, standout_features"
     )
 
     if table:
@@ -1088,7 +1093,7 @@ def get_listings(
         if grant_eligible and not row["grant_eligible"]:
             continue
         if persona_compute is not None:
-            row["persona_score"] = persona_compute(row, persona)
+            row["persona_score"] = persona_compute(row, persona, weights_override=weights_override)
         result.append(row)
     return result
 

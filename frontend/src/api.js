@@ -162,6 +162,21 @@ export async function extractPreferences(message, currentPrefs = null) {
   })
 }
 
+export async function fetchPreferenceDeck({ persona, n = 12, city, parish, minPrice, maxPrice, minSqm, maxSqm, seed } = {}) {
+  const p = new URLSearchParams()
+  if (persona)            p.set('persona', persona)
+  if (n)                  p.set('n', String(n))
+  if (city)               p.set('city', city)
+  if (parish)             p.set('parish', parish)
+  if (minPrice != null)   p.set('min_price', String(minPrice))
+  if (maxPrice != null)   p.set('max_price', String(maxPrice))
+  if (minSqm != null)     p.set('min_sqm', String(minSqm))
+  if (maxSqm != null)     p.set('max_sqm', String(maxSqm))
+  if (seed != null)       p.set('seed', String(seed))
+  const qs = p.toString()
+  return api(`${BASE}/preference-deck${qs ? `?${qs}` : ''}`)
+}
+
 export async function fetchReactions({ details = false } = {}) {
   const params = details ? '?details=true' : ''
   return api(`${BASE}/reactions${params}`)

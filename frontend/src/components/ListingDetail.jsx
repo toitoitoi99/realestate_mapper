@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useLanguage } from '../LanguageContext'
 import { translateDescription, fetchListingDetail, fetchNearbyProjects } from '../api'
 import FlipRentScorecard from './FlipRentScorecard'
+import PersonaInsightCard from './PersonaInsightCard'
 import AmenityRating from './AmenityRating'
 import ListingComparison from './ListingComparison'
 import SourceLogo from './SourceLogo'
@@ -49,7 +50,7 @@ function PctBadge({ pct, invert = false }) {
   return <span className={`text-xs font-semibold ${color}`}>{sign}{pct.toFixed(0)}%</span>
 }
 
-export default function ListingDetail({ listing, onBack, parishStats, ineStats, reaction, onSetReaction, onClearReaction }) {
+export default function ListingDetail({ listing, onBack, parishStats, ineStats, reaction, onSetReaction, onClearReaction, personaId }) {
   const { lang, t } = useLanguage()
   const isAdmin = useIsAdmin()
   const [descriptionEn, setDescriptionEn] = useState(null)
@@ -365,6 +366,9 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats, 
             )}
           </div>
 
+          {/* Persona-specific KPI breakdown — only when a persona is active */}
+          {personaId && <PersonaInsightCard listing={listing} personaId={personaId} />}
+
           {/* Flip + Rent scorecard (replaces Deal Score / Property Score / Rarity) */}
           <FlipRentScorecard listing={listing} />
 
@@ -472,7 +476,7 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats, 
             rel="noopener noreferrer"
             className="block text-center bg-blue-600 text-white text-sm font-medium py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors"
           >
-            {t.viewOnSource} ({listing.source})
+            {t.viewOnSource} {listing.source} →
           </a>
 
           {/* Scraped date */}

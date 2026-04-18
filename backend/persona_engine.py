@@ -52,20 +52,29 @@ def is_known_persona(persona_id: Optional[str]) -> bool:
     return persona_id in PERSONA_WEIGHTS
 
 
-def compute_persona_score(row: dict, persona_id: str) -> Optional[float]:
+def compute_persona_score(
+    row: dict,
+    persona_id: str,
+    weights_override: Optional[dict] = None,
+) -> Optional[float]:
     """Compute a 0-100 persona score for a listing row.
 
     Reads positives from the row's flip_factors / rent_factors JSON blob,
     re-normalises the weights over the signals that actually have a value
     (so listings missing a signal aren't penalised below the others).
 
+    `weights_override` lets the caller pass a swipe-derived weight vector
+    (computed in frontend/src/lib/swipeWeights.js) so the same scoring path
+    can express "your prior + your demonstrated preferences." Falls back to
+    PERSONA_WEIGHTS when not provided.
+
     Returns None if no relevant signals are present.
     """
-    weights = PERSONA_WEIGHTS.get(persona_id)
+    weights = weights_override or PERSONA_WEIGHTS.get(persona_id)
     if not weights:
         return None
 
-    src_col = PERSONA_BUNDLE_SOURCE[persona_id]
+    src_col = PERSONA_BUNDLE_SOURCE.get(persona_id, "flip_factors")
     raw = row.get(src_col)
     if not raw:
         return None

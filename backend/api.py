@@ -100,6 +100,31 @@ class BaseHandler(tornado.web.RequestHandler):
             raise tornado.web.HTTPError(400, reason=f"Invalid value for '{name}': expected number")
 
 
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _parse_weights_arg(raw):
+    """Parse a JSON-encoded {signal: weight} map from a query string. Returns
+    None on missing/invalid input — caller falls back to persona defaults."""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    out = {}
+    for k, v in parsed.items():
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if f < 0:
+            continue
+        out[str(k)] = f
+    return out or None
+
+
 # ── Handlers ─────────────────────────────────────────────────────────────────
 
 class ListingsHandler(BaseHandler):
@@ -135,6 +160,7 @@ class ListingsHandler(BaseHandler):
             min_rent_score=self.get_float_arg("min_rent_score"),
             region_profile=self.get_argument("region_profile", None),
             persona=self.get_argument("persona", None),
+            weights_override=_parse_weights_arg(self.get_argument("weights", None)),
             bedrooms_min=self.get_int_arg("bedrooms_min"),
             style_primary=self.get_argument("style_primary", None),
             outdoor_required=self.get_argument("outdoor_required", None) == "true",
@@ -1397,6 +1423,35 @@ class ExtractImageTagsHandler(BaseHandler):
         self.write_json(result.to_dict())
 
 
+class PreferenceDeckHandler(BaseHandler):
+    """GET /api/preference-deck
+
+    Returns a stratified list of listings for the onboarding swipe deck.
+    Persona drives both the sale/rent table choice and the axes used to
+    maximise variety across consecutive cards.
+    """
+
+    MAX_N = 20
+    DEFAULT_N = 12
+
+    def get(self):
+        from preference_deck import build_deck
+        n = self.get_int_arg("n", self.DEFAULT_N) or self.DEFAULT_N
+        n = max(4, min(n, self.MAX_N))
+        items = build_deck(
+            persona=self.get_argument("persona", None),
+            n=n,
+            city=self.get_argument("city", None),
+            parish=self.get_argument("parish", None),
+            min_price=self.get_float_arg("min_price"),
+            max_price=self.get_float_arg("max_price"),
+            min_sqm=self.get_float_arg("min_sqm"),
+            max_sqm=self.get_float_arg("max_sqm"),
+            seed=self.get_int_arg("seed"),
+        )
+        self.write_json({"count": len(items), "items": items})
+
+
 class ExtractPreferencesHandler(BaseHandler):
     """POST /api/extract-preferences  body: {message: str, current_prefs?: dict}
 
@@ -1429,6 +1484,7 @@ def make_app() -> tornado.web.Application:
             (r"/api/listings",              ListingsHandler),
             (r"/api/extract-image-tags",    ExtractImageTagsHandler),
             (r"/api/extract-preferences",   ExtractPreferencesHandler),
+            (r"/api/preference-deck",       PreferenceDeckHandler),
             (r"/api/listings/(\d+)/score-preview",   FlipRentPreviewHandler),
             (r"/api/listings/(\d+)/compare",         ComparisonHandler),
             (r"/api/listings/(\d+)/address-history",  AddressHistoryHandler),
