@@ -5,8 +5,11 @@
 //   - a "matching N of M" count so the impact is concrete
 //   - Saved searches dropdown
 //   - Edit profile + Sign out
-// Returns null when no persona is set.
+// When no persona is set (e.g. user clicked "Skip to map"), renders a
+// minimal "Browsing as guest · Back to home" bar so there's always a path
+// back to the landing / sign-in page.
 
+import { useNavigate } from 'react-router-dom'
 import SavedSearches from './SavedSearches'
 
 const RENO_LABEL = {
@@ -44,7 +47,22 @@ export default function PersonaBar({
   // Onboarding-swipe override is influencing the rank — 0 when not active
   swipeCount = 0,
 }) {
-  if (!persona) return null
+  const navigate = useNavigate()
+  if (!persona) {
+    return (
+      <div className="bg-gray-50 border-b border-gray-200 px-4 py-1.5 text-xs text-gray-700 flex items-center gap-3">
+        <span>Browsing as guest</span>
+        <span className="ml-auto">
+          <button
+            onClick={() => navigate('/')}
+            className="text-blue-700 hover:underline"
+          >
+            &larr; Back to home
+          </button>
+        </span>
+      </div>
+    )
+  }
   const chips = activeChips(preferences)
 
   return (
