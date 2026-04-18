@@ -36,6 +36,7 @@ function activeChips(prefs) {
   if (prefs.style) out.push(prefs.style)
   if (prefs.outdoor_required) out.push('outdoor')
   if (prefs.max_renovation) out.push(RENO_LABEL[prefs.max_renovation] || prefs.max_renovation)
+  if (prefs.strict_tags) out.push('strict tags')
   return out
 }
 

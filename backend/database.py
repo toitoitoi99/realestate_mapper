@@ -950,6 +950,7 @@ def get_listings(
     style_primary: Optional[str] = None,
     outdoor_required: bool = False,
     max_renovation: Optional[str] = None,
+    strict_tags: bool = False,
     limit: int = 500,
     offset: int = 0,
 ) -> List[dict]:
@@ -1010,22 +1011,36 @@ def get_listings(
     if region_profile:
         clauses.append("region_profile=?"); params.append(region_profile)
 
-    # --- Persona-preference filters (NULL-tolerant: untagged listings remain) ---
+    # --- Persona-preference filters ---
+    # Default: NULL-tolerant — untagged listings stay visible until the photo
+    # tagger reaches them. When `strict_tags` is set, drop the IS NULL escape
+    # hatch so only listings we have positive evidence for show up. Useful
+    # once tag coverage is high enough that "untagged" is the exception.
     if bedrooms_min is not None:
         clauses.append("bedrooms>=?"); params.append(bedrooms_min)
     if style_primary:
-        clauses.append("(style_primary IS NULL OR style_primary=?)")
+        if strict_tags:
+            clauses.append("style_primary=?")
+        else:
+            clauses.append("(style_primary IS NULL OR style_primary=?)")
         params.append(style_primary)
     if outdoor_required:
-        # Only exclude listings explicitly tagged as having no outdoor space.
-        clauses.append("(outdoor_type IS NULL OR outdoor_type<>'none')")
+        if strict_tags:
+            # Must be explicitly tagged with a non-"none" outdoor type.
+            clauses.append("(outdoor_type IS NOT NULL AND outdoor_type<>'none')")
+        else:
+            # Only exclude listings explicitly tagged as having no outdoor space.
+            clauses.append("(outdoor_type IS NULL OR outdoor_type<>'none')")
     if max_renovation:
         # Allow turnkey, then cosmetic, then full_renovation in order.
         order = ["turnkey", "cosmetic", "full_renovation"]
         if max_renovation in order:
             allowed = order[: order.index(max_renovation) + 1]
             placeholders = ",".join("?" * len(allowed))
-            clauses.append(f"(renovation_class IS NULL OR renovation_class IN ({placeholders}))")
+            if strict_tags:
+                clauses.append(f"renovation_class IN ({placeholders})")
+            else:
+                clauses.append(f"(renovation_class IS NULL OR renovation_class IN ({placeholders}))")
             params.extend(allowed)
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""

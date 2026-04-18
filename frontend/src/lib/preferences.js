@@ -17,6 +17,11 @@ export const EMPTY_PREFERENCES = {
   style: null,
   outdoor_required: false,
   max_renovation: null,
+  // When true, only show listings the photo-tagger has already labelled —
+  // hides untagged ones rather than letting them through. Useful once tag
+  // coverage is high (today only ~17% of sales have style tags, so off
+  // by default).
+  strict_tags: false,
 }
 
 export const STYLE_OPTIONS = [
@@ -57,5 +62,6 @@ export function preferencesToFilters(prefs) {
   if (prefs.style)                out.style_primary = prefs.style
   if (prefs.outdoor_required)     out.outdoor_required = true
   if (prefs.max_renovation)       out.max_renovation = prefs.max_renovation
+  if (prefs.strict_tags)          out.strict_tags = true
   return out
 }

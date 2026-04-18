@@ -402,6 +402,23 @@ export default function Onboarding() {
             allowClear
             withHints
           />
+
+          <div className="mt-5 pt-4 border-t border-gray-100">
+            <label className="flex items-start gap-2 cursor-pointer text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={prefs.strict_tags}
+                onChange={e => update('strict_tags', e.target.checked)}
+                className="h-4 w-4 mt-0.5"
+              />
+              <span>
+                Strict tag match
+                <span className="block text-xs text-gray-500 mt-0.5 leading-snug">
+                  Hide listings we haven&rsquo;t photo-tagged yet (we&rsquo;re tagging them in batches; coverage grows over time). Off by default so you don&rsquo;t miss matches.
+                </span>
+              </span>
+            </label>
+          </div>
         </Section>
 
         {/* Swipe deck — only after a persona is picked, since axes depend on it */}
