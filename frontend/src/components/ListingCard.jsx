@@ -5,8 +5,9 @@ import SourceLogo from './SourceLogo'
 import ReactionButtons from './ReactionButtons'
 import { matchBadges } from '../lib/matchBadges'
 import { personaInsight } from '../lib/personaInsight'
+import WhyThisRanked from './WhyThisRanked'
 
-export default function ListingCard({ listing, onSelect, highlighted, reaction, onSetReaction, onClearReaction, preferences, personaId, scoreShow = 'both' }) {
+export default function ListingCard({ listing, onSelect, highlighted, reaction, onSetReaction, onClearReaction, preferences, personaId, personaWeights, scoreShow = 'both' }) {
   const { t } = useLanguage()
   const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
 
@@ -50,7 +51,12 @@ export default function ListingCard({ listing, onSelect, highlighted, reaction, 
       </div>
 
       <FlipRentBadges flip={listing.flip_score} rent={listing.rent_score} show={scoreShow} />
-      {insight && <PersonaInsightBadge insight={insight} />}
+      {insight && (
+        <PersonaInsightBadge
+          insight={insight}
+          why={personaId ? <WhyThisRanked listing={listing} personaId={personaId} weights={personaWeights} /> : null}
+        />
+      )}
       <GrantBadge eligible={listing.grant_eligible} />
       <MatchBadges badges={matchBadges(listing, preferences)} />
 
@@ -73,18 +79,19 @@ export default function ListingCard({ listing, onSelect, highlighted, reaction, 
   )
 }
 
-function PersonaInsightBadge({ insight }) {
+function PersonaInsightBadge({ insight, why }) {
   const cls = insight.tone === 'good'
     ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
     : insight.tone === 'bad'
       ? 'bg-red-100 text-red-800 border-red-300'
       : 'bg-blue-50 text-blue-800 border-blue-200'
   return (
-    <div className="mt-1.5">
+    <div className="mt-1.5 inline-flex items-center">
       <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded border ${cls}`}>
         <span className="uppercase tracking-wider text-[10px] opacity-75">{insight.label}</span>
         <span>{insight.value}</span>
       </span>
+      {why}
     </div>
   )
 }

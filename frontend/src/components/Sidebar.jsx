@@ -35,7 +35,7 @@ export default function Sidebar({
   showSecurity, onToggleSecurity, securityPois,
   selectedParishes, onToggleSelectedParish, onClearSelectedParishes,
   reactionFor, onSetReaction, onClearReaction,
-  preferences, personaId,
+  preferences, personaId, personaWeights,
   scoreShow = 'both',
 }) {
   const { t } = useLanguage()
@@ -270,6 +270,7 @@ export default function Sidebar({
                 onClearReaction={onClearReaction}
                 preferences={preferences}
                 personaId={personaId}
+                personaWeights={personaWeights}
                 scoreShow={scoreShow}
               />
               <button
@@ -304,6 +305,7 @@ export default function Sidebar({
                           onClearReaction={onClearReaction}
                           preferences={preferences}
                           personaId={personaId}
+                personaWeights={personaWeights}
                           scoreShow={scoreShow}
                         />
                         <span className="absolute top-1 right-1 text-[10px] text-gray-400 bg-white/80 rounded px-1">
@@ -331,6 +333,7 @@ export default function Sidebar({
               onClearReaction={onClearReaction}
               preferences={preferences}
               personaId={personaId}
+              personaWeights={personaWeights}
               scoreShow={scoreShow}
             />
           )
