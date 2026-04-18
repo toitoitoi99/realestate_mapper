@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLanguage } from '../LanguageContext'
 import { fetchListingComparison, fetchAddressHistory } from '../api'
+import { personaInsight } from '../lib/personaInsight'
 
-export default function ListingComparison({ listing, radiusM: externalRadius, onRadiusChange }) {
+export default function ListingComparison({ listing, radiusM: externalRadius, onRadiusChange, personaId }) {
   const { t } = useLanguage()
   const [internalRadius, setInternalRadius] = useState(500)
   const radiusM = externalRadius ?? internalRadius
@@ -156,19 +157,23 @@ export default function ListingComparison({ listing, radiusM: externalRadius, on
               <summary className="text-xs text-blue-600 cursor-pointer hover:underline">
                 {t.showComparables || 'Show comparable listings'} ({comparables.length})
               </summary>
-              <div className="mt-2 space-y-1.5 max-h-40 overflow-y-auto">
-                {comparables.slice(0, 15).map(c => (
-                  <div key={`${c.source}-${c.id}`} className="flex items-center gap-2 text-xs text-gray-600 py-1 border-b border-gray-100">
-                    <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[10px] font-medium w-12 text-center">
-                      {c.distance_m}m
-                    </span>
-                    <span className="flex-1 truncate">{c.address || 'Unknown'}</span>
-                    <span className="font-medium whitespace-nowrap">€{c.price_per_sqm?.toLocaleString()}/m²</span>
-                    {c.status === 'sold' && (
-                      <span className="bg-red-100 text-red-700 px-1 py-0.5 rounded text-[10px]">sold</span>
-                    )}
-                  </div>
-                ))}
+              <div className="mt-2 space-y-1.5 max-h-60 overflow-y-auto">
+                {comparables.slice(0, 15).map(c => {
+                  const insight = personaInsight(c, personaId)
+                  return (
+                    <div key={`${c.source}-${c.id}`} className="flex items-center gap-2 text-xs text-gray-600 py-1 border-b border-gray-100">
+                      <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[10px] font-medium w-12 text-center shrink-0">
+                        {c.distance_m}m
+                      </span>
+                      <span className="flex-1 truncate min-w-0">{c.address || 'Unknown'}</span>
+                      <span className="font-medium whitespace-nowrap text-gray-500">€{c.price_per_sqm?.toLocaleString()}/m²</span>
+                      {insight && <ComparableInsight insight={insight} />}
+                      {c.status === 'sold' && (
+                        <span className="bg-red-100 text-red-700 px-1 py-0.5 rounded text-[10px]">sold</span>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </details>
           </>
@@ -290,5 +295,22 @@ export default function ListingComparison({ listing, radiusM: externalRadius, on
         </div>
       )}
     </div>
+  )
+}
+
+function ComparableInsight({ insight }) {
+  const cls = insight.tone === 'good'
+    ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+    : insight.tone === 'bad'
+      ? 'bg-red-100 text-red-700 border-red-200'
+      : 'bg-blue-50 text-blue-800 border-blue-200'
+  return (
+    <span
+      title={`${insight.label}: ${insight.value}`}
+      className={`inline-flex items-baseline gap-1 px-1.5 py-0.5 rounded border text-[10px] font-semibold whitespace-nowrap ${cls}`}
+    >
+      <span className="opacity-70 uppercase tracking-wider text-[9px]">{insight.label}</span>
+      <span>{insight.value}</span>
+    </span>
   )
 }

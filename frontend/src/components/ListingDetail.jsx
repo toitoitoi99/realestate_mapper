@@ -402,7 +402,12 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats, 
           )}
 
           {/* ============ PRICE COMPARISON (MOVED UP) ============ */}
-          <ListingComparison listing={listing} radiusM={radiusM} onRadiusChange={setRadiusM} />
+          <ListingComparison
+            listing={listing}
+            radiusM={radiusM}
+            onRadiusChange={setRadiusM}
+            personaId={personaId}
+          />
 
           {/* Property details */}
           {details.length > 0 && (
