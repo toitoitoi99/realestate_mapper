@@ -488,6 +488,7 @@ export default function App() {
           loading={loading}
           preferences={profile?.preferences}
           personaId={activePersonaId}
+          personaWeights={personaWeights}
           selectedNeighborhood={selectedNeighborhood}
           onClearNeighborhood={() => setSelectedNeighborhood(null)}
           selectedListing={selectedListing}
