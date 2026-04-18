@@ -270,7 +270,20 @@ def classify_listing(
     raw = "".join(
         block.text for block in resp.content if getattr(block, "type", None) == "text"
     ).strip()
+    return parse_classifier_raw_text(raw, text_hint=text_hint, images_used=len(downloaded))
 
+
+def parse_classifier_raw_text(
+    raw: str,
+    text_hint: Optional[str] = None,
+    images_used: int = 0,
+) -> RenovationResult:
+    """Parse the classifier's raw JSON response into a RenovationResult.
+
+    Separated from classify_listing so the batch driver can reuse the same
+    validation against model output without duplicating logic.
+    """
+    raw = (raw or "").strip()
     # Strip code fences if present
     raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.MULTILINE).strip()
 
@@ -283,7 +296,7 @@ def classify_listing(
             cost_estimate_eur_per_sqm=None,
             evidence=[],
             text_hint=text_hint,
-            images_used=len(downloaded),
+            images_used=images_used,
             error=f"json_parse_failed: {raw[:200]}",
         )
 
@@ -295,7 +308,7 @@ def classify_listing(
             cost_estimate_eur_per_sqm=None,
             evidence=[],
             text_hint=text_hint,
-            images_used=len(downloaded),
+            images_used=images_used,
             error=f"invalid_class: {rc}",
         )
 
@@ -306,7 +319,7 @@ def classify_listing(
         evidence=list(parsed.get("evidence", []))[:5],
         needs=_sanitize_needs(parsed.get("needs")),
         text_hint=text_hint,
-        images_used=len(downloaded),
+        images_used=images_used,
     )
 
 
