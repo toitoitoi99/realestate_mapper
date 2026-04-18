@@ -476,7 +476,6 @@ export default function App() {
         onChangeArea={setCurrentArea}
         selectedScraper={selectedScraper}
         onSelectScraper={setSelectedScraper}
-        scrapeStatus={scrapeStatus}
         onOpenAdmin={() => setView('admin')}
       />
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>

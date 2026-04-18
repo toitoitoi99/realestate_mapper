@@ -9,44 +9,10 @@ export const SCRAPER_OPTIONS = [
   { key: 'casa_sapo',  label: 'Casa Sapo' },
 ]
 
-const SCRAPER_LABEL = Object.fromEntries(SCRAPER_OPTIONS.map(s => [s.key, s.label]))
-
-function ScrapeStatus({ status, t }) {
-  if (!status) return null
-  const label = SCRAPER_LABEL[status.source] ?? status.source
-  let dot = '', text = '', cls = 'text-gray-600'
-  if (status.status === 'running') {
-    dot = '🟡'
-    cls = 'text-amber-700'
-    const found = status.listings_found ?? 0
-    text = `${t.statusRunning} · ${label}${found ? ` · ${found} ${t.statusFound}` : ''}`
-  } else if (status.status === 'completed') {
-    dot = '🟢'
-    cls = 'text-emerald-700'
-    const nw = status.listings_new ?? 0
-    const er = status.errors ?? 0
-    text = `${label} · ${nw} ${t.statusNew}${er ? ` · ${er} ${t.statusErrors}` : ''}`
-  } else if (status.status === 'failed') {
-    dot = '🔴'
-    cls = 'text-red-700'
-    text = `${t.statusFailed} · ${label}`
-  } else {
-    return null
-  }
-  return (
-    <span
-      className={`text-xs ${cls} whitespace-nowrap`}
-      title={status.notes || `${status.status} (${status.started_at ?? ''})`}
-    >
-      {dot} {text}
-    </span>
-  )
-}
-
 export default function StatsBar({
   stats, ineStats, onScrape, scraping,
   areas, currentArea, onChangeArea,
-  selectedScraper, onSelectScraper, scrapeStatus,
+  selectedScraper, onSelectScraper,
   onOpenAdmin,
 }) {
   const { lang, toggle, t } = useLanguage()
@@ -84,14 +50,8 @@ export default function StatsBar({
         <span><b className="text-gray-900">{fmt(stats.neighborhood_count)}</b> {t.neighborhoods}</span>
       </div>
 
-      {stats.last_scrape && (
-        <span className="text-gray-400 text-xs ml-auto hidden md:block">
-          {t.lastScrape} {new Date(stats.last_scrape).toLocaleDateString()}
-        </span>
-      )}
-
       {/* Language toggle */}
-      <div className="flex rounded overflow-hidden border border-gray-200 text-xs ml-auto md:ml-0">
+      <div className="flex rounded overflow-hidden border border-gray-200 text-xs ml-auto">
         {['en', 'pt'].map(l => (
           <button
             key={l}
@@ -103,10 +63,8 @@ export default function StatsBar({
         ))}
       </div>
 
-      {/* Compact scrape status + admin entry point.
-          Full picker, history, and per-source controls live in the admin page. */}
+      {/* Admin entry point. Full picker, history, and per-source controls live in the admin page. */}
       <div className="flex items-center gap-2">
-        <ScrapeStatus status={scrapeStatus} t={t} />
         <button
           onClick={onOpenAdmin}
           aria-label="Open admin"
