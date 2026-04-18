@@ -203,23 +203,27 @@ def _difference(a: dict, b: dict) -> int:
     return sum(1 for k, v in a.items() if v is not None and b.get(k) is not None and b[k] != v)
 
 
-def _first_image(images_field) -> Optional[str]:
+def _parse_images(images_field) -> List[str]:
     if not images_field:
-        return None
-    if isinstance(images_field, list) and images_field:
-        return images_field[0]
+        return []
+    if isinstance(images_field, list):
+        return [u for u in images_field if u]
     if isinstance(images_field, str):
         s = images_field.strip()
         if s.startswith("["):
             try:
                 arr = json.loads(s)
-                return arr[0] if arr else None
-            except (json.JSONDecodeError, IndexError):
-                return None
+                return [u for u in arr if u]
+            except (json.JSONDecodeError, TypeError):
+                return []
         if s.startswith("http"):
-            # Comma-separated URLs.
-            return s.split(",")[0].strip()
-    return None
+            return [u.strip() for u in s.split(",") if u.strip()]
+    return []
+
+
+def _first_image(images_field) -> Optional[str]:
+    urls = _parse_images(images_field)
+    return urls[0] if urls else None
 
 
 def _factor_positives(row: dict, persona_id: Optional[str]) -> dict:
@@ -254,6 +258,7 @@ def _shape_for_response(row: dict, bins: dict, listing_type: str, persona_id: Op
         "lat":            row["lat"],
         "lon":            row["lon"],
         "image_url":      _first_image(row.get("images")),
+        "image_urls":     _parse_images(row.get("images"))[:5],
         "style_primary":  row.get("style_primary"),
         "outdoor_type":   row.get("outdoor_type"),
         "renovation_class": row.get("renovation_class"),

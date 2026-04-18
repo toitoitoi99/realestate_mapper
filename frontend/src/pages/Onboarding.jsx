@@ -503,6 +503,70 @@ function Tag({ children }) {
   )
 }
 
+function PhotoCarousel({ urls, alt }) {
+  const [photoIndex, setPhotoIndex] = useState(0)
+  const photos = urls && urls.length > 0 ? urls : null
+
+  if (!photos) {
+    return (
+      <div className="w-full h-56 bg-gray-100 grid place-items-center text-gray-400 text-sm">
+        No photo
+      </div>
+    )
+  }
+
+  const prev = (e) => {
+    e.stopPropagation()
+    setPhotoIndex(i => (i - 1 + photos.length) % photos.length)
+  }
+  const next = (e) => {
+    e.stopPropagation()
+    setPhotoIndex(i => (i + 1) % photos.length)
+  }
+
+  return (
+    <div className="relative w-full h-56 bg-gray-100 overflow-hidden">
+      <img
+        key={photoIndex}
+        src={photos[photoIndex]}
+        alt={alt}
+        className="w-full h-full object-cover"
+        loading="lazy"
+      />
+      {photos.length > 1 && (
+        <>
+          <button
+            type="button"
+            onClick={prev}
+            className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center text-sm leading-none"
+            aria-label="Previous photo"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            onClick={next}
+            className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center text-sm leading-none"
+            aria-label="Next photo"
+          >
+            ›
+          </button>
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
+            {photos.map((_, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setPhotoIndex(i) }}
+                className={`w-1.5 h-1.5 rounded-full transition-colors ${i === photoIndex ? 'bg-white' : 'bg-white/50'}`}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function SwipeDeck({ loading, error, deck, index, counts, onAction }) {
   if (loading) {
     return <div className="text-sm text-gray-500">Loading listings\u2026</div>
@@ -531,22 +595,14 @@ function SwipeDeck({ loading, error, deck, index, counts, onAction }) {
   const priceLabel = item.listing_type === 'rent'
     ? `€${fmt(item.price_amount)}/mo`
     : `€${fmt(item.price_amount)}`
+  const photos = item.image_urls && item.image_urls.length > 0
+    ? item.image_urls
+    : (item.image_url ? [item.image_url] : [])
 
   return (
     <div>
       <div className="rounded-lg overflow-hidden border border-gray-200 bg-white">
-        {item.image_url ? (
-          <img
-            src={item.image_url}
-            alt={item.neighborhood || 'Listing'}
-            className="w-full h-56 object-cover"
-            loading="lazy"
-          />
-        ) : (
-          <div className="w-full h-56 bg-gray-100 grid place-items-center text-gray-400 text-sm">
-            No photo
-          </div>
-        )}
+        <PhotoCarousel key={index} urls={photos} alt={item.neighborhood || 'Listing'} />
         <div className="p-4">
           <div className="flex items-baseline justify-between">
             <div className="text-lg font-semibold text-gray-900">{priceLabel}</div>
