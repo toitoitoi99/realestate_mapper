@@ -13,6 +13,7 @@ import Sidebar from './components/Sidebar'
 import Map from './components/Map'
 import PersonaBar from './components/PersonaBar'
 import AdminPage from './components/AdminPage'
+import MyListingsPage from './components/MyListingsPage'
 import './index.css'
 
 export default function App() {
@@ -53,7 +54,7 @@ export default function App() {
   // Map of `${kind}-${id}` → { reaction, comment }
   const [reactions, setReactions] = useState({})
   const [showDisliked, setShowDisliked] = useState(false)
-  const [view, setView] = useState('map')  // 'map' | 'admin'
+  const [view, setView] = useState('map')  // 'map' | 'admin' | 'my-listings'
 
   const { filters, setFilter, reset } = useFilters()
 
@@ -358,6 +359,19 @@ export default function App() {
 
   const { user } = useAuth()
 
+  const viewListingOnMap = (listing) => {
+    // Seed into the current listings array if not present so the pin
+    // renders even when the active filters would exclude it.
+    setListings(prev => {
+      const key = `${listing.id}-${listing.listing_type}`
+      if (prev.some(l => `${l.id}-${l.listing_type}` === key)) return prev
+      return [...prev, listing]
+    })
+    setSelectedListing(listing)
+    setHighlightedListing(listing)
+    setView('map')
+  }
+
   if (view === 'admin') {
     return (
       <AdminPage
@@ -367,18 +381,16 @@ export default function App() {
         scraping={scraping}
         scrapeStatus={scrapeStatus}
         onScrape={handleScrape}
-        onViewListing={(listing) => {
-          // Seed into the current listings array if not present so the pin
-          // renders even when the active filters would exclude it.
-          setListings(prev => {
-            const key = `${listing.id}-${listing.listing_type}`
-            if (prev.some(l => `${l.id}-${l.listing_type}` === key)) return prev
-            return [...prev, listing]
-          })
-          setSelectedListing(listing)
-          setHighlightedListing(listing)
-          setView('map')
-        }}
+        onViewListing={viewListingOnMap}
+      />
+    )
+  }
+
+  if (view === 'my-listings') {
+    return (
+      <MyListingsPage
+        onBack={() => setView('map')}
+        onViewListing={viewListingOnMap}
       />
     )
   }
@@ -398,6 +410,7 @@ export default function App() {
         }
         onEditProfile={() => navigate('/onboarding')}
         onSignOut={async () => { await signOut(); navigate('/') }}
+        onOpenMyListings={() => setView('my-listings')}
       />
       <StatsBar
         stats={stats}
@@ -459,6 +472,7 @@ export default function App() {
           reactionFor={reactionFor}
           onSetReaction={handleSetReaction}
           onClearReaction={handleClearReaction}
+          scoreShow={activePersona?.primaryScore ?? 'both'}
         />
         <Map
           areaConfig={areas[currentArea]}

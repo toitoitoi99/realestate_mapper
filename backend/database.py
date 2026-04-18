@@ -634,6 +634,25 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_reactions_reaction
             ON listing_reactions(reaction);
 
+        -- Admin-only per-persona agreement/disagreement with the model's score
+        -- for a given listing. One row per (listing, persona). Used to tune
+        -- the ranking model — distinct from user `listing_reactions`.
+        CREATE TABLE IF NOT EXISTS listing_ratings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            listing_kind TEXT NOT NULL,           -- 'sale' | 'rent'
+            listing_id INTEGER NOT NULL,
+            persona TEXT NOT NULL,                -- 'flip' | 'rent'
+            agree TEXT NOT NULL,                  -- 'agree' | 'disagree'
+            comment TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(listing_kind, listing_id, persona)
+        );
+        CREATE INDEX IF NOT EXISTS idx_ratings_kind_id
+            ON listing_ratings(listing_kind, listing_id);
+        CREATE INDEX IF NOT EXISTS idx_ratings_persona_agree
+            ON listing_ratings(persona, agree);
+
         CREATE TABLE IF NOT EXISTS app_settings (
             key TEXT PRIMARY KEY,
             value_json TEXT NOT NULL,
@@ -1229,6 +1248,106 @@ def delete_reaction(listing_kind: str, listing_id: int) -> bool:
         cur = conn.execute(
             "DELETE FROM listing_reactions WHERE listing_kind=? AND listing_id=?",
             (listing_kind, listing_id),
+        )
+    conn.close()
+    return cur.rowcount > 0
+
+
+# --- Admin-only per-persona score agreement ---------------------------------
+
+RATING_PERSONAS = ("flip", "rent")
+
+
+def get_ratings(persona: Optional[str] = None, agree: Optional[str] = None) -> List[dict]:
+    conn = get_connection()
+    sql = (
+        "SELECT listing_kind, listing_id, persona, agree, comment, created_at, updated_at "
+        "FROM listing_ratings"
+    )
+    params: list = []
+    where = []
+    if persona:
+        where.append("persona=?"); params.append(persona)
+    if agree:
+        where.append("agree=?"); params.append(agree)
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_ratings_with_listings(persona: Optional[str] = None, agree: Optional[str] = None) -> List[dict]:
+    """Every rating joined with a subset of listing columns (for admin UI)."""
+    ratings = get_ratings(persona=persona, agree=agree)
+    if not ratings:
+        return []
+    conn = get_connection()
+    sale_ids = [r["listing_id"] for r in ratings if r["listing_kind"] == "sale"]
+    rent_ids = [r["listing_id"] for r in ratings if r["listing_kind"] == "rent"]
+
+    cols = (
+        "id, title, url, source, source_id, price_amount, price_per_sqm, "
+        "size_sqm, rooms, neighborhood, parish, city, lat, lon, status, "
+        "scraped_at, flip_score, rent_score"
+    )
+    details: dict = {}
+    if sale_ids:
+        placeholders = ",".join("?" * len(sale_ids))
+        for r in conn.execute(f"SELECT {cols} FROM sales WHERE id IN ({placeholders})", sale_ids).fetchall():
+            details[("sale", r["id"])] = dict(r)
+    if rent_ids:
+        placeholders = ",".join("?" * len(rent_ids))
+        for r in conn.execute(f"SELECT {cols} FROM rentals WHERE id IN ({placeholders})", rent_ids).fetchall():
+            details[("rent", r["id"])] = dict(r)
+    conn.close()
+
+    for r in ratings:
+        d = details.get((r["listing_kind"], r["listing_id"]))
+        if d:
+            d["listing_type"] = r["listing_kind"]
+            r["listing"] = d
+        else:
+            r["listing"] = None
+    return ratings
+
+
+def set_rating(listing_kind: str, listing_id: int, persona: str, agree: str, comment: Optional[str]) -> dict:
+    if listing_kind not in ("sale", "rent"):
+        raise ValueError(f"invalid listing_kind: {listing_kind}")
+    if persona not in RATING_PERSONAS:
+        raise ValueError(f"invalid persona: {persona}")
+    if agree not in ("agree", "disagree"):
+        raise ValueError(f"invalid agree value: {agree}")
+    now = datetime.utcnow().isoformat()
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO listing_ratings (listing_kind, listing_id, persona, agree, comment, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(listing_kind, listing_id, persona) DO UPDATE SET
+                agree=excluded.agree,
+                comment=excluded.comment,
+                updated_at=excluded.updated_at
+            """,
+            (listing_kind, listing_id, persona, agree, comment, now, now),
+        )
+        row = conn.execute(
+            "SELECT listing_kind, listing_id, persona, agree, comment, created_at, updated_at "
+            "FROM listing_ratings WHERE listing_kind=? AND listing_id=? AND persona=?",
+            (listing_kind, listing_id, persona),
+        ).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def delete_rating(listing_kind: str, listing_id: int, persona: str) -> bool:
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            "DELETE FROM listing_ratings WHERE listing_kind=? AND listing_id=? AND persona=?",
+            (listing_kind, listing_id, persona),
         )
     conn.close()
     return cur.rowcount > 0

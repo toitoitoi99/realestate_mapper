@@ -5,6 +5,11 @@
 //   - Onboarding wizard (pre-fills preferences)
 //   - Future: persona-aware ranking in the results view
 
+// `primaryScore` determines which FlipRentBadge (if either) is shown on the
+// listing card — so the user only sees the score that matches their lens.
+//   'flip' → show flip_score only
+//   'rent' → show rent_score only
+//   'both' → show both (rare; rental_investor cares about both)
 export const PERSONAS = {
   rental_investor: {
     id: 'rental_investor',
@@ -13,6 +18,7 @@ export const PERSONAS = {
     description:
       'Find sale listings with strong rental yield, durable demand, and sensible acquisition prices relative to the neighborhood.',
     defaultView: 'sale',
+    primaryScore: 'both',
     // Weights applied to existing scores (see scoring_engine.py).
     // Client-side ranking does not need to sum to 1; it just re-orders.
     scoreWeights: {
@@ -30,6 +36,7 @@ export const PERSONAS = {
     description:
       'Find sale listings trading below neighborhood comps where the renovation cost is justified by the expected resale margin.',
     defaultView: 'sale',
+    primaryScore: 'flip',
     scoreWeights: {
       market_discount: 0.5,
       expected_resale: 0.3,
@@ -44,6 +51,7 @@ export const PERSONAS = {
     description:
       'Find sale listings matched to lifestyle: neighborhood feel, light, outdoor space, and the style you actually want to live in.',
     defaultView: 'sale',
+    primaryScore: 'flip',
     scoreWeights: {
       amenity: 0.4,
       light: 0.2,
@@ -59,6 +67,7 @@ export const PERSONAS = {
     description:
       'Find rental listings by price, location, commute, and interior style. Fast decisions with fewer commitments.',
     defaultView: 'rent',
+    primaryScore: 'rent',
     scoreWeights: {
       amenity: 0.4,
       transit: 0.3,

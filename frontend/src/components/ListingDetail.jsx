@@ -6,6 +6,8 @@ import AmenityRating from './AmenityRating'
 import ListingComparison from './ListingComparison'
 import SourceLogo from './SourceLogo'
 import ReactionButtons from './ReactionButtons'
+import PersonaRater from './PersonaRater'
+import { useIsAdmin } from '../lib/admin'
 
 function PriceDiff({ current, other }) {
   if (!current || !other) return null
@@ -49,6 +51,7 @@ function PctBadge({ pct, invert = false }) {
 
 export default function ListingDetail({ listing, onBack, parishStats, ineStats, reaction, onSetReaction, onClearReaction }) {
   const { lang, t } = useLanguage()
+  const isAdmin = useIsAdmin()
   const [descriptionEn, setDescriptionEn] = useState(null)
   const [translating, setTranslating] = useState(false)
   const [crossListings, setCrossListings] = useState([])
@@ -299,6 +302,9 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats, 
               />
             </div>
           )}
+
+          {/* Admin: per-persona score agreement (tunes the model) */}
+          {isAdmin && <PersonaRater listing={listing} />}
 
           {/* ============ VALUE SUMMARY CARD ============ */}
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">

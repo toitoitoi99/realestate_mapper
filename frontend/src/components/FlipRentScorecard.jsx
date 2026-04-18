@@ -46,17 +46,26 @@ function ratingBarWidth(score) {
   return `${Math.max(0, Math.min(100, score || 0))}%`
 }
 
-/** Compact inline badge pair for the listing card. */
-export function FlipRentBadges({ flip, rent }) {
+/**
+ * Compact inline badge pair for the listing card.
+ * `show` filters which badge(s) render:
+ *   'both' (default) — show flip + rent
+ *   'flip'           — show flip only
+ *   'rent'           — show rent only
+ */
+export function FlipRentBadges({ flip, rent, show = 'both' }) {
   if (flip == null && rent == null) return null
   const { bands } = useScoreBands()
   const f = Math.round(flip || 0)
   const r = Math.round(rent || 0)
   const fRating = ratingFor(flip, bands)
   const rRating = ratingFor(rent, bands)
+  const showFlip = (show === 'both' || show === 'flip') && flip != null
+  const showRent = (show === 'both' || show === 'rent') && rent != null
+  if (!showFlip && !showRent) return null
   return (
     <div className="flex gap-1.5 mt-1.5">
-      {flip != null && (
+      {showFlip && (
         <span
           className={`inline-flex items-center gap-1 text-xs font-semibold px-1.5 py-0.5 rounded ${ratingClasses(fRating).pill}`}
           title="Flip potential"
@@ -66,7 +75,7 @@ export function FlipRentBadges({ flip, rent }) {
           <span className="opacity-80">{f}</span>
         </span>
       )}
-      {rent != null && (
+      {showRent && (
         <span
           className={`inline-flex items-center gap-1 text-xs font-semibold px-1.5 py-0.5 rounded ${ratingClasses(rRating).pill}`}
           title="Rental potential"

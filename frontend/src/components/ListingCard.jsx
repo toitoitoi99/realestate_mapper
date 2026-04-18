@@ -4,7 +4,7 @@ import { FlipRentBadges } from './FlipRentScorecard'
 import SourceLogo from './SourceLogo'
 import ReactionButtons from './ReactionButtons'
 
-export default function ListingCard({ listing, onSelect, highlighted, reaction, onSetReaction, onClearReaction }) {
+export default function ListingCard({ listing, onSelect, highlighted, reaction, onSetReaction, onClearReaction, scoreShow = 'both' }) {
   const { t } = useLanguage()
   const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
 
@@ -46,7 +46,7 @@ export default function ListingCard({ listing, onSelect, highlighted, reaction, 
         <span className="ml-auto"><SourceLogo source={listing.source} /></span>
       </div>
 
-      <FlipRentBadges flip={listing.flip_score} rent={listing.rent_score} />
+      <FlipRentBadges flip={listing.flip_score} rent={listing.rent_score} show={scoreShow} />
       <GrantBadge eligible={listing.grant_eligible} />
 
       {onSetReaction && (

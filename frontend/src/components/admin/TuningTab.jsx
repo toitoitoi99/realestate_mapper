@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { fetchAdminTuning, saveScoreBands, resetScoreBands } from '../../api'
+import { fetchAdminTuning, saveScoreBands, resetScoreBands, fetchRatings, clearRating as apiClearRating } from '../../api'
 import { useScoreBands } from '../../ScoreBandsContext'
+import ListingRefCard from '../ListingRefCard'
 
 function Section({ title, hint, children, right }) {
   return (
@@ -220,7 +221,111 @@ function Profile({ name, profile }) {
   )
 }
 
-export default function TuningTab() {
+function DisagreementsPanel({ onViewListing }) {
+  const [ratings, setRatings] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  const load = () => {
+    setLoading(true); setError(null)
+    fetchRatings({ details: true })
+      .then(d => setRatings(d.ratings ?? []))
+      .catch(e => setError(String(e?.message ?? e)))
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { load() }, [])
+
+  const handleClear = async (item) => {
+    const prev = ratings
+    setRatings(ratings.filter(r => !(
+      r.listing_kind === item.listing_kind &&
+      r.listing_id === item.listing_id &&
+      r.persona === item.persona
+    )))
+    try {
+      await apiClearRating(item.listing_kind, item.listing_id, item.persona)
+    } catch (e) {
+      setRatings(prev)
+      setError(`Failed to clear: ${e?.message ?? e}`)
+    }
+  }
+
+  const grouped = {
+    flip: { agree: [], disagree: [] },
+    rent: { agree: [], disagree: [] },
+  }
+  for (const r of ratings) {
+    if (grouped[r.persona]) grouped[r.persona][r.agree]?.push(r)
+  }
+  const sortByDate = (arr) => [...arr].sort((a, b) =>
+    new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)
+  )
+
+  const totals = {
+    flip: { agree: grouped.flip.agree.length, disagree: grouped.flip.disagree.length },
+    rent: { agree: grouped.rent.agree.length, disagree: grouped.rent.disagree.length },
+  }
+
+  if (loading) return <div className="text-xs text-gray-500">Loading ratings…</div>
+  if (error) return <div className="text-xs text-red-600">{error}</div>
+  if (ratings.length === 0) {
+    return (
+      <div className="text-xs text-gray-500">
+        No per-persona ratings yet. Turn on <b>Admin mode</b> above, open a listing, and use the agree/disagree buttons in the per-persona rater.
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-4 text-xs">
+        {['flip', 'rent'].map(p => (
+          <div key={p} className="bg-white border border-gray-200 rounded px-3 py-1.5">
+            <span className="font-semibold uppercase tracking-wider text-gray-700">{p}</span>{' '}
+            <span className="text-green-700">{totals[p].agree} ✓</span>{' · '}
+            <span className="text-red-700">{totals[p].disagree} ✗</span>
+          </div>
+        ))}
+      </div>
+      {['flip', 'rent'].map(p => {
+        const disagrees = sortByDate(grouped[p].disagree)
+        if (!disagrees.length) return null
+        return (
+          <div key={p}>
+            <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">
+              {p} — disagreements ({disagrees.length})
+            </h4>
+            <div className="space-y-2">
+              {disagrees.map(item => (
+                <ListingRefCard
+                  key={`${item.persona}-${item.listing_kind}-${item.listing_id}`}
+                  listing={item.listing}
+                  listingKind={item.listing_kind}
+                  comment={item.comment}
+                  updatedAt={item.updated_at || item.created_at}
+                  commentPrefix="✗"
+                  topBadges={[{
+                    text: `${p} score wrong`,
+                    className: 'bg-red-100 text-red-700',
+                  }]}
+                  onViewOnMap={item.listing && onViewListing ? onViewListing : null}
+                  actions={
+                    <button
+                      onClick={() => handleClear(item)}
+                      className="px-2 py-1 text-xs border border-gray-300 rounded text-gray-500 hover:bg-red-50 hover:text-red-600"
+                    >Clear</button>
+                  }
+                />
+              ))}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+export default function TuningTab({ onViewListing }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const { refresh: refreshBands } = useScoreBands()
@@ -249,6 +354,13 @@ export default function TuningTab() {
         right={<ScoreBandsEditor current={data.score_bands} onSaved={handleBandsSaved} />}
       >
         <ScoreBands bands={data.score_bands} />
+      </Section>
+
+      <Section
+        title="Disagreements"
+        hint="Listings where you marked the model's score wrong (per persona). Use these to spot patterns before re-weighting."
+      >
+        <DisagreementsPanel onViewListing={onViewListing} />
       </Section>
 
       <Section

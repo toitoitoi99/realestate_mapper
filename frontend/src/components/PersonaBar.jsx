@@ -35,7 +35,7 @@ function activeChips(prefs) {
 
 export default function PersonaBar({
   persona, preferences, userEmail, listingCount, totalCount,
-  onEditProfile, onSignOut,
+  onEditProfile, onSignOut, onOpenMyListings,
 }) {
   if (!persona) return null
   const chips = activeChips(preferences)
@@ -73,6 +73,14 @@ export default function PersonaBar({
       )}
 
       <span className="ml-auto flex items-center gap-3">
+        {onOpenMyListings && (
+          <button
+            onClick={onOpenMyListings}
+            className="text-blue-700 hover:underline"
+          >
+            ⭐ My listings
+          </button>
+        )}
         <button
           onClick={onEditProfile}
           className="text-blue-700 hover:underline"
