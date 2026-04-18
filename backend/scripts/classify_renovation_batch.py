@@ -135,7 +135,7 @@ def _build_request(tbl: str, row) -> Optional[dict]:
     content.append({"type": "text", "text": user_text})
 
     return {
-        "custom_id": f"{tbl}:{row['id']}",
+        "custom_id": f"{tbl}_{row['id']}",
         "params": {
             "model": MODEL,
             "max_tokens": 600,
@@ -251,7 +251,7 @@ def cmd_collect(args):
         for item in client.messages.batches.results(b["batch_id"]):
             custom_id = item.custom_id
             try:
-                tbl, lid_str = custom_id.split(":", 1)
+                tbl, lid_str = custom_id.rsplit("_", 1)
                 lid = int(lid_str)
             except (ValueError, AttributeError):
                 total_errors["bad_custom_id"] = total_errors.get("bad_custom_id", 0) + 1
