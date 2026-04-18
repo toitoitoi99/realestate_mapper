@@ -23,6 +23,7 @@ function FlyToResult({ result }) {
 }
 
 export default function AddressSearch({ onSelectListing, onLookupResult }) {
+  const map = useMap()
   const [query, setQuery] = useState('')
   const [suggestions, setSuggestions] = useState([])
   const [result, setResult] = useState(null)
@@ -32,6 +33,27 @@ export default function AddressSearch({ onSelectListing, onLookupResult }) {
   const [lookupError, setLookupError] = useState(null)
   const debounceRef = useRef(null)
   const containerRef = useRef(null)
+
+  async function fetchSuggestions(val) {
+    const base = `https://nominatim.openstreetmap.org/search?format=json&limit=8&addressdetails=1&countrycodes=pt&q=${encodeURIComponent(val)}`
+    const headers = { 'Accept-Language': 'en' }
+    let viewbox = null
+    if (map) {
+      const b = map.getBounds()
+      // Nominatim viewbox order: west,north,east,south
+      viewbox = `${b.getWest()},${b.getNorth()},${b.getEast()},${b.getSouth()}`
+    }
+    // First try: bias to visible map area (soft bias, bounded=0)
+    const firstUrl = viewbox ? `${base}&viewbox=${viewbox}&bounded=0` : base
+    let res = await fetch(firstUrl, { headers })
+    let data = await res.json()
+    // Fallback: broaden to all of Portugal if nothing came back
+    if ((!data || data.length === 0) && viewbox) {
+      res = await fetch(base, { headers })
+      data = await res.json()
+    }
+    return data || []
+  }
 
   // Close suggestions when clicking outside the search container
   useEffect(() => {
@@ -55,9 +77,7 @@ export default function AddressSearch({ onSelectListing, onLookupResult }) {
     debounceRef.current = setTimeout(async () => {
       setLoading(true)
       try {
-        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(val + ', Lisboa, Portugal')}&format=json&limit=5&addressdetails=1`
-        const res = await fetch(url, { headers: { 'Accept-Language': 'en' } })
-        const data = await res.json()
+        const data = await fetchSuggestions(val)
         setSuggestions(data)
       } catch { /* ignore */ }
       finally { setLoading(false) }
@@ -134,7 +154,7 @@ export default function AddressSearch({ onSelectListing, onLookupResult }) {
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             onBlur={() => setTimeout(() => setSuggestions([]), 150)}
-            placeholder="Search address in Lisbon…"
+            placeholder="Search address…"
             className="w-full rounded-lg shadow-md border border-gray-200 bg-white px-4 py-2 pr-8 text-sm text-gray-800 placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-400"
           />
           {(query || result) && (
