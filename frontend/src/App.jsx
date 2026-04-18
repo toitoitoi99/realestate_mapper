@@ -72,9 +72,14 @@ export default function App() {
   // to the backend. Falls back to the persona's prior when there aren't enough
   // swipes (see MIN_SWIPES_FOR_OVERRIDE in swipeWeights.js).
   const [personaWeights, setPersonaWeights] = useState(null)
+  // Count of like/dislike swipes that contributed to the override (skips
+  // ignored). Only tracked when an override actually fires — drives the
+  // "✨ Personalized by N swipes" indicator in the persona bar.
+  const [activeSwipeCount, setActiveSwipeCount] = useState(0)
   useEffect(() => {
     if (!user || !activePersonaId || !supabase) {
       setPersonaWeights(null)
+      setActiveSwipeCount(0)
       return
     }
     let cancelled = false
@@ -90,9 +95,17 @@ export default function App() {
         if (error) {
           console.warn('swipes load error:', error)
           setPersonaWeights(null)
+          setActiveSwipeCount(0)
           return
         }
-        setPersonaWeights(computeWeights(activePersonaId, data ?? []))
+        const swipes = data ?? []
+        const weights = computeWeights(activePersonaId, swipes)
+        setPersonaWeights(weights)
+        // Only count when the override actually fires — surface "this many
+        // swipes are nudging the rank" rather than "you swiped N times".
+        setActiveSwipeCount(weights
+          ? swipes.filter(s => s.action === 'like' || s.action === 'dislike').length
+          : 0)
       })
     return () => { cancelled = true }
   }, [user?.id, activePersonaId])
@@ -432,6 +445,7 @@ export default function App() {
         }
         filters={filters}
         area={currentArea}
+        swipeCount={activeSwipeCount}
         onApplySavedSearch={({ filters: f, area }) => {
           replaceAllFilters(f)
           if (area) setCurrentArea(area)
