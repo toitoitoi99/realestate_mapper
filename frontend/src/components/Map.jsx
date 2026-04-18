@@ -57,8 +57,16 @@ function InvalidateOnResize() {
 function FlyToListing({ listing }) {
   const map = useMap()
   useEffect(() => {
-    if (listing?.lat && listing?.lon) {
+    // Guard against NaN/strings/etc — Leaflet throws "Invalid LatLng" and
+    // the error bubbles up through React, unmounting the entire app.
+    if (!Number.isFinite(listing?.lat) || !Number.isFinite(listing?.lon)) return
+    // Still wrap in try/catch — Leaflet can throw from inside the flyTo
+    // animation if the map is being torn down or state is odd. Better to
+    // skip the pan than crash the whole tree.
+    try {
       map.flyTo([listing.lat, listing.lon], 16, { duration: 1 })
+    } catch (e) {
+      console.warn('FlyToListing: map.flyTo failed', e)
     }
   }, [listing?.id, map])
   return null
