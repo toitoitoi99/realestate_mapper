@@ -4,6 +4,7 @@ import { fetchAreas, fetchStats, fetchNeighborhoods, fetchListings, fetchProject
 import { useAuth } from './contexts/AuthContext'
 import { getPersona } from './lib/personas'
 import { computeWeights, weightsToQueryParam, MIN_SWIPES_FOR_OVERRIDE } from './lib/swipeWeights'
+import { reactionsToSwipes, indexListingsByKey } from './lib/reactionWeights'
 import { supabase } from './lib/supabase'
 import { preferencesToFilters } from './lib/preferences'
 import { useFilters } from './useFilters'
@@ -68,19 +69,15 @@ export default function App() {
   const activePersona = getPersona(activePersonaId)
   const lastAppliedPersona = useRef(null)
 
-  // Swipe-derived weight override: load profile_swipes for the active persona
-  // and compute a per-signal weight vector that the listings query forwards
-  // to the backend. Falls back to the persona's prior when there aren't enough
-  // swipes (see MIN_SWIPES_FOR_OVERRIDE in swipeWeights.js).
-  const [personaWeights, setPersonaWeights] = useState(null)
-  // Count of like/dislike swipes that contributed to the override (skips
-  // ignored). Only tracked when an override actually fires — drives the
-  // "✨ Personalized by N swipes" indicator in the persona bar.
-  const [activeSwipeCount, setActiveSwipeCount] = useState(0)
+  // Personalization signal sources:
+  //   - profile_swipes (onboarding deck) — fetched once per user/persona
+  //   - listing_reactions (👍/👎 in the wild) — from existing `reactions`
+  //     state, converted to swipe-shape via reactionWeights.reactionsToSwipes
+  // Both flow through the same computeWeights() math.
+  const [rawSwipes, setRawSwipes] = useState([])
   useEffect(() => {
     if (!user || !activePersonaId || !supabase) {
-      setPersonaWeights(null)
-      setActiveSwipeCount(0)
+      setRawSwipes([])
       return
     }
     let cancelled = false
@@ -95,21 +92,34 @@ export default function App() {
         if (cancelled) return
         if (error) {
           console.warn('swipes load error:', error)
-          setPersonaWeights(null)
-          setActiveSwipeCount(0)
+          setRawSwipes([])
           return
         }
-        const swipes = data ?? []
-        const weights = computeWeights(activePersonaId, swipes)
-        setPersonaWeights(weights)
-        // Only count when the override actually fires — surface "this many
-        // swipes are nudging the rank" rather than "you swiped N times".
-        setActiveSwipeCount(weights
-          ? swipes.filter(s => s.action === 'like' || s.action === 'dislike').length
-          : 0)
+        setRawSwipes(data ?? [])
       })
     return () => { cancelled = true }
   }, [user?.id, activePersonaId])
+
+  // Derive the override weights from raw swipes + reaction-pseudo-swipes.
+  // Memoized — re-runs when the user reacts to a listing or a fresh listing
+  // batch arrives (so a like immediately nudges future ranking).
+  const listingsByKey = useMemo(() => indexListingsByKey(listings), [listings])
+  const reactionPseudoSwipes = useMemo(
+    () => reactionsToSwipes(reactions, listingsByKey, activePersonaId),
+    [reactions, listingsByKey, activePersonaId]
+  )
+  const combinedSignals = useMemo(
+    () => [...rawSwipes, ...reactionPseudoSwipes],
+    [rawSwipes, reactionPseudoSwipes]
+  )
+  const personaWeights = useMemo(
+    () => computeWeights(activePersonaId, combinedSignals),
+    [activePersonaId, combinedSignals]
+  )
+  // Surface "Personalized by N signals" only when the override actually fires.
+  const activeSwipeCount = personaWeights
+    ? combinedSignals.filter(s => s.action === 'like' || s.action === 'dislike').length
+    : 0
 
   // When the persona changes, default the listing_type filter to its preferred view.
   // Only fires on actual persona change, so the user can still toggle freely after.

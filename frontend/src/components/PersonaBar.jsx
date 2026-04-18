@@ -101,11 +101,11 @@ export default function PersonaBar({
       {swipeCount > 0 && (
         <span
           className="inline-flex items-center gap-1 text-purple-700"
-          title={`${swipeCount} of your onboarding swipes are nudging the persona ranking`}
+          title={`${swipeCount} signals (onboarding swipes + ratings) are nudging the persona ranking`}
         >
           <span className="text-gray-400">·</span>
           <span aria-hidden="true">✨</span>
-          <span>Personalized by {swipeCount}&nbsp;swipe{swipeCount === 1 ? '' : 's'}</span>
+          <span>Personalized by {swipeCount}&nbsp;signal{swipeCount === 1 ? '' : 's'}</span>
         </span>
       )}
 
