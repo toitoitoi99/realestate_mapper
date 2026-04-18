@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { fetchAreas, fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes, fetchSoldTrends, fetchNeighbourhoodTypologies, fetchParishStats, fetchScrapeRuns, fetchReactions, setReaction as apiSetReaction, clearReaction as apiClearReaction } from './api'
 import { useAuth } from './contexts/AuthContext'
 import { getPersona } from './lib/personas'
+import { computeWeights, weightsToQueryParam, MIN_SWIPES_FOR_OVERRIDE } from './lib/swipeWeights'
+import { supabase } from './lib/supabase'
 import { preferencesToFilters } from './lib/preferences'
 import { useFilters } from './useFilters'
 import { CATEGORIES } from './projectCategories'
@@ -64,6 +66,36 @@ export default function App() {
   const activePersonaId = profile?.persona ?? null
   const activePersona = getPersona(activePersonaId)
   const lastAppliedPersona = useRef(null)
+
+  // Swipe-derived weight override: load profile_swipes for the active persona
+  // and compute a per-signal weight vector that the listings query forwards
+  // to the backend. Falls back to the persona's prior when there aren't enough
+  // swipes (see MIN_SWIPES_FOR_OVERRIDE in swipeWeights.js).
+  const [personaWeights, setPersonaWeights] = useState(null)
+  useEffect(() => {
+    if (!user || !activePersonaId || !supabase) {
+      setPersonaWeights(null)
+      return
+    }
+    let cancelled = false
+    supabase
+      .from('profile_swipes')
+      .select('action, factor_positives, persona, created_at')
+      .eq('user_id', user.id)
+      .eq('persona', activePersonaId)
+      .order('created_at', { ascending: false })
+      .limit(200)
+      .then(({ data, error }) => {
+        if (cancelled) return
+        if (error) {
+          console.warn('swipes load error:', error)
+          setPersonaWeights(null)
+          return
+        }
+        setPersonaWeights(computeWeights(activePersonaId, data ?? []))
+      })
+    return () => { cancelled = true }
+  }, [user?.id, activePersonaId])
 
   // When the persona changes, default the listing_type filter to its preferred view.
   // Only fires on actual persona change, so the user can still toggle freely after.
@@ -130,6 +162,10 @@ export default function App() {
     if (min_rent_score > 0) apiFilters.min_rent_score = min_rent_score
     if (selectedNeighborhood) apiFilters.neighborhood = selectedNeighborhood
     if (activePersonaId) apiFilters.persona = activePersonaId
+    if (personaWeights) {
+      const wq = weightsToQueryParam(personaWeights)
+      if (wq) apiFilters.weights = wq
+    }
     // Persona preferences (saved on profile) layer in as additional filters.
     // UI filters always win — only fill in keys the UI hasn't set.
     const prefFilters = preferencesToFilters(profile?.preferences)
@@ -180,7 +216,7 @@ export default function App() {
       })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [filters, selectedNeighborhood, activePersonaId, profile?.preferences])
+  }, [filters, selectedNeighborhood, activePersonaId, profile?.preferences, personaWeights])
 
   // Poll a single source's latest scrape_runs row; transition UI state
   // when it reaches a terminal status.
