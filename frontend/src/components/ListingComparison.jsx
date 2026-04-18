@@ -69,8 +69,11 @@ export default function ListingComparison({ listing, radiusM: externalRadius, on
   return (
     <div className="text-sm space-y-4">
       {/* Section: Price Comparison */}
-      <div>
-        <h3 className="font-semibold text-gray-700 mb-2">{t.priceComparison || 'Price Comparison'}</h3>
+      <details open className="group">
+        <summary className="font-semibold text-gray-700 mb-2 cursor-pointer list-none flex items-center gap-1">
+          <span className="inline-block transition-transform group-open:rotate-90 text-gray-400">&rsaquo;</span>
+          {t.priceComparison || 'Price Comparison'}
+        </summary>
 
         {/* Radius slider */}
         <div className="mb-3">
@@ -117,7 +120,7 @@ export default function ListingComparison({ listing, radiusM: externalRadius, on
                 {t.basedOn || 'Based on'} {data.comparables.count} {t.similarProperties || 'similar properties'} {t.within || 'within'} {radiusM}m
               </div>
               <div className="flex items-baseline gap-2 mb-2">
-                <span className="text-lg font-bold text-gray-800">
+                <span className="font-semibold text-gray-800">
                   €{stats.median_price_per_sqm?.toLocaleString()}/m²
                 </span>
                 <span className="text-xs text-gray-500">{t.medianLabel || 'median'}</span>
@@ -180,7 +183,7 @@ export default function ListingComparison({ listing, radiusM: externalRadius, on
         ) : (
           <div className="text-xs text-gray-400">{t.noComparables || 'No comparable listings found in this radius'}</div>
         )}
-      </div>
+      </details>
 
       {/* Section: Rental Yield */}
       {rentals.count > 0 && (
