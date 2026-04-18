@@ -1395,19 +1395,25 @@ def get_radius_comparison(
         params.append(filter_bedrooms)
 
     sales_rows = conn.execute(
+        # flip_factors / rent_factors / reno_cost_estimate are needed so the
+        # frontend can compute per-comparable persona KPIs (yield / margin /
+        # lifestyle / €-per-m²-month) for the comparison sidebar.
         f"SELECT id, price_per_sqm, price_amount, size_sqm, property_type, bedrooms, "
-        f"address, lat, lon, status, source, scraped_at "
+        f"address, lat, lon, status, source, scraped_at, "
+        f"flip_factors, rent_factors, reno_cost_estimate "
         f"FROM {table} WHERE {' AND '.join(where)}",
         params
     ).fetchall()
 
     # Haversine refinement
+    comp_listing_type = "rent" if table == "rentals" else "sale"
     comparables = []
     for r in sales_rows:
         dist = _haversine(lat, lon, r["lat"], r["lon"])
         if dist <= radius_m:
             d = dict(r)
             d["distance_m"] = round(dist)
+            d["listing_type"] = comp_listing_type
             comparables.append(d)
 
     comparables.sort(key=lambda x: x["distance_m"])
