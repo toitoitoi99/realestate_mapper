@@ -50,3 +50,5 @@ npm-debug.log*
 *.suo
 *.sw?
 backend/data/debug/
+
+frontend/.env.local
