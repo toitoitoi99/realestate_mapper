@@ -41,6 +41,7 @@ import json
 import logging
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -62,8 +63,16 @@ logger = logging.getLogger(__name__)
 
 
 STATE_FILE = Path(__file__).resolve().parent.parent / "data" / "renovation_batches.json"
-MAX_REQUESTS_PER_BATCH = 2000  # Anthropic caps at 10,000; keep batches smaller
-                                # so a hiccup costs less and status is granular.
+# Keep each batch below the org's per-minute RPM ceiling so Anthropic's
+# batch workers don't saturate the rate limit and start 429-erroring
+# items. Tier 1 sits at 2,000 RPM; 1,500 leaves headroom for other
+# traffic and keeps recovery fast when we submit the next batch.
+MAX_REQUESTS_PER_BATCH = 1500
+# When submitting serially, we wait until the previous batch's in-flight
+# count drops below this threshold before firing the next one.
+DRAIN_THRESHOLD = 200
+# Poll cadence while waiting for the previous batch to drain.
+POLL_SECONDS = 30
 CONFIDENT_STAGES = {"needs_reno", "full_remodel", "turnkey", "approved_project"}
 
 
@@ -83,6 +92,34 @@ def _load_state() -> dict:
 def _save_state(state: dict) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(json.dumps(state, indent=2))
+
+
+# ---------- Rate-limit-safe submission ------------------------------------
+
+
+def _wait_for_drain(client: anthropic.Anthropic, batch_id: str) -> None:
+    """Block until the given batch's in-flight request count drops below
+    DRAIN_THRESHOLD (or the batch ends). Prevents the next batch's workers
+    from competing with a still-running batch for the org's RPM budget."""
+    logger.info(f"waiting for {batch_id} to drain below {DRAIN_THRESHOLD} in-flight")
+    while True:
+        try:
+            live = client.messages.batches.retrieve(batch_id)
+        except Exception as e:
+            logger.warning(f"retrieve failed ({e}); sleeping and retrying")
+            time.sleep(POLL_SECONDS)
+            continue
+        rc = live.request_counts
+        in_flight = rc.processing
+        if live.processing_status == "ended" or in_flight < DRAIN_THRESHOLD:
+            logger.info(f"{batch_id}: drained (processing={in_flight}, "
+                        f"succeeded={rc.succeeded}, errored={rc.errored}); "
+                        f"advancing to next batch")
+            return
+        logger.info(f"{batch_id}: processing={in_flight}, "
+                    f"succeeded={rc.succeeded}, errored={rc.errored}; "
+                    f"sleeping {POLL_SECONDS}s")
+        time.sleep(POLL_SECONDS)
 
 
 # ---------- Submit --------------------------------------------------------
@@ -174,11 +211,15 @@ def cmd_submit(args):
     state = _load_state()
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+    prev_batch_id: Optional[str] = None
     for i in range(0, len(all_requests), MAX_REQUESTS_PER_BATCH):
         chunk = all_requests[i:i + MAX_REQUESTS_PER_BATCH]
+        if prev_batch_id and not args.parallel:
+            _wait_for_drain(client, prev_batch_id)
         batch = client.messages.batches.create(requests=chunk)
         logger.info(f"batch {batch.id}: created with {len(chunk)} requests "
                     f"(processing_status={batch.processing_status})")
+        prev_batch_id = batch.id
         state["batches"].append({
             "batch_id": batch.id,
             "created_at": now,
@@ -318,6 +359,11 @@ def main():
     p_sub.add_argument("--skip-if-staged", action="store_true",
                        help="Skip listings whose building_stage is already "
                             "confidently set from text.")
+    p_sub.add_argument("--parallel", action="store_true",
+                       help="Fire all batches back-to-back without waiting "
+                            "for each to drain. Only safe if the total "
+                            "request count stays within your org's RPM "
+                            "budget; otherwise most items 429-error.")
     p_sub.set_defaults(func=cmd_submit)
 
     p_stat = sub.add_parser("status", help="Show state of tracked batches")
