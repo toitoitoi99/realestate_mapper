@@ -165,6 +165,7 @@ class ListingsHandler(BaseHandler):
             style_primary=self.get_argument("style_primary", None),
             outdoor_required=self.get_argument("outdoor_required", None) == "true",
             max_renovation=self.get_argument("max_renovation", None),
+            strict_tags=self.get_argument("strict_tags", None) == "true",
             limit=self.get_int_arg("limit", 10000),
             offset=self.get_int_arg("offset", 0),
         )
