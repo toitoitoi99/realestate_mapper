@@ -16,6 +16,7 @@ Run:
     python3 signal_batch.py                    # all listings
     python3 signal_batch.py --listing-type sales --limit 50
     python3 signal_batch.py --listing-id 12345
+    python3 signal_batch.py --only-stale       # new listings + price/status changes since last score
     python3 signal_batch.py --reno-cost-per-sqm 1800  # slider override
 """
 from __future__ import annotations
@@ -478,9 +479,9 @@ def score_one(
                 region_profile = ?, reno_cost_estimate = ?,
                 noise_score = ?, light_score = ?,
                 layout_openness_score = ?, social_housing_adj_score = ?,
-                dev_momentum_score = ?
+                dev_momentum_score = ?,
+                score_computed_at = ?
             WHERE id = ?""",
-        # same-arg positions as before; the only thing that changed is light
         (
             flip.score,
             json.dumps({"result": flip.to_dict(),
@@ -505,6 +506,7 @@ def score_one(
             layout,
             social_adj,
             dev_mom,
+            now.isoformat(),
             row["id"],
         ),
     )
@@ -525,6 +527,7 @@ def run_batch(
     limit: Optional[int] = None,
     reno_cost_per_sqm: Optional[float] = None,
     reno_tier_override: Optional[str] = None,
+    only_stale: bool = False,
 ):
     db.init_db()
     conn = db.get_connection()
@@ -532,6 +535,8 @@ def run_batch(
     now = datetime.now(timezone.utc)
 
     for tbl in tables:
+        score_col = "flip_score" if tbl == "sales" else "rent_score"
+        history_lt = "sale" if tbl == "sales" else "rent"
         q = f"""SELECT id, lat, lon, price_amount, size_sqm, price_per_sqm,
                        property_type, condition, floor, building_year,
                        orientation, description, photo_analysis,
@@ -544,6 +549,22 @@ def run_batch(
         params = []
         if listing_id:
             q += " AND id = ?"; params.append(listing_id)
+        if only_stale and not listing_id:
+            # Re-score if never scored, or if price/status changed since the
+            # last score timestamp.
+            q += f"""
+                AND (
+                    {score_col} IS NULL
+                    OR score_computed_at IS NULL
+                    OR EXISTS (
+                        SELECT 1 FROM listing_history h
+                        WHERE h.listing_id = {tbl}.id
+                          AND h.listing_type = ?
+                          AND h.field IN ('price_amount', 'status')
+                          AND h.changed_at > {tbl}.score_computed_at
+                    )
+                )"""
+            params.append(history_lt)
         if limit:
             q += f" LIMIT {int(limit)}"
         rows = conn.execute(q, params).fetchall()
@@ -579,6 +600,9 @@ def main():
     parser.add_argument("--reno-cost-per-sqm", type=float, default=None,
                         help="Override reno cost €/m² (UI slider equivalent)")
     parser.add_argument("--reno-tier", choices=["cosmetic", "mid", "gut"], default=None)
+    parser.add_argument("--only-stale", action="store_true",
+                        help="Score only listings that are unscored or whose "
+                             "price/status changed since the last score.")
     args = parser.parse_args()
     run_batch(
         listing_type=args.listing_type,
@@ -586,6 +610,7 @@ def main():
         limit=args.limit,
         reno_cost_per_sqm=args.reno_cost_per_sqm,
         reno_tier_override=args.reno_tier,
+        only_stale=args.only_stale,
     )
 
 

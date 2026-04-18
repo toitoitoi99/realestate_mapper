@@ -483,6 +483,9 @@ def init_db():
         if "reno_cost_estimate" not in existing:
             conn.execute(f"ALTER TABLE {tbl} ADD COLUMN reno_cost_estimate REAL")
             logger.info(f"[DB] Added reno_cost_estimate column to {tbl}")
+        if "score_computed_at" not in existing:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN score_computed_at TEXT")
+            logger.info(f"[DB] Added score_computed_at column to {tbl}")
 
         # Cached signal values (avoid recomputing from raw sources each score)
         if "noise_score" not in existing:
