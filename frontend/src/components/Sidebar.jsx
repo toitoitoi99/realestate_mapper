@@ -36,6 +36,7 @@ export default function Sidebar({
   selectedParishes, onToggleSelectedParish, onClearSelectedParishes,
   reactionFor, onSetReaction, onClearReaction,
   preferences, personaId,
+  scoreShow = 'both',
 }) {
   const { t } = useLanguage()
   const [collapsed, setCollapsed] = useState(false)
@@ -269,6 +270,7 @@ export default function Sidebar({
                 onClearReaction={onClearReaction}
                 preferences={preferences}
                 personaId={personaId}
+                scoreShow={scoreShow}
               />
               <button
                 onClick={onClearHighlight}
@@ -301,7 +303,8 @@ export default function Sidebar({
                           onSetReaction={onSetReaction}
                           onClearReaction={onClearReaction}
                           preferences={preferences}
-                personaId={personaId}
+                          personaId={personaId}
+                          scoreShow={scoreShow}
                         />
                         <span className="absolute top-1 right-1 text-[10px] text-gray-400 bg-white/80 rounded px-1">
                           {l._dist < 1 ? `${Math.round(l._dist * 1000)}m` : `${l._dist.toFixed(1)}km`}
@@ -327,6 +330,8 @@ export default function Sidebar({
               onSetReaction={onSetReaction}
               onClearReaction={onClearReaction}
               preferences={preferences}
+              personaId={personaId}
+              scoreShow={scoreShow}
             />
           )
         })}

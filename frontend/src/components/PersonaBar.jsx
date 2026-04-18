@@ -38,7 +38,7 @@ function activeChips(prefs) {
 
 export default function PersonaBar({
   persona, preferences, userEmail, listingCount, totalCount,
-  onEditProfile, onSignOut,
+  onEditProfile, onSignOut, onOpenMyListings,
   // Saved-searches plumbing
   filters, area, onApplySavedSearch,
   // Onboarding-swipe override is influencing the rank — 0 when not active
@@ -96,6 +96,17 @@ export default function PersonaBar({
           area={area}
           onApply={onApplySavedSearch}
         />
+        {onOpenMyListings && (
+          <>
+            <span className="text-gray-400">|</span>
+            <button
+              onClick={onOpenMyListings}
+              className="text-blue-700 hover:underline"
+            >
+              ⭐ My listings
+            </button>
+          </>
+        )}
         <span className="text-gray-400">|</span>
         <button
           onClick={onEditProfile}

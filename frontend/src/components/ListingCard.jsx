@@ -6,7 +6,7 @@ import ReactionButtons from './ReactionButtons'
 import { matchBadges } from '../lib/matchBadges'
 import { personaInsight } from '../lib/personaInsight'
 
-export default function ListingCard({ listing, onSelect, highlighted, reaction, onSetReaction, onClearReaction, preferences, personaId }) {
+export default function ListingCard({ listing, onSelect, highlighted, reaction, onSetReaction, onClearReaction, preferences, personaId, scoreShow = 'both' }) {
   const { t } = useLanguage()
   const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
 
@@ -49,7 +49,7 @@ export default function ListingCard({ listing, onSelect, highlighted, reaction, 
         <span className="ml-auto"><SourceLogo source={listing.source} /></span>
       </div>
 
-      <FlipRentBadges flip={listing.flip_score} rent={listing.rent_score} />
+      <FlipRentBadges flip={listing.flip_score} rent={listing.rent_score} show={scoreShow} />
       {insight && <PersonaInsightBadge insight={insight} />}
       <GrantBadge eligible={listing.grant_eligible} />
       <MatchBadges badges={matchBadges(listing, preferences)} />

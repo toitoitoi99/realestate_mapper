@@ -1,20 +1,26 @@
 import { useState } from 'react'
 import ScrapersTab from './admin/ScrapersTab'
-import ReactionsTab from './admin/ReactionsTab'
 import TuningTab from './admin/TuningTab'
 import DataHealthTab from './admin/DataHealthTab'
 import ConfigTab from './admin/ConfigTab'
+import { useIsAdmin, setAdminMode, isAdminModeOn } from '../lib/admin'
 
 const TABS = [
   { key: 'scrapers',   label: 'Scrapers' },
   { key: 'health',     label: 'Data Health' },
   { key: 'tuning',     label: 'Tuning' },
-  { key: 'reactions',  label: 'Reactions' },
   { key: 'config',     label: 'Config' },
 ]
 
 export default function AdminPage({ onBack, selectedScraper, onSelectScraper, scraping, scrapeStatus, onScrape, onViewListing }) {
   const [tab, setTab] = useState('scrapers')
+  const isAdmin = useIsAdmin()
+  const [, force] = useState(0)
+
+  const toggleAdminMode = () => {
+    setAdminMode(!isAdminModeOn())
+    force(x => x + 1)
+  }
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
@@ -41,6 +47,15 @@ export default function AdminPage({ onBack, selectedScraper, onSelectScraper, sc
             </button>
           ))}
         </nav>
+        <label className="ml-auto flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={isAdmin}
+            onChange={toggleAdminMode}
+            className="cursor-pointer"
+          />
+          Admin mode (show per-persona rater on listings)
+        </label>
       </div>
 
       <div className="flex-1 overflow-auto">
@@ -54,8 +69,7 @@ export default function AdminPage({ onBack, selectedScraper, onSelectScraper, sc
           />
         )}
         {tab === 'health'    && <DataHealthTab />}
-        {tab === 'tuning'    && <TuningTab />}
-        {tab === 'reactions' && <ReactionsTab onViewOnMap={onViewListing} />}
+        {tab === 'tuning'    && <TuningTab onViewListing={onViewListing} />}
         {tab === 'config'    && <ConfigTab />}
       </div>
     </div>
