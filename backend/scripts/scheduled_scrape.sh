@@ -218,6 +218,24 @@ batch_duration=$(( $(date +%s) - batch_start_ts ))
 duration_str="$((batch_duration / 60))m$((batch_duration % 60))s"
 total_legs=$(( ${#SCRAPERS[@]} * ${#TYPES[@]} ))
 
+# Score new and price/status-changed listings. Skip if no scraper succeeded
+# (nothing fresh to score, and a clean slate avoids burning compute on a
+# wholly-failed run). Scoring failure is reported in the summary but does
+# not flip the batch to failed.
+scoring_status=""
+if [ "${#succeeded_legs[@]}" -gt 0 ]; then
+    log "--- Scoring new and stale listings ---"
+    "$PYTHON" backend/signal_batch.py --only-stale >> "$LOG_FILE" 2>&1
+    SCORE_RC=$?
+    if [ "$SCORE_RC" -eq 0 ]; then
+        log "--- Scoring: OK ---"
+        scoring_status="✅ scored"
+    else
+        log "--- Scoring: FAILED (exit $SCORE_RC) ---"
+        scoring_status="⚠️ scoring failed (exit $SCORE_RC)"
+    fi
+fi
+
 # Build Slack summary
 host_label=$(/bin/hostname -s 2>/dev/null || echo "unknown-host")
 summary="Lisbon scrape batch on \`${host_label}\` finished in ${duration_str}."
@@ -228,6 +246,10 @@ fi
 if [ "${#failed_legs[@]}" -gt 0 ]; then
     summary="${summary}
 ❌ FAIL: ${failed_legs[*]}"
+fi
+if [ -n "$scoring_status" ]; then
+    summary="${summary}
+${scoring_status}"
 fi
 
 if [ "${#failed_legs[@]}" -eq 0 ]; then
