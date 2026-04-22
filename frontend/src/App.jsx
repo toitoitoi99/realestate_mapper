@@ -116,6 +116,13 @@ export default function App() {
     () => computeWeights(activePersonaId, combinedSignals),
     [activePersonaId, combinedSignals]
   )
+  // Stable serialized form — used as the fetch-effect dependency to avoid a
+  // circular re-render loop: listings → listingsByKey → reactionPseudoSwipes
+  // → combinedSignals → personaWeights (new object ref) → fetch → listings…
+  const weightsParam = useMemo(
+    () => weightsToQueryParam(personaWeights),
+    [personaWeights]
+  )
   // Surface "Personalized by N signals" only when the override actually fires.
   const activeSwipeCount = personaWeights
     ? combinedSignals.filter(s => s.action === 'like' || s.action === 'dislike').length
@@ -186,10 +193,7 @@ export default function App() {
     if (min_rent_score > 0) apiFilters.min_rent_score = min_rent_score
     if (selectedNeighborhood) apiFilters.neighborhood = selectedNeighborhood
     if (activePersonaId) apiFilters.persona = activePersonaId
-    if (personaWeights) {
-      const wq = weightsToQueryParam(personaWeights)
-      if (wq) apiFilters.weights = wq
-    }
+    if (weightsParam) apiFilters.weights = weightsParam
     // Persona preferences (saved on profile) layer in as additional filters.
     // UI filters always win — only fill in keys the UI hasn't set.
     const prefFilters = preferencesToFilters(profile?.preferences)
@@ -240,7 +244,7 @@ export default function App() {
       })
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [filters, selectedNeighborhood, activePersonaId, profile?.preferences, personaWeights])
+  }, [filters, selectedNeighborhood, activePersonaId, profile?.preferences, weightsParam])
 
   // Poll a single source's latest scrape_runs row; transition UI state
   // when it reaches a terminal status.
