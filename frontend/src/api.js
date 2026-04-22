@@ -61,6 +61,10 @@ export async function fetchProjects(layer = null) {
   return api(`${BASE}/projects${params}`)
 }
 
+export async function triggerScore() {
+  return api(`${BASE}/score`, { method: 'POST' })
+}
+
 export async function fetchScrapeRuns({ source, limit = 5 } = {}) {
   const params = new URLSearchParams()
   if (source) params.set('source', source)

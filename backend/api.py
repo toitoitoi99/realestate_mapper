@@ -52,6 +52,7 @@ logger = logging.getLogger(__name__)
 PORT = int(os.environ.get("PORT", 8000))
 _executor = ThreadPoolExecutor(max_workers=4)
 _address_lookup_lock = threading.Lock()
+_score_lock = threading.Lock()
 
 # ── Area config ──────────────────────────────────────────────────────────────
 
@@ -586,6 +587,49 @@ def _run_scrape(source: str, max_pages: int):
                 )
         except Exception:
             pass
+
+
+def _run_score():
+    """Runs rarity + signal_batch scoring in a background thread."""
+    run_id = db.start_scrape_run("scorer")
+    try:
+        import signal_batch
+        logger.info("[score] Computing rarity scores")
+        db.compute_rarity_scores()
+        logger.info("[score] Running signal batch (only_stale=True)")
+        signal_batch.run_batch(only_stale=True)
+        db.finish_scrape_run(run_id, ScrapeRun(source="scorer", status="completed"))
+        logger.info("[score] Done")
+    except Exception as e:
+        logger.exception(f"[score] Failed: {e}")
+        try:
+            db.finish_scrape_run(
+                run_id, ScrapeRun(source="scorer", status="failed", notes=str(e)[:500])
+            )
+        except Exception:
+            pass
+    finally:
+        _score_lock.release()
+
+
+class ScoreHandler(BaseHandler):
+    """
+    POST /api/score
+
+    Triggers rarity + flip/rent scoring for stale listings in a background
+    thread and returns immediately. Poll /api/scrape-runs?source=scorer to
+    track progress.
+    """
+
+    def post(self):
+        if not _score_lock.acquire(blocking=False):
+            self.set_status(409)
+            self.write_json({"error": "A scoring run is already in progress"})
+            return
+
+        thread = threading.Thread(target=_run_score, daemon=True)
+        thread.start()
+        self.write_json({"message": "Scoring started"}, status=202)
 
 
 # ── Gradient helper ───────────────────────────────────────────────────────────
@@ -1494,6 +1538,7 @@ def make_app() -> tornado.web.Application:
             (r"/api/neighborhoods/(.+)",    NeighborhoodDetailHandler),
             (r"/api/scrape-runs",           ScrapeRunsHandler),
             (r"/api/scrape",                ScrapeHandler),
+            (r"/api/score",                 ScoreHandler),
             (r"/api/projects",              ProjectsHandler),
             (r"/api/security",               SecurityHandler),
             (r"/api/ine-stats",             IneStatsHandler),

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useLanguage } from '../../LanguageContext'
-import { fetchScrapeRuns } from '../../api'
+import { fetchScrapeRuns, triggerScore } from '../../api'
 import { SCRAPER_OPTIONS } from '../StatsBar'
 
 function StatusPill({ status }) {
@@ -116,6 +116,103 @@ function ScraperCard({ source, label, selected, onSelect, running, onRun, latest
   )
 }
 
+function ScorerCard() {
+  const [scoring, setScoring] = useState(false)
+  const [history, setHistory] = useState([])
+  const [tick, setTick] = useState(0)
+
+  const loadHistory = useCallback(() => {
+    fetchScrapeRuns({ source: 'scorer', limit: 5 })
+      .then(d => setHistory(d.runs ?? []))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => { loadHistory() }, [loadHistory, tick])
+
+  // Poll while running
+  useEffect(() => {
+    if (!scoring) return
+    const id = setInterval(() => setTick(t => t + 1), 3000)
+    return () => clearInterval(id)
+  }, [scoring])
+
+  // Detect completion from history
+  useEffect(() => {
+    const latest = history[0]
+    if (scoring && latest && (latest.status === 'completed' || latest.status === 'failed')) {
+      setScoring(false)
+    }
+  }, [history, scoring])
+
+  const handleRun = async () => {
+    if (scoring) return
+    setScoring(true)
+    try {
+      await triggerScore()
+      setTick(t => t + 1)
+    } catch (e) {
+      console.error('Score trigger failed', e)
+      setScoring(false)
+    }
+  }
+
+  const latest = history[0]
+
+  return (
+    <div className="bg-white rounded border border-gray-200 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h3 className="font-semibold text-gray-800">Score listings</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Rarity + flip/rent signals for unscored &amp; stale listings</p>
+        </div>
+        <button
+          onClick={handleRun}
+          disabled={scoring}
+          className="px-3 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+        >
+          {scoring ? 'Running…' : 'Run now'}
+        </button>
+      </div>
+
+      <div className="flex items-center gap-4 text-xs text-gray-600 mb-3">
+        <StatusPill status={latest?.status} />
+        {latest?.started_at && <span>last run {fmtDate(latest.started_at)}</span>}
+        {latest?.notes && <span className="text-gray-500 truncate max-w-[240px]" title={latest.notes}>{latest.notes}</span>}
+      </div>
+
+      <details>
+        <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">
+          Last {history.length} run{history.length === 1 ? '' : 's'}
+        </summary>
+        {history.length > 0 && (
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-gray-500 border-b border-gray-200">
+                  <th className="py-1 pr-2">Started</th>
+                  <th className="py-1 pr-2">Status</th>
+                  <th className="py-1 pr-2">Duration</th>
+                  <th className="py-1 pr-2">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map(r => (
+                  <tr key={r.id} className="border-b border-gray-100">
+                    <td className="py-1 pr-2 whitespace-nowrap">{fmtDate(r.started_at)}</td>
+                    <td className="py-1 pr-2"><StatusPill status={r.status} /></td>
+                    <td className="py-1 pr-2">{fmtDuration(durationMs(r.started_at, r.completed_at))}</td>
+                    <td className="py-1 pr-2 text-gray-500 truncate max-w-[300px]" title={r.notes || ''}>{r.notes || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </details>
+    </div>
+  )
+}
+
 export default function ScrapersTab({ selectedScraper, onSelectScraper, scraping, scrapeStatus, onScrape }) {
   const { t } = useLanguage()
 
@@ -161,6 +258,8 @@ export default function ScrapersTab({ selectedScraper, onSelectScraper, scraping
           />
         ))}
       </div>
+
+      <ScorerCard />
     </div>
   )
 }
