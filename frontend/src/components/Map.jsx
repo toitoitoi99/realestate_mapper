@@ -156,6 +156,15 @@ function ZoomTracker({ onZoom }) {
   return null
 }
 
+function BoundsTracker({ onChange }) {
+  const map = useMapEvents({
+    moveend: () => onChange(map.getBounds()),
+    zoomend: () => onChange(map.getBounds()),
+  })
+  useEffect(() => { onChange(map.getBounds()) }, [map])
+  return null
+}
+
 function listingMarkerSize(zoom) {
   const radius = Math.max(3, Math.min(10, zoom - 8))
   const weight = zoom >= 15 ? 1.5 : zoom >= 13 ? 1 : 0.5
@@ -262,6 +271,17 @@ export default function Map({
     withCoords = allWithCoords.filter(l => isParishVisible(l.neighborhood))
   }
 
+  const canvasRenderer = useMemo(() => L.canvas({ padding: 0.5 }), [])
+  const [mapBounds, setMapBounds] = useState(null)
+
+  const visibleListings = useMemo(() => {
+    if (!mapBounds) return withCoords
+    const expanded = mapBounds.pad(0.2)
+    return withCoords.filter(l =>
+      expanded.contains([l.lat, l.lon]) || l.id === selectedListing?.id
+    )
+  }, [mapBounds, withCoords, selectedListing?.id])
+
   const ref = useRef(null)
   const [ctx, setCtx] = useState(null)
   const [mapZoom, setMapZoom] = useState(areaConfig?.zoom || DEFAULT_ZOOM)
@@ -294,6 +314,7 @@ export default function Map({
           />
           <FlyToListing listing={selectedListing} />
           <ZoomTracker onZoom={setMapZoom} />
+          <BoundsTracker onChange={setMapBounds} />
 
           <NeighborhoodLayer
             showNeighborhoods={showNeighborhoods}
@@ -305,7 +326,7 @@ export default function Map({
             parishToGroup={parishToGroup}
           />
 
-          {withCoords.map(l => {
+          {visibleListings.map(l => {
             const isRent = l.listing_type === 'rent'
             const isSold = l.status === 'sold'
             const isReserved = l.status === 'reserved'
@@ -378,6 +399,7 @@ export default function Map({
                 key={l.id}
                 center={[l.lat, l.lon]}
                 radius={mSize.radius}
+                renderer={canvasRenderer}
                 pathOptions={{
                   ...markerColor,
                   fillOpacity,
