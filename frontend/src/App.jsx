@@ -103,10 +103,11 @@ export default function App() {
   // Derive the override weights from raw swipes + reaction-pseudo-swipes.
   // Memoized — re-runs when the user reacts to a listing or a fresh listing
   // batch arrives (so a like immediately nudges future ranking).
-  const listingsByKey = useMemo(() => indexListingsByKey(listings), [listings])
+  const listingsByKeyRef = useRef({})
+  useEffect(() => { listingsByKeyRef.current = indexListingsByKey(listings) }, [listings])
   const reactionPseudoSwipes = useMemo(
-    () => reactionsToSwipes(reactions, listingsByKey, activePersonaId),
-    [reactions, listingsByKey, activePersonaId]
+    () => reactionsToSwipes(reactions, listingsByKeyRef.current, activePersonaId),
+    [reactions, activePersonaId]
   )
   const combinedSignals = useMemo(
     () => [...rawSwipes, ...reactionPseudoSwipes],
