@@ -60,6 +60,7 @@ export default function App() {
   const [view, setView] = useState('map')  // 'map' | 'admin' | 'my-page'
   const [myPageTab, setMyPageTab] = useState('impressions')
   const [returnTo, setReturnTo] = useState(null)  // 'admin' when navigating to map from admin
+  const [adminInitialTab, setAdminInitialTab] = useState('scrapers')
 
   const { filters, setFilter, reset, replaceAll: replaceAllFilters } = useFilters()
 
@@ -451,13 +452,14 @@ export default function App() {
   if (view === 'admin') {
     return (
       <AdminPage
-        onBack={() => setView('map')}
+        initialTab={adminInitialTab}
+        onBack={() => { setAdminInitialTab('scrapers'); setView('map') }}
         selectedScraper={selectedScraper}
         onSelectScraper={setSelectedScraper}
         scraping={scraping}
         scrapeStatus={scrapeStatus}
         onScrape={handleScrape}
-        onViewListing={(listing) => { viewListingOnMap(listing); setReturnTo('admin') }}
+        onViewListing={(listing) => { viewListingOnMap(listing); setReturnTo('admin'); setAdminInitialTab('calibrate') }}
       />
     )
   }
@@ -485,7 +487,7 @@ export default function App() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {returnTo === 'admin' && (
         <div className="bg-blue-600 text-white text-xs px-4 py-1.5 flex items-center gap-3">
-          <button onClick={() => { setReturnTo(null); setView('admin') }}
+          <button onClick={() => { setReturnTo(null); setAdminInitialTab('calibrate'); setView('admin') }}
             className="flex items-center gap-1.5 hover:underline cursor-pointer font-medium">
             ← Back to Calibrate
           </button>

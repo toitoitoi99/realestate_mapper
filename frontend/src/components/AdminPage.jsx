@@ -14,8 +14,8 @@ const TABS = [
   { key: 'config',     label: 'Config' },
 ]
 
-export default function AdminPage({ onBack, selectedScraper, onSelectScraper, scraping, scrapeStatus, onScrape, onViewListing }) {
-  const [tab, setTab] = useState('scrapers')
+export default function AdminPage({ onBack, selectedScraper, onSelectScraper, scraping, scrapeStatus, onScrape, onViewListing, initialTab = 'scrapers' }) {
+  const [tab, setTab] = useState(initialTab)
   const isAdmin = useIsAdmin()
   const [, force] = useState(0)
 
