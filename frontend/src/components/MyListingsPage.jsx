@@ -123,12 +123,12 @@ export default function MyListingsPage({ onBack, onViewListing }) {
                 emptyHint="Nothing liked yet. Use 👍 on a listing to save it."
               />
               <Column
-                title="Hidden"
+                title="Not liked"
                 icon="👎"
                 items={disliked}
                 onClear={handleClear}
                 onViewOnMap={onViewListing}
-                emptyHint="Nothing hidden yet."
+                emptyHint="Nothing disliked yet."
               />
             </div>
           </>

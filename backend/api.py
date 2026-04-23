@@ -673,6 +673,52 @@ class ComparisonHandler(BaseHandler):
         self.write_json(result)
 
 
+class CompareListingsHandler(BaseHandler):
+    """POST /api/compare-listings
+    Body: { a: {id, kind}, b: {id, kind}, persona?: str }
+    Returns Claude-generated pros/cons + recommendation for both listings.
+    """
+
+    async def post(self):
+        try:
+            body = json.loads(self.request.body or b"{}")
+        except json.JSONDecodeError:
+            self.write_error_json("invalid JSON body", 400); return
+
+        def _fetch(lid, kind):
+            table = db._table_for(kind)
+            conn = db.get_connection()
+            row = conn.execute(f"SELECT * FROM {table} WHERE id=?", (lid,)).fetchone()
+            conn.close()
+            if not row:
+                return None
+            r = dict(row)
+            r["listing_type"] = kind
+            return r
+
+        spec_a = body.get("a") or {}
+        spec_b = body.get("b") or {}
+        persona = body.get("persona")
+
+        listing_a = _fetch(spec_a.get("id"), spec_a.get("kind", "sale")) if spec_a.get("id") else None
+        listing_b = _fetch(spec_b.get("id"), spec_b.get("kind", "sale")) if spec_b.get("id") else None
+
+        if not listing_a:
+            self.write_error_json("listing A not found", 404); return
+        if not listing_b:
+            self.write_error_json("listing B not found", 404); return
+
+        try:
+            from scorers.listing_comparator import compare_listings
+            result = await tornado.ioloop.IOLoop.current().run_in_executor(
+                None, lambda: compare_listings(listing_a, listing_b, persona)
+            )
+        except Exception as e:
+            self.write_error_json(f"comparison failed: {e}", 502); return
+
+        self.write_json(result)
+
+
 class AddressHistoryHandler(BaseHandler):
     """GET /api/listings/:id/address-history"""
 
@@ -1526,6 +1572,7 @@ class ExtractPreferencesHandler(BaseHandler):
 def make_app() -> tornado.web.Application:
     return tornado.web.Application(
         [
+            (r"/api/compare-listings",       CompareListingsHandler),
             (r"/api/listings",              ListingsHandler),
             (r"/api/extract-image-tags",    ExtractImageTagsHandler),
             (r"/api/extract-preferences",   ExtractPreferencesHandler),
