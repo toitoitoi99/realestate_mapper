@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { fetchReactions, clearReaction as apiClearReaction } from '../api'
+import { useAuth } from '../contexts/AuthContext'
+import { supabase } from '../lib/supabase'
+import { fetchListingDetail } from '../api'
 import ListingRefCard from './ListingRefCard'
 
 function Column({ title, icon, items, onClear, onViewOnMap, emptyHint }) {
@@ -38,38 +40,53 @@ function Column({ title, icon, items, onClear, onViewOnMap, emptyHint }) {
 }
 
 export default function MyListingsPage({ onBack, onViewListing }) {
+  const { user } = useAuth()
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  const load = () => {
+  const load = async () => {
+    if (!user || !supabase) { setRows([]); setLoading(false); return }
     setLoading(true); setError(null)
-    fetchReactions({ details: true })
-      .then(d => setRows(d.reactions ?? []))
-      .catch(e => setError(String(e?.message ?? e)))
-      .finally(() => setLoading(false))
-  }
-  useEffect(() => { load() }, [])
+    try {
+      const { data, error: err } = await supabase
+        .from('listing_reactions')
+        .select('listing_kind, listing_id, reaction, comment, created_at, updated_at')
+        .eq('user_id', user.id)
+        .order('updated_at', { ascending: false })
+      if (err) throw err
 
-  const { liked, disliked } = useMemo(() => {
-    const sorted = [...rows].sort((a, b) =>
-      new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)
-    )
-    return {
-      liked: sorted.filter(r => r.reaction === 'like'),
-      disliked: sorted.filter(r => r.reaction === 'dislike'),
+      // Enrich with listing details from backend
+      const enriched = await Promise.all((data ?? []).map(async r => {
+        try {
+          const d = await fetchListingDetail(r.listing_id, r.listing_kind === 'rent' ? 'rent' : 'sale')
+          return { ...r, listing: d.listing ?? null }
+        } catch { return { ...r, listing: null } }
+      }))
+      setRows(enriched)
+    } catch (e) {
+      setError(String(e?.message ?? e))
+    } finally {
+      setLoading(false)
     }
-  }, [rows])
+  }
+  useEffect(() => { load() }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const { liked, disliked } = useMemo(() => ({
+    liked: rows.filter(r => r.reaction === 'like'),
+    disliked: rows.filter(r => r.reaction === 'dislike'),
+  }), [rows])
 
   const handleClear = async (item) => {
+    if (!user || !supabase) return
     const prev = rows
     setRows(rows.filter(r => !(r.listing_kind === item.listing_kind && r.listing_id === item.listing_id)))
-    try {
-      await apiClearReaction(item.listing_kind, item.listing_id)
-    } catch (e) {
-      setRows(prev)
-      setError(`Failed to clear: ${e?.message ?? e}`)
-    }
+    const { error: err } = await supabase.from('listing_reactions')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('listing_kind', item.listing_kind)
+      .eq('listing_id', item.listing_id)
+    if (err) { setRows(prev); setError(`Failed to clear: ${err.message}`) }
   }
 
   return (

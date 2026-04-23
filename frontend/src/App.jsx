@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { fetchAreas, fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes, fetchSoldTrends, fetchNeighbourhoodTypologies, fetchParishStats, fetchScrapeRuns, fetchReactions, setReaction as apiSetReaction, clearReaction as apiClearReaction } from './api'
+import { fetchAreas, fetchStats, fetchNeighborhoods, fetchListings, fetchProjects, triggerScrape, fetchIneStats, fetchSecurity, fetchParishes, fetchSoldTrends, fetchNeighbourhoodTypologies, fetchParishStats, fetchScrapeRuns } from './api'
 import { useAuth } from './contexts/AuthContext'
 import { getPersona } from './lib/personas'
 import { computeWeights, weightsToQueryParam, MIN_SWIPES_FOR_OVERRIDE } from './lib/swipeWeights'
@@ -153,14 +153,26 @@ export default function App() {
     }).catch(console.error)
     fetchNeighbourhoodTypologies().then(d => setNeighbourhoodTypologies(d.typologies ?? {})).catch(console.error)
     fetchParishStats(currentArea).then(d => setParishStats(d.stats ?? {})).catch(console.error)
-    fetchReactions().then(d => {
-      const map = {}
-      for (const r of (d.reactions ?? [])) {
-        map[`${r.listing_kind}-${r.listing_id}`] = { reaction: r.reaction, comment: r.comment }
-      }
-      setReactions(map)
-    }).catch(console.error)
   }, [])
+
+  useEffect(() => {
+    if (!user || !supabase) { setReactions({}); return }
+    let cancelled = false
+    supabase
+      .from('listing_reactions')
+      .select('listing_kind, listing_id, reaction, comment')
+      .eq('user_id', user.id)
+      .then(({ data, error }) => {
+        if (cancelled) return
+        if (error) { console.warn('reactions load error:', error); return }
+        const map = {}
+        for (const r of (data ?? [])) {
+          map[`${r.listing_kind}-${r.listing_id}`] = { reaction: r.reaction, comment: r.comment }
+        }
+        setReactions(map)
+      })
+    return () => { cancelled = true }
+  }, [user?.id])
 
   useEffect(() => {
     fetchParishes(currentArea).then(d => {
@@ -366,30 +378,31 @@ export default function App() {
   const handleSetReaction = useCallback(async (listing, reaction, comment) => {
     const kind = listing.listing_type || 'sale'
     const key = `${kind}-${listing.id}`
-    // Optimistic update
     setReactions(prev => ({ ...prev, [key]: { reaction, comment: comment ?? null } }))
-    try {
-      const row = await apiSetReaction(kind, listing.id, reaction, comment ?? null)
-      setReactions(prev => ({ ...prev, [key]: { reaction: row.reaction, comment: row.comment } }))
-    } catch (e) {
-      console.error('setReaction failed', e)
-    }
-  }, [])
+    if (!user || !supabase) return
+    const { error } = await supabase.from('listing_reactions').upsert({
+      user_id: user.id,
+      listing_kind: kind,
+      listing_id: listing.id,
+      reaction,
+      comment: comment ?? null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,listing_kind,listing_id' })
+    if (error) console.error('setReaction failed', error)
+  }, [user])
 
   const handleClearReaction = useCallback(async (listing) => {
     const kind = listing.listing_type || 'sale'
     const key = `${kind}-${listing.id}`
-    setReactions(prev => {
-      const next = { ...prev }
-      delete next[key]
-      return next
-    })
-    try {
-      await apiClearReaction(kind, listing.id)
-    } catch (e) {
-      console.error('clearReaction failed', e)
-    }
-  }, [])
+    setReactions(prev => { const next = { ...prev }; delete next[key]; return next })
+    if (!user || !supabase) return
+    const { error } = await supabase.from('listing_reactions')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('listing_kind', kind)
+      .eq('listing_id', listing.id)
+    if (error) console.error('clearReaction failed', error)
+  }, [user])
 
   const toggleGroup = useCallback((key) => {
     setVisibleGroups(prev => ({ ...prev, [key]: !prev[key] }))

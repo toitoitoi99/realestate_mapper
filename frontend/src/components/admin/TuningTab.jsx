@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
-import { fetchAdminTuning, saveScoreBands, resetScoreBands, fetchRatings, clearRating as apiClearRating } from '../../api'
+import { fetchAdminTuning, saveScoreBands, resetScoreBands, fetchListingDetail } from '../../api'
 import { useScoreBands } from '../../ScoreBandsContext'
+import { useAuth } from '../../contexts/AuthContext'
+import { supabase } from '../../lib/supabase'
 import ListingRefCard from '../ListingRefCard'
 
 function Section({ title, hint, children, right }) {
@@ -222,32 +224,51 @@ function Profile({ name, profile }) {
 }
 
 function DisagreementsPanel({ onViewListing }) {
+  const { user } = useAuth()
   const [ratings, setRatings] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  const load = () => {
+  const load = async () => {
+    if (!user || !supabase) { setRatings([]); setLoading(false); return }
     setLoading(true); setError(null)
-    fetchRatings({ details: true })
-      .then(d => setRatings(d.ratings ?? []))
-      .catch(e => setError(String(e?.message ?? e)))
-      .finally(() => setLoading(false))
+    try {
+      const { data, error: err } = await supabase
+        .from('listing_ratings')
+        .select('listing_kind, listing_id, persona, agree, comment, updated_at, created_at')
+        .eq('user_id', user.id)
+        .order('updated_at', { ascending: false })
+      if (err) throw err
+      const enriched = await Promise.all((data ?? []).map(async r => {
+        try {
+          const d = await fetchListingDetail(r.listing_id, r.listing_kind === 'rent' ? 'rent' : 'sale')
+          return { ...r, listing: d.listing ?? null }
+        } catch { return { ...r, listing: null } }
+      }))
+      setRatings(enriched)
+    } catch (e) {
+      setError(String(e?.message ?? e))
+    } finally {
+      setLoading(false)
+    }
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleClear = async (item) => {
+    if (!user || !supabase) return
     const prev = ratings
     setRatings(ratings.filter(r => !(
       r.listing_kind === item.listing_kind &&
       r.listing_id === item.listing_id &&
       r.persona === item.persona
     )))
-    try {
-      await apiClearRating(item.listing_kind, item.listing_id, item.persona)
-    } catch (e) {
-      setRatings(prev)
-      setError(`Failed to clear: ${e?.message ?? e}`)
-    }
+    const { error: err } = await supabase.from('listing_ratings')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('listing_kind', item.listing_kind)
+      .eq('listing_id', item.listing_id)
+      .eq('persona', item.persona)
+    if (err) { setRatings(prev); setError(`Failed to clear: ${err.message}`) }
   }
 
   const grouped = {
@@ -271,7 +292,7 @@ function DisagreementsPanel({ onViewListing }) {
   if (ratings.length === 0) {
     return (
       <div className="text-xs text-gray-500">
-        No per-persona ratings yet. Turn on <b>Admin mode</b> above, open a listing, and use the agree/disagree buttons in the per-persona rater.
+        No per-persona ratings yet. Use the <b>Calibrate</b> tab to rate listings.
       </div>
     )
   }

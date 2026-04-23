@@ -3,12 +3,14 @@ import ScrapersTab from './admin/ScrapersTab'
 import TuningTab from './admin/TuningTab'
 import DataHealthTab from './admin/DataHealthTab'
 import ConfigTab from './admin/ConfigTab'
+import CalibrateTab from './admin/CalibrateTab'
 import { useIsAdmin, setAdminMode, isAdminModeOn } from '../lib/admin'
 
 const TABS = [
   { key: 'scrapers',   label: 'Scrapers' },
   { key: 'health',     label: 'Data Health' },
   { key: 'tuning',     label: 'Tuning' },
+  { key: 'calibrate',  label: 'Calibrate' },
   { key: 'config',     label: 'Config' },
 ]
 
@@ -68,9 +70,10 @@ export default function AdminPage({ onBack, selectedScraper, onSelectScraper, sc
             onScrape={onScrape}
           />
         )}
-        {tab === 'health'    && <DataHealthTab />}
-        {tab === 'tuning'    && <TuningTab onViewListing={onViewListing} />}
-        {tab === 'config'    && <ConfigTab />}
+        {tab === 'health'     && <DataHealthTab />}
+        {tab === 'tuning'     && <TuningTab onViewListing={onViewListing} />}
+        {tab === 'calibrate'  && <CalibrateTab onViewListing={onViewListing} />}
+        {tab === 'config'     && <ConfigTab />}
       </div>
     </div>
   )
