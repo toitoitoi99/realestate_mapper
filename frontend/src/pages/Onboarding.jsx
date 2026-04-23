@@ -425,13 +425,22 @@ export default function Onboarding() {
         {personaId && (
           <Section
             title="Quick swipes"
-            subtitle="Tap like or skip on a few listings — helps us understand what you're drawn to.">
+            subtitle={
+              personaId === 'home_renter'
+                ? 'Rental listings — tap like or skip to help us tune your results.'
+                : personaId === 'flipper'
+                ? 'Sale listings with renovation upside — like what catches your eye.'
+                : personaId === 'rental_investor'
+                ? 'Sale listings to buy and rent out — like what looks promising.'
+                : 'Sale listings — tap like or skip to help us tune your results.'
+            }>
             <SwipeDeck
               loading={deckLoading}
               error={deckError}
               deck={deck}
               index={deckIndex}
               counts={swipeCounts}
+              persona={personaId}
               onAction={recordSwipe}
             />
           </Section>
@@ -567,7 +576,7 @@ function PhotoCarousel({ urls, alt }) {
   )
 }
 
-function SwipeDeck({ loading, error, deck, index, counts, onAction }) {
+function SwipeDeck({ loading, error, deck, index, counts, persona, onAction }) {
   if (loading) {
     return <div className="text-sm text-gray-500">Loading listings\u2026</div>
   }
@@ -614,6 +623,16 @@ function SwipeDeck({ loading, error, deck, index, counts, onAction }) {
             {item.style_primary ? ` \u00b7 ${item.style_primary}` : ''}
             {item.outdoor_type && item.outdoor_type !== 'none' ? ` \u00b7 ${item.outdoor_type}` : ''}
           </div>
+          {persona === 'flipper' && item.renovation_class && item.renovation_class !== 'turnkey' && (
+            <div className="mt-2 inline-block rounded px-1.5 py-0.5 text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+              {item.renovation_class === 'full_renovation' ? '🔨 Needs full reno' : '🖌️ Cosmetic work'}
+            </div>
+          )}
+          {persona === 'rental_investor' && item.price_per_sqm && (
+            <div className="mt-2 inline-block rounded px-1.5 py-0.5 text-xs font-medium bg-green-50 text-green-700 border border-green-200">
+              €{Math.round(item.price_per_sqm)}/m²
+            </div>
+          )}
         </div>
       </div>
 

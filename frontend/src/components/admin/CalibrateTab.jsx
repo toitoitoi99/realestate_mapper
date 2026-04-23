@@ -1,9 +1,56 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { supabase } from '../../lib/supabase'
 import { fetchListings } from '../../api'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 
 const GRADE = { A: 'bg-emerald-100 text-emerald-800', B: 'bg-blue-100 text-blue-800', C: 'bg-amber-100 text-amber-800', D: 'bg-red-100 text-red-800' }
+
+function PhotoCarousel({ images }) {
+  const [idx, setIdx] = useState(0)
+  const urls = (() => { try { return images ? JSON.parse(images) : [] } catch { return [] } })()
+  useEffect(() => setIdx(0), [images])
+  if (!urls.length) return (
+    <div className="w-full h-52 bg-gray-100 grid place-items-center text-gray-400 text-sm rounded-t-lg">No photos</div>
+  )
+  return (
+    <div className="relative w-full h-52 bg-gray-100 overflow-hidden rounded-t-lg">
+      <img src={urls[idx]} alt="" className="w-full h-full object-cover" loading="lazy" />
+      {urls.length > 1 && (
+        <>
+          <button onClick={() => setIdx(i => (i - 1 + urls.length) % urls.length)}
+            className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center text-lg leading-none">‹</button>
+          <button onClick={() => setIdx(i => (i + 1) % urls.length)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center text-lg leading-none">›</button>
+          <div className="absolute bottom-2 right-3 bg-black/40 text-white text-[10px] px-1.5 py-0.5 rounded-full">
+            {idx + 1} / {urls.length}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function ListingMiniMap({ lat, lon }) {
+  const ref = useRef(null)
+  const mapRef = useRef(null)
+  useEffect(() => {
+    if (!ref.current || !lat || !lon) return
+    if (mapRef.current) { mapRef.current.remove(); mapRef.current = null }
+    const map = L.map(ref.current, { zoomControl: false, attributionControl: false, scrollWheelZoom: false, dragging: false })
+    map.setView([lat, lon], 14)
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map)
+    L.circleMarker([lat, lon], { radius: 8, color: '#1d4ed8', fillColor: '#3b82f6', fillOpacity: 0.9, weight: 2 }).addTo(map)
+    mapRef.current = map
+    setTimeout(() => map.invalidateSize(), 50)
+    return () => { map.remove(); mapRef.current = null }
+  }, [lat, lon])
+  if (!lat || !lon) return (
+    <div className="w-full h-24 bg-gray-50 grid place-items-center text-xs text-gray-400">No location data</div>
+  )
+  return <div ref={ref} className="w-full h-36" />
+}
 
 function gradeFor(score) {
   if (score == null) return null
@@ -225,7 +272,10 @@ export default function CalibrateTab({ onViewListing }) {
       </div>
 
       {/* Listing card */}
-      <div className="bg-white border border-gray-200 rounded-lg p-3">
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <PhotoCarousel images={current.images} />
+        <ListingMiniMap lat={current.lat} lon={current.lon} />
+        <div className="p-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm font-semibold text-gray-800 truncate">
@@ -255,6 +305,7 @@ export default function CalibrateTab({ onViewListing }) {
               View on map
             </button>
           )}
+        </div>
         </div>
       </div>
 
