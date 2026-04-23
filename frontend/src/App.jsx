@@ -472,6 +472,15 @@ export default function App() {
     )
   }
 
+  if (view === 'compare') {
+    return (
+      <ComparePage
+        onBack={() => setView('map')}
+        onViewListing={viewListingOnMap}
+      />
+    )
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {returnTo === 'admin' && (
