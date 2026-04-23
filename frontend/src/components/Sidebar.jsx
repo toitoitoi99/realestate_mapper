@@ -23,7 +23,7 @@ export default function Sidebar({
   highlightedListing, onClearHighlight,
   sidebarTab, onChangeTab,
   // Neighbourhood panel props
-  neighborhoods, neighbourhoodTypologies, parishStats, ineStats,
+  neighborhoods, neighbourhoodTypologies, parishStats, ineStats, parishFeatures, parishToGroup,
   showNeighborhoods, onToggleNeighborhoods,
   visibleGroups, onToggleGroup,
   neighborhoodGroups, hiddenParishes, onToggleParish,
@@ -170,6 +170,13 @@ export default function Sidebar({
         </>
       ) : (
         <NeighbourhoodPanel
+          selectedNeighborhood={selectedNeighborhood}
+          onSelectNeighborhood={onSelectNeighborhood}
+          neighborhoods={neighborhoods}
+          typologies={neighbourhoodTypologies}
+          parishStats={parishStats}
+          parishFeatures={parishFeatures}
+          parishToGroup={parishToGroup}
           showNeighborhoods={showNeighborhoods}
           onToggleNeighborhoods={onToggleNeighborhoods}
           visibleGroups={visibleGroups}
@@ -177,10 +184,6 @@ export default function Sidebar({
           neighborhoodGroups={neighborhoodGroups}
           hiddenParishes={hiddenParishes}
           onToggleParish={onToggleParish}
-          neighborhoods={neighborhoods}
-          typologies={neighbourhoodTypologies}
-          parishStats={parishStats}
-          onSelectNeighborhood={onSelectNeighborhood}
           showProjects={showProjects}
           onToggleProjects={onToggleProjects}
           visibleCategories={visibleCategories}

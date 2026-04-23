@@ -23,21 +23,29 @@ function priceColor(gradient) {
   return `rgb(${r},${g},60)`
 }
 
-function FlyTo({ neighborhood, listings }) {
+function FlyToNeighbourhood({ selectedNeighborhood, parishFeatures }) {
   const map = useMap()
   useEffect(() => {
-    if (neighborhood && listings?.length > 0) {
-      const withCoords = listings.filter(l => l.lat && l.lon)
-      if (withCoords.length > 0) {
-        const lats = withCoords.map(l => l.lat)
-        const lons = withCoords.map(l => l.lon)
-        map.fitBounds([
-          [Math.min(...lats) - 0.005, Math.min(...lons) - 0.005],
-          [Math.max(...lats) + 0.005, Math.max(...lons) + 0.005],
-        ], { padding: [40, 40] })
+    if (!selectedNeighborhood) return
+    // Prefer polygon zoom — immediate and precise
+    if (parishFeatures?.length) {
+      const features = parishFeatures.filter(f =>
+        f.properties?.name === selectedNeighborhood ||
+        f.properties?.municipality === selectedNeighborhood
+      )
+      if (features.length > 0) {
+        try {
+          const bounds = L.geoJSON(features).getBounds()
+          if (bounds.isValid()) {
+            map.flyToBounds(bounds, { padding: [60, 60], duration: 0.9, maxZoom: 15 })
+            return
+          }
+        } catch (e) {
+          console.warn('FlyToNeighbourhood failed', e)
+        }
       }
     }
-  }, [neighborhood, listings, map])
+  }, [selectedNeighborhood, map])  // intentionally excludes parishFeatures — only fires on neighbourhood change
   return null
 }
 
@@ -284,7 +292,7 @@ export default function Map({
           <DynamicTileLayer baseMap={baseMap} />
           <InvalidateOnResize />
           <FlyToArea areaConfig={areaConfig} />
-          <FlyTo neighborhood={selectedNeighborhood} listings={withCoords} />
+          <FlyToNeighbourhood selectedNeighborhood={selectedNeighborhood} parishFeatures={parishFeatures} />
           <FitToParishes
             parishFeatures={parishFeatures}
             hiddenParishes={hiddenParishes}

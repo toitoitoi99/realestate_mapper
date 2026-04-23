@@ -404,6 +404,7 @@ export default function App() {
   }, [])
 
   const handleSelectNeighborhood = useCallback((name) => {
+    if (name === null) { setSelectedNeighborhood(null); return }
     setSelectedNeighborhood(prev => prev === name ? null : name)
   }, [])
 
@@ -515,6 +516,8 @@ export default function App() {
           neighbourhoodTypologies={neighbourhoodTypologies}
           parishStats={parishStats}
           ineStats={ineStats}
+          parishFeatures={parishFeatures}
+          parishToGroup={parishToGroup}
           showNeighborhoods={showNeighborhoods}
           onToggleNeighborhoods={() => setShowNeighborhoods(p => !p)}
           visibleGroups={visibleGroups}
