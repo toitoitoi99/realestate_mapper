@@ -58,6 +58,7 @@ export default function App() {
   const [reactions, setReactions] = useState({})
   const [showDisliked, setShowDisliked] = useState(false)
   const [view, setView] = useState('map')  // 'map' | 'admin' | 'my-listings'
+  const [returnTo, setReturnTo] = useState(null)  // 'admin' when navigating to map from admin
 
   const { filters, setFilter, reset, replaceAll: replaceAllFilters } = useFilters()
 
@@ -455,7 +456,7 @@ export default function App() {
         scraping={scraping}
         scrapeStatus={scrapeStatus}
         onScrape={handleScrape}
-        onViewListing={viewListingOnMap}
+        onViewListing={(listing) => { viewListingOnMap(listing); setReturnTo('admin') }}
       />
     )
   }
@@ -471,6 +472,15 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {returnTo === 'admin' && (
+        <div className="bg-blue-600 text-white text-xs px-4 py-1.5 flex items-center gap-3">
+          <button onClick={() => { setReturnTo(null); setView('admin') }}
+            className="flex items-center gap-1.5 hover:underline cursor-pointer font-medium">
+            ← Back to Calibrate
+          </button>
+          <span className="opacity-60">Viewing listing on map</span>
+        </div>
+      )}
       <PersonaBar
         persona={activePersona}
         preferences={profile?.preferences}
