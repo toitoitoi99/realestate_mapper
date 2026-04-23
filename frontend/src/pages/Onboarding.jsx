@@ -10,9 +10,10 @@ import { supabase } from '../lib/supabase'
 
 // Single-page preference wizard. Persona at top, then chips/ranges for the
 // rest. Saves both `persona` and `preferences` jsonb to the profile row.
-export default function Onboarding() {
+export default function Onboarding({ onDone } = {}) {
   const { user, profile, loading, refreshProfile } = useAuth()
   const navigate = useNavigate()
+  const done = () => { if (onDone) onDone(); else navigate('/app') }
   const [personaId, setPersonaId] = useState('')
   const [prefs, setPrefs] = useState(EMPTY_PREFERENCES)
   const [saving, setSaving] = useState(false)
@@ -191,7 +192,7 @@ export default function Onboarding() {
       if (e) throw e
       sessionStorage.removeItem('pending_persona')
       await refreshProfile()
-      navigate('/app')
+      done()
     } catch (e) {
       setError(e.message)
     } finally {
@@ -207,7 +208,7 @@ export default function Onboarding() {
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Tune your map</h1>
           <button
-            onClick={() => navigate('/app')}
+            onClick={done}
             className="text-sm text-gray-500 hover:text-gray-800"
           >
             Skip

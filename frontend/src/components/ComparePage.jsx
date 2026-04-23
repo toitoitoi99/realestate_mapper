@@ -127,7 +127,7 @@ function Slot({ label, listing, likedListings, onPick, onClear }) {
   )
 }
 
-export default function ComparePage({ onBack, onViewListing }) {
+export default function ComparePage({ onBack, onViewListing, embedded = false }) {
   const { user, profile } = useAuth()
   const [likedListings, setLikedListings] = useState([])
   const [loadingLiked, setLoadingLiked] = useState(true)
@@ -189,15 +189,14 @@ export default function ComparePage({ onBack, onViewListing }) {
   return (
     <div className="flex flex-col h-full bg-gray-50">
       {/* Header */}
-      <div className="flex items-center gap-4 px-4 py-2 bg-white border-b border-gray-200 shrink-0">
-        <button
-          onClick={onBack}
-          className="text-xs text-gray-600 hover:text-gray-900 cursor-pointer"
-        >
-          ← Back to map
-        </button>
-        <span className="font-semibold text-gray-800">⚖️ Compare listings</span>
-      </div>
+      {!embedded && (
+        <div className="flex items-center gap-4 px-4 py-2 bg-white border-b border-gray-200 shrink-0">
+          <button onClick={onBack} className="text-xs text-gray-600 hover:text-gray-900 cursor-pointer">
+            ← Back to map
+          </button>
+          <span className="font-semibold text-gray-800">⚖️ Compare listings</span>
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto p-4 space-y-4">
         {loadingLiked ? (

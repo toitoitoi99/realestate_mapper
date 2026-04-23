@@ -16,8 +16,7 @@ import Sidebar from './components/Sidebar'
 import Map from './components/Map'
 import PersonaBar from './components/PersonaBar'
 import AdminPage from './components/AdminPage'
-import MyListingsPage from './components/MyListingsPage'
-import ComparePage from './components/ComparePage'
+import MyPage from './components/MyPage'
 import './index.css'
 
 export default function App() {
@@ -58,7 +57,8 @@ export default function App() {
   // Map of `${kind}-${id}` → { reaction, comment }
   const [reactions, setReactions] = useState({})
   const [showDisliked, setShowDisliked] = useState(false)
-  const [view, setView] = useState('map')  // 'map' | 'admin' | 'my-listings' | 'compare'
+  const [view, setView] = useState('map')  // 'map' | 'admin' | 'my-page'
+  const [myPageTab, setMyPageTab] = useState('impressions')
   const [returnTo, setReturnTo] = useState(null)  // 'admin' when navigating to map from admin
   const [adminInitialTab, setAdminInitialTab] = useState('scrapers')
 
@@ -464,11 +464,12 @@ export default function App() {
     )
   }
 
-  if (view === 'my-listings') {
+  if (view === 'my-page') {
     return (
-      <MyListingsPage
+      <MyPage
         onBack={() => setView('map')}
         onViewListing={viewListingOnMap}
+        initialTab={myPageTab}
       />
     )
   }
@@ -511,10 +512,9 @@ export default function App() {
           replaceAllFilters(f)
           if (area) setCurrentArea(area)
         }}
-        onEditProfile={() => navigate('/onboarding')}
+        onEditProfile={() => { setMyPageTab('profile'); setView('my-page') }}
         onSignOut={async () => { await signOut(); navigate('/') }}
-        onOpenMyListings={() => setView('my-listings')}
-        onOpenCompare={() => setView('compare')}
+        onOpenMyPage={(tab = 'impressions') => { setMyPageTab(tab); setView('my-page') }}
       />
       <StatsBar
         stats={stats}

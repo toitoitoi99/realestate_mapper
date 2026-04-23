@@ -39,7 +39,7 @@ function Column({ title, icon, items, onClear, onViewOnMap, emptyHint }) {
   )
 }
 
-export default function MyListingsPage({ onBack, onViewListing }) {
+export default function MyListingsPage({ onBack, onViewListing, embedded = false }) {
   const { user } = useAuth()
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
@@ -91,15 +91,14 @@ export default function MyListingsPage({ onBack, onViewListing }) {
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
-      <div className="flex items-center gap-4 px-4 py-2 bg-white border-b border-gray-200 shrink-0">
-        <button
-          onClick={onBack}
-          className="text-xs text-gray-600 hover:text-gray-900 cursor-pointer"
-        >
-          ← Back to map
-        </button>
-        <span className="font-semibold text-gray-800">⭐ My listings</span>
-      </div>
+      {!embedded && (
+        <div className="flex items-center gap-4 px-4 py-2 bg-white border-b border-gray-200 shrink-0">
+          <button onClick={onBack} className="text-xs text-gray-600 hover:text-gray-900 cursor-pointer">
+            ← Back to map
+          </button>
+          <span className="font-semibold text-gray-800">⭐ My listings</span>
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto p-4">
         {loading ? (
