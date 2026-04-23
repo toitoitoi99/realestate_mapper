@@ -17,6 +17,7 @@ import Map from './components/Map'
 import PersonaBar from './components/PersonaBar'
 import AdminPage from './components/AdminPage'
 import MyListingsPage from './components/MyListingsPage'
+import ComparePage from './components/ComparePage'
 import './index.css'
 
 export default function App() {
@@ -57,7 +58,7 @@ export default function App() {
   // Map of `${kind}-${id}` → { reaction, comment }
   const [reactions, setReactions] = useState({})
   const [showDisliked, setShowDisliked] = useState(false)
-  const [view, setView] = useState('map')  // 'map' | 'admin' | 'my-listings'
+  const [view, setView] = useState('map')  // 'map' | 'admin' | 'my-listings' | 'compare'
 
   const { filters, setFilter, reset, replaceAll: replaceAllFilters } = useFilters()
 
@@ -471,6 +472,15 @@ export default function App() {
     )
   }
 
+  if (view === 'compare') {
+    return (
+      <ComparePage
+        onBack={() => setView('map')}
+        onViewListing={viewListingOnMap}
+      />
+    )
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <PersonaBar
@@ -494,6 +504,7 @@ export default function App() {
         onEditProfile={() => navigate('/onboarding')}
         onSignOut={async () => { await signOut(); navigate('/') }}
         onOpenMyListings={() => setView('my-listings')}
+        onOpenCompare={() => setView('compare')}
       />
       <StatsBar
         stats={stats}

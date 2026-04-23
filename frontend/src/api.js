@@ -244,6 +244,14 @@ export async function resetScoreBands() {
   return api(`${BASE}/admin/tuning/score-bands`, { method: 'DELETE' })
 }
 
+export async function compareListings(a, b, persona = null) {
+  return api(`${BASE}/compare-listings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ a, b, ...(persona ? { persona } : {}) }),
+  })
+}
+
 export async function addressLookup(address, lat, lon, listingType = 'sale') {
   return api(`${BASE}/address-lookup`, {
     method: 'POST',
