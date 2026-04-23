@@ -134,6 +134,7 @@ export default function App() {
   useEffect(() => {
     if (activePersona && lastAppliedPersona.current !== activePersonaId) {
       setFilter('listing_type', activePersona.defaultView === 'rent' ? 'rent' : 'sale')
+      setFilter('sort_by', 'persona')
       lastAppliedPersona.current = activePersonaId
     }
   }, [activePersonaId, activePersona, setFilter])
@@ -206,12 +207,9 @@ export default function App() {
         let all = d.listings ?? []
         if (show_sold === 'active' || !show_sold) all = all.filter(l => l.status === 'active' || !l.status)
         else if (show_sold === 'sold') all = all.filter(l => l.status === 'sold' || l.status === 'reserved')
-        // When a persona is active and user hasn't picked a sort, default to persona_score desc
-        if (!sort_by && activePersonaId) {
+        if (sort_by === 'persona' || (sort_by === 'default' && activePersonaId)) {
           all = [...all].sort((a, b) => (b.persona_score ?? -1) - (a.persona_score ?? -1))
-        }
-        if (sort_by === 'persona') all = [...all].sort((a, b) => (b.persona_score ?? -1) - (a.persona_score ?? -1))
-        else if (sort_by === 'flip') all = [...all].sort((a, b) => (b.flip_score ?? 0) - (a.flip_score ?? 0))
+        } else if (sort_by === 'flip') all = [...all].sort((a, b) => (b.flip_score ?? 0) - (a.flip_score ?? 0))
         else if (sort_by === 'rent_score') all = [...all].sort((a, b) => (b.rent_score ?? 0) - (a.rent_score ?? 0))
         else if (sort_by === 'price_asc') all = [...all].sort((a, b) => (a.price_amount ?? 0) - (b.price_amount ?? 0))
         else if (sort_by === 'price_desc') all = [...all].sort((a, b) => (b.price_amount ?? 0) - (a.price_amount ?? 0))

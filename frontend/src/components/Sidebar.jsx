@@ -223,6 +223,7 @@ export default function Sidebar({
             className="border border-gray-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
           >
             <option value="default">{t.sortDefault}</option>
+            {personaId && <option value="persona">{t.sortForYou}</option>}
             <option value="flip">Flip score</option>
             <option value="rent_score">Rent score</option>
             <option value="price_asc">{t.sortPriceAsc}</option>
