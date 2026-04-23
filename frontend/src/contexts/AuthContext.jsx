@@ -61,7 +61,7 @@ export function AuthProvider({ children }) {
     if (!supabaseEnabled) throw new Error('Supabase not configured')
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo: `${window.location.origin}/onboarding` },
+      options: { redirectTo: window.location.origin },
     })
     if (error) throw error
   }
@@ -70,7 +70,7 @@ export function AuthProvider({ children }) {
     if (!supabaseEnabled) throw new Error('Supabase not configured')
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: `${window.location.origin}/onboarding` },
+      options: { emailRedirectTo: window.location.origin },
     })
     if (error) throw error
   }

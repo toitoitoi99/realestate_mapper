@@ -15,6 +15,7 @@ function RootRoute() {
   const { user, profile, loading } = useAuth()
   if (loading) return <div className="min-h-screen grid place-items-center text-gray-500">Loading&hellip;</div>
   if (user && profile?.persona) return <Navigate to="/app" replace />
+  if (user) return <Navigate to="/onboarding" replace />
   return <Landing />
 }
 
