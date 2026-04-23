@@ -962,7 +962,7 @@ def get_listings(
     clauses, params = [], []
 
     if neighborhood:
-        clauses.append("neighborhood=?"); params.append(neighborhood)
+        clauses.append("(neighborhood=? OR parish=?)"); params.extend([neighborhood, neighborhood])
     if source:
         clauses.append("source=?"); params.append(source)
     if min_price is not None:
