@@ -63,15 +63,15 @@ logger = logging.getLogger(__name__)
 
 
 STATE_FILE = Path(__file__).resolve().parent.parent / "data" / "renovation_batches.json"
-# Keep each batch below the org's per-minute RPM ceiling so Anthropic's
-# batch workers don't saturate the rate limit and start 429-erroring
-# items. Tier 1 sits at 2,000 RPM; 1,500 leaves headroom for other
-# traffic and keeps recovery fast when we submit the next batch.
-MAX_REQUESTS_PER_BATCH = 1500
-# When submitting serially, we wait until the previous batch's in-flight
-# count drops below this threshold before firing the next one.
-DRAIN_THRESHOLD = 200
-# Poll cadence while waiting for the previous batch to drain.
+# Per-batch request count. Anthropic's batch workers fire requests in a
+# burst, which saturates not just the per-minute RPM ceiling but also
+# the (much tighter) input-tokens-per-minute (ITPM) ceiling when doing
+# vision work. Each listing burns ~5k input tokens (6 images + system
+# prompt); at tier-3 ITPM a batch of ~500 is the sweet spot — large
+# enough to keep submission overhead low, small enough that a single
+# batch's worker burst doesn't exhaust the token budget.
+MAX_REQUESTS_PER_BATCH = 500
+# Poll cadence while waiting for the previous batch to end.
 POLL_SECONDS = 30
 CONFIDENT_STAGES = {"needs_reno", "full_remodel", "turnkey", "approved_project"}
 
@@ -97,11 +97,12 @@ def _save_state(state: dict) -> None:
 # ---------- Rate-limit-safe submission ------------------------------------
 
 
-def _wait_for_drain(client: anthropic.Anthropic, batch_id: str) -> None:
-    """Block until the given batch's in-flight request count drops below
-    DRAIN_THRESHOLD (or the batch ends). Prevents the next batch's workers
-    from competing with a still-running batch for the org's RPM budget."""
-    logger.info(f"waiting for {batch_id} to drain below {DRAIN_THRESHOLD} in-flight")
+def _wait_for_end(client: anthropic.Anthropic, batch_id: str) -> None:
+    """Block until the given batch fully ends. Partial draining isn't
+    enough: Anthropic's batch worker bursts through the token-per-minute
+    ceiling even when only a few hundred requests are still in flight,
+    so a new batch fired mid-run gets 429-erroring immediately."""
+    logger.info(f"waiting for {batch_id} to end")
     while True:
         try:
             live = client.messages.batches.retrieve(batch_id)
@@ -110,13 +111,11 @@ def _wait_for_drain(client: anthropic.Anthropic, batch_id: str) -> None:
             time.sleep(POLL_SECONDS)
             continue
         rc = live.request_counts
-        in_flight = rc.processing
-        if live.processing_status == "ended" or in_flight < DRAIN_THRESHOLD:
-            logger.info(f"{batch_id}: drained (processing={in_flight}, "
-                        f"succeeded={rc.succeeded}, errored={rc.errored}); "
-                        f"advancing to next batch")
+        if live.processing_status == "ended":
+            logger.info(f"{batch_id}: ended (succeeded={rc.succeeded}, "
+                        f"errored={rc.errored}); advancing to next batch")
             return
-        logger.info(f"{batch_id}: processing={in_flight}, "
+        logger.info(f"{batch_id}: processing={rc.processing}, "
                     f"succeeded={rc.succeeded}, errored={rc.errored}; "
                     f"sleeping {POLL_SECONDS}s")
         time.sleep(POLL_SECONDS)
@@ -215,7 +214,7 @@ def cmd_submit(args):
     for i in range(0, len(all_requests), MAX_REQUESTS_PER_BATCH):
         chunk = all_requests[i:i + MAX_REQUESTS_PER_BATCH]
         if prev_batch_id and not args.parallel:
-            _wait_for_drain(client, prev_batch_id)
+            _wait_for_end(client, prev_batch_id)
         batch = client.messages.batches.create(requests=chunk)
         logger.info(f"batch {batch.id}: created with {len(chunk)} requests "
                     f"(processing_status={batch.processing_status})")
