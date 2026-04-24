@@ -7,6 +7,54 @@ import 'leaflet/dist/leaflet.css'
 
 const GRADE = { A: 'bg-emerald-100 text-emerald-800', B: 'bg-blue-100 text-blue-800', C: 'bg-amber-100 text-amber-800', D: 'bg-red-100 text-red-800' }
 
+function RatingBadge({ r }) {
+  if (!r) return <span className="text-gray-300 text-[10px]">—</span>
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${r.agree === 'agree' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+      {r.agree === 'agree' ? '✓' : '✗'} {r.agree}
+      {r.comment && <span className="italic opacity-70 max-w-[140px] truncate" title={r.comment}>· {r.comment}</span>}
+    </span>
+  )
+}
+
+function ReviewedList({ allListings, userRatings, onViewListing }) {
+  const ratedIds = new Set(userRatings.map(r => r.listing_id))
+  const ratedListings = allListings.filter(l => ratedIds.has(l.id))
+  if (!ratedListings.length) return <p className="text-sm text-gray-400 py-4">No rated listings yet.</p>
+  return (
+    <div className="space-y-2 mt-1">
+      {ratedListings.map(l => {
+        const kind = l.listing_type || 'sale'
+        const flip = userRatings.find(r => r.listing_id === l.id && r.listing_kind === kind && r.persona === 'flip')
+        const rent = userRatings.find(r => r.listing_id === l.id && r.listing_kind === kind && r.persona === 'rent')
+        return (
+          <div key={l.id} className="bg-white border border-gray-200 rounded-lg p-3 flex items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-gray-800 truncate">{l.title || `#${l.id}`}</p>
+              <p className="text-xs text-gray-400">{[l.neighborhood, l.parish].filter(Boolean).join(' · ')}</p>
+              <p className="text-xs text-gray-600 mt-0.5">{l.price_amount ? `€${l.price_amount.toLocaleString()}` : ''}{l.size_sqm ? ` · ${l.size_sqm} m²` : ''}</p>
+            </div>
+            <div className="flex flex-col gap-1 shrink-0 items-end">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-gray-400">Flip</span>
+                <RatingBadge r={flip} />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-gray-400">Rent</span>
+                <RatingBadge r={rent} />
+              </div>
+            </div>
+            <div className="flex flex-col gap-1 shrink-0 text-right">
+              {l.url && <a href={l.url} target="_blank" rel="noreferrer" className="text-[10px] text-blue-500 hover:underline">Source ↗</a>}
+              {onViewListing && <button onClick={() => onViewListing(l)} className="text-[10px] text-gray-400 hover:text-gray-700 cursor-pointer">Map</button>}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function PhotoCarousel({ images }) {
   const [idx, setIdx] = useState(0)
   const urls = (() => { try { return images ? JSON.parse(images) : [] } catch { return [] } })()
@@ -237,27 +285,27 @@ export default function CalibrateTab({ onViewListing }) {
   if (!user) return <div className="p-8 text-center text-sm text-gray-500">Sign in to calibrate scores.</div>
   if (loading) return <div className="p-8 text-center text-sm text-gray-500">Loading scored listings…</div>
 
-  if (!current) return (
+  if (!current && queue !== 'reviewed') return (
     <div className="p-8 text-center space-y-2">
       <p className="text-sm text-gray-600">{candidates.length === 0 ? 'No listings in this queue.' : 'Queue complete!'}</p>
       <p className="text-xs text-gray-400">{sessionCount} rated this session</p>
-      <button onClick={() => { setLoaded(false); setLoading(true); /* re-trigger load */ setAllListings([]); setUserRatings([]) }}
+      <button onClick={() => { setLoaded(false); setLoading(true); setAllListings([]); setUserRatings([]) }}
         className="mt-2 px-4 py-2 text-xs bg-gray-800 text-white rounded cursor-pointer">
         Reload
       </button>
     </div>
   )
 
-  const kind = current.listing_type || 'sale'
-  const existingFlip = userRatings.find(r => r.listing_id === current.id && r.listing_kind === kind && r.persona === 'flip')
-  const existingRent = userRatings.find(r => r.listing_id === current.id && r.listing_kind === kind && r.persona === 'rent')
+  const kind = current?.listing_type || 'sale'
+  const existingFlip = current ? userRatings.find(r => r.listing_id === current.id && r.listing_kind === kind && r.persona === 'flip') : null
+  const existingRent = current ? userRatings.find(r => r.listing_id === current.id && r.listing_kind === kind && r.persona === 'rent') : null
 
   return (
     <div className="p-4 space-y-3 max-w-3xl">
       {/* Toolbar */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex gap-1">
-          {[['unreviewed', 'Unreviewed'], ['disagreements', 'Disagreements']].map(([m, label]) => (
+          {[['unreviewed', 'Unreviewed'], ['disagreements', 'Disagreements'], ['reviewed', 'Reviewed']].map(([m, label]) => (
             <button key={m} onClick={() => setQueue(m)}
               className={`px-3 py-1 text-xs rounded cursor-pointer ${queue === m ? 'bg-gray-800 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
               {label}
@@ -273,6 +321,10 @@ export default function CalibrateTab({ onViewListing }) {
         </button>
       </div>
 
+      {/* Reviewed list mode */}
+      {queue === 'reviewed' && <ReviewedList allListings={allListings} userRatings={userRatings} onViewListing={onViewListing} />}
+
+      {queue !== 'reviewed' && <>
       {/* Property type filter */}
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs text-gray-400">Hide:</span>
@@ -356,6 +408,7 @@ export default function CalibrateTab({ onViewListing }) {
           {saving ? 'Saving…' : 'Save & Next →'}
         </button>
       </div>
+      </>}
     </div>
   )
 }
