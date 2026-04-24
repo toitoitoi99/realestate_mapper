@@ -43,7 +43,7 @@ export default function FilterPanel({ filters, setFilter, reset }) {
       placeholder={placeholder}
       value={filters[key]}
       onChange={e => setFilter(key, e.target.value)}
-      className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+      className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
     />
   )
 
@@ -53,7 +53,7 @@ export default function FilterPanel({ filters, setFilter, reset }) {
       placeholder={placeholder}
       value={filters[key]}
       onChange={e => setFilter(key, e.target.value)}
-      className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+      className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
     />
   )
 
@@ -63,7 +63,7 @@ export default function FilterPanel({ filters, setFilter, reset }) {
       <select
         value={filters[key]}
         onChange={e => setFilter(key, e.target.value)}
-        className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+        className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
       >
         <option value="">{t.any}</option>
         {options.map(([value, label]) => (
@@ -78,7 +78,7 @@ export default function FilterPanel({ filters, setFilter, reset }) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <span className="text-sm font-semibold text-gray-700">{t.filters}</span>
-        <button onClick={reset} className="text-xs text-blue-500 hover:underline cursor-pointer">{t.reset}</button>
+        <button onClick={reset} className="text-xs text-primary hover:underline cursor-pointer">{t.reset}</button>
       </div>
 
       {/* Active filter chips */}
@@ -87,12 +87,12 @@ export default function FilterPanel({ filters, setFilter, reset }) {
           {chips.map(chip => (
             <span
               key={chip.key}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs border border-blue-200"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-tint text-primary text-xs border border-primary-border"
             >
               {chip.label}
               <button
                 onClick={() => removeChip(chip)}
-                className="text-blue-400 hover:text-blue-600 cursor-pointer leading-none"
+                className="text-primary hover:text-primary cursor-pointer leading-none"
               >&times;</button>
             </span>
           ))}
@@ -106,7 +106,7 @@ export default function FilterPanel({ filters, setFilter, reset }) {
           {[['sale', t.buy], ['rent', t.rent], ['all', t.all]].map(([type, label]) => (
             <button key={type} onClick={() => setFilter('listing_type', type)}
               className={`flex-1 py-1.5 ${filters.listing_type === type
-                ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                ? 'bg-primary text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
               {label}
             </button>
           ))}
@@ -152,7 +152,7 @@ export default function FilterPanel({ filters, setFilter, reset }) {
                     ? 'bg-amber-500 text-white'
                     : opt.value === 'both'
                     ? 'bg-gray-700 text-white'
-                    : 'bg-blue-500 text-white'
+                    : 'bg-primary text-white'
                   : 'bg-white text-gray-500 hover:bg-gray-50'
               }`}
             >
@@ -204,11 +204,11 @@ export default function FilterPanel({ filters, setFilter, reset }) {
           step="5"
           value={filters.min_flip_score || 0}
           onChange={e => setFilter('min_flip_score', Number(e.target.value))}
-          className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
+          className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary"
         />
         <div className="flex justify-between text-[10px] text-gray-400 mt-1">
           <span>All</span>
-          <span className="font-medium text-blue-600">
+          <span className="font-medium text-primary">
             {!filters.min_flip_score ? 'All' : `≥ ${filters.min_flip_score}`}
           </span>
         </div>

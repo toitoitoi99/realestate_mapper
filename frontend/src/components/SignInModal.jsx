@@ -101,13 +101,13 @@ export default function SignInModal({ open, onClose, persona = null }) {
                 placeholder="you@email.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                 disabled={busy || !enabled}
               />
               <button
                 type="submit"
                 disabled={busy || !enabled || !email}
-                className="w-full rounded-md bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2.5 text-sm font-medium text-white"
+                className="w-full rounded-md bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2.5 text-sm font-medium text-white"
               >
                 {busy ? 'Sending\u2026' : 'Email me a sign-in link'}
               </button>

@@ -56,7 +56,7 @@ export default function PersonaBar({
         <span className="ml-auto">
           <button
             onClick={() => navigate('/')}
-            className="text-blue-700 hover:underline"
+            className="text-primary hover:underline"
           >
             &larr; Back to home
           </button>
@@ -67,12 +67,12 @@ export default function PersonaBar({
   const chips = activeChips(preferences)
 
   return (
-    <div className="bg-blue-50 border-b border-blue-100 px-4 py-1.5 text-xs text-gray-700 flex items-center gap-3 flex-wrap">
+    <div className="bg-primary-tint border-b border-primary-border px-4 py-1.5 text-xs text-gray-700 flex items-center gap-3 flex-wrap">
       <span className="flex items-center gap-1.5">
         <span className="text-base leading-none">{persona.icon}</span>
         <span>
           Viewing as{' '}
-          <span className="font-semibold text-blue-700">{persona.label}</span>
+          <span className="font-semibold text-primary">{persona.label}</span>
         </span>
       </span>
 
@@ -82,7 +82,7 @@ export default function PersonaBar({
           {chips.map((c, i) => (
             <span
               key={i}
-              className="inline-block px-2 py-0.5 rounded-full bg-white border border-blue-200 text-blue-800 text-[11px] leading-tight"
+              className="inline-block px-2 py-0.5 rounded-full bg-white border border-primary-border text-primary text-[11px] leading-tight"
             >
               {c}
             </span>
@@ -120,7 +120,7 @@ export default function PersonaBar({
             <span className="text-gray-400">|</span>
             <button
               onClick={() => onOpenMyPage('impressions')}
-              className="text-blue-700 hover:underline"
+              className="text-primary hover:underline"
             >
               👤 My page
             </button>
@@ -131,7 +131,7 @@ export default function PersonaBar({
             <span className="text-gray-400">|</span>
             <button
               onClick={onEditProfile}
-              className="text-blue-700 hover:underline"
+              className="text-primary hover:underline"
             >
               Edit profile
             </button>

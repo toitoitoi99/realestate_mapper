@@ -5,14 +5,14 @@ import { fetchAmenityRating } from '../api'
 const CATEGORIES = {
   green_spaces:    { color: 'bg-green-500',  barBg: 'bg-green-100' },
   convenience:     { color: 'bg-orange-500', barBg: 'bg-orange-100' },
-  education:       { color: 'bg-blue-500',   barBg: 'bg-blue-100' },
+  education:       { color: 'bg-primary',   barBg: 'bg-primary-tint' },
   transportation:  { color: 'bg-purple-500', barBg: 'bg-purple-100' },
   healthcare:      { color: 'bg-red-500',    barBg: 'bg-red-100' },
 }
 
 const CLASS_STYLES = {
   A: 'bg-emerald-600 text-white',
-  B: 'bg-blue-600 text-white',
+  B: 'bg-primary text-white',
   C: 'bg-amber-600 text-white',
 }
 

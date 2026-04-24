@@ -43,8 +43,8 @@ function AreaCard({ id, area }) {
       </div>
       {area.idealista_urls && (
         <div className="mt-2 text-[11px] text-gray-500 space-y-0.5 font-mono truncate">
-          <div title={area.idealista_urls.sale}>sale: <a href={area.idealista_urls.sale} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{area.idealista_urls.sale}</a></div>
-          <div title={area.idealista_urls.rent}>rent: <a href={area.idealista_urls.rent} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">{area.idealista_urls.rent}</a></div>
+          <div title={area.idealista_urls.sale}>sale: <a href={area.idealista_urls.sale} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{area.idealista_urls.sale}</a></div>
+          <div title={area.idealista_urls.rent}>rent: <a href={area.idealista_urls.rent} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{area.idealista_urls.rent}</a></div>
         </div>
       )}
       {area.parishes_geojson && (
@@ -58,11 +58,11 @@ function AreaCard({ id, area }) {
 
 function BaseMapCard({ id, map, isDefault }) {
   return (
-    <div className={`rounded border p-3 ${isDefault ? 'border-blue-500 bg-blue-50/30' : 'border-gray-200 bg-gray-50'}`}>
+    <div className={`rounded border p-3 ${isDefault ? 'border-primary bg-primary-tint/30' : 'border-gray-200 bg-gray-50'}`}>
       <div className="flex items-center gap-2">
         <span className="font-mono text-xs bg-white rounded px-1.5 py-0.5 border border-gray-200">{id}</span>
         <span className="font-semibold text-gray-800">{map.name}</span>
-        {isDefault && <span className="px-1.5 py-0.5 text-[10px] rounded bg-blue-600 text-white">default</span>}
+        {isDefault && <span className="px-1.5 py-0.5 text-[10px] rounded bg-primary text-white">default</span>}
       </div>
       <div className="mt-1 text-[11px] text-gray-500 font-mono truncate" title={map.url}>{map.url}</div>
       {map.maxZoom && <div className="mt-0.5 text-[11px] text-gray-500">maxZoom: <code className="font-mono">{map.maxZoom}</code></div>}

@@ -46,7 +46,7 @@ function ScraperCard({ source, label, selected, onSelect, running, onRun, latest
   const lastRun = history[0]
 
   return (
-    <div className={`bg-white rounded border ${selected ? 'border-blue-500' : 'border-gray-200'} p-4`}>
+    <div className={`bg-white rounded border ${selected ? 'border-primary' : 'border-gray-200'} p-4`}>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <input
@@ -61,7 +61,7 @@ function ScraperCard({ source, label, selected, onSelect, running, onRun, latest
         <button
           onClick={() => onRun(source)}
           disabled={running}
-          className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+          className="px-3 py-1 text-xs bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
         >
           {running ? 'Running…' : 'Run now'}
         </button>

@@ -50,7 +50,7 @@ export default function Landing() {
           ) : (
             <button
               onClick={() => setSignInOpen(true)}
-              className="text-sm font-medium text-blue-600 hover:text-blue-700"
+              className="text-sm font-medium text-primary hover:text-primary"
             >
               Sign in
             </button>
@@ -83,8 +83,8 @@ export default function Landing() {
                 key={id}
                 onClick={() => pick(id)}
                 className={`group text-left rounded-xl border bg-white p-5 transition-all
-                  hover:border-blue-500 hover:shadow-md hover:-translate-y-0.5
-                  ${isPicked ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-200'}`}
+                  hover:border-primary hover:shadow-md hover:-translate-y-0.5
+                  ${isPicked ? 'border-primary ring-2 ring-primary-border' : 'border-gray-200'}`}
               >
                 <div className="text-3xl">{p.icon}</div>
                 <div className="mt-3 font-semibold text-gray-900 group-hover:text-blue-700">
@@ -93,7 +93,7 @@ export default function Landing() {
                 <div className="mt-1 text-sm text-gray-500 leading-snug">
                   {p.tagline}
                 </div>
-                <div className="mt-3 text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="mt-3 text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity">
                   Choose &rarr;
                 </div>
               </button>

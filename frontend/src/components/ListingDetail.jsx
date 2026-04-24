@@ -211,7 +211,7 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats, 
       <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 shrink-0">
         <button
           onClick={onBack}
-          className="text-sm text-blue-600 hover:text-blue-800 font-medium cursor-pointer"
+          className="text-sm text-primary hover:text-primary font-medium cursor-pointer"
         >
           ← {t.back}
         </button>
@@ -272,7 +272,7 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats, 
               <SourceLogo source={listing.source} size="md" />
             </div>
             <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-xl font-bold text-blue-700">
+              <span className="text-xl font-bold text-primary">
                 €{fmt(listing.price_amount)}{isRent ? '/mo' : ''}
               </span>
               {days != null && (
@@ -317,7 +317,7 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats, 
                 </span>
               )}
               {days != null && days <= 3 && (
-                <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">NEW</span>
+                <span className="text-[10px] font-bold bg-primary-tint text-primary px-1.5 py-0.5 rounded">NEW</span>
               )}
             </div>
 
@@ -381,7 +381,7 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats, 
                   <SourceLogo source={listing.source} size="md" />
                   <span className="text-xs text-gray-400">this listing</span>
                 </div>
-                <span className="font-bold text-blue-700 text-sm">€{fmt(listing.price_amount)}</span>
+                <span className="font-bold text-primary text-sm">€{fmt(listing.price_amount)}</span>
               </div>
               {crossListings.map(cl => (
                 <a
@@ -439,7 +439,7 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats, 
           {/* Nearby construction projects detail */}
           {nearbyProjects && nearbyProjects.count > 0 && (
             <details className="text-sm">
-              <summary className="font-semibold text-gray-700 cursor-pointer hover:text-blue-600">
+              <summary className="font-semibold text-gray-700 cursor-pointer hover:text-primary">
                 {t.nearbyProjects || 'Nearby construction'} ({nearbyProjects.count})
               </summary>
               <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto">
@@ -479,7 +479,7 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats, 
             href={listing.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="block text-center bg-blue-600 text-white text-sm font-medium py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors"
+            className="block text-center bg-primary text-white text-sm font-medium py-2 px-4 rounded-lg hover:bg-primary-hover transition-colors"
           >
             {t.viewOnSource} {listing.source} →
           </a>

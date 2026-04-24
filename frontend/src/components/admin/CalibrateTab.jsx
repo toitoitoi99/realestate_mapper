@@ -5,7 +5,7 @@ import { fetchListings } from '../../api'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
-const GRADE = { A: 'bg-emerald-100 text-emerald-800', B: 'bg-blue-100 text-blue-800', C: 'bg-amber-100 text-amber-800', D: 'bg-red-100 text-red-800' }
+const GRADE = { A: 'bg-emerald-100 text-emerald-800', B: 'bg-primary-tint text-primary', C: 'bg-amber-100 text-amber-800', D: 'bg-red-100 text-red-800' }
 
 function PhotoCarousel({ images }) {
   const [idx, setIdx] = useState(0)
@@ -127,7 +127,7 @@ function RatingWidget({ label, score, factors, existing, agree, onAgree, comment
         onChange={e => onComment(e.target.value)}
         placeholder={agree === 'disagree' ? 'Why? e.g. "no comps within 500m", "yield too optimistic"' : 'Optional note…'}
         rows={3}
-        className="w-full text-xs border border-gray-200 rounded p-2 resize-none focus:outline-none focus:border-blue-400 placeholder-gray-300"
+        className="w-full text-xs border border-gray-200 rounded p-2 resize-none focus:outline-none focus:border-primary-border placeholder-gray-300"
       />
     </div>
   )
@@ -318,7 +318,7 @@ export default function CalibrateTab({ onViewListing }) {
         </div>
         <div className="mt-2 flex gap-3">
           {current.url && (
-            <a href={current.url} target="_blank" rel="noreferrer" className="text-xs text-blue-500 hover:underline">
+            <a href={current.url} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">
               View on {current.source || 'source'} ↗
             </a>
           )}

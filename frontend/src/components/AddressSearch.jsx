@@ -155,7 +155,7 @@ export default function AddressSearch({ onSelectListing, onLookupResult }) {
             onKeyDown={handleKeyDown}
             onBlur={() => setTimeout(() => setSuggestions([]), 150)}
             placeholder="Search address…"
-            className="w-full rounded-lg shadow-md border border-gray-200 bg-white px-4 py-2 pr-8 text-sm text-gray-800 placeholder-gray-400 outline-none focus:ring-2 focus:ring-blue-400"
+            className="w-full rounded-lg shadow-md border border-gray-200 bg-white px-4 py-2 pr-8 text-sm text-gray-800 placeholder-gray-400 outline-none focus:ring-2 focus:ring-primary"
           />
           {(query || result) && (
             <button
@@ -171,7 +171,7 @@ export default function AddressSearch({ onSelectListing, onLookupResult }) {
               <li
                 key={item.place_id}
                 onClick={() => handleSelect(item)}
-                className="px-4 py-2 cursor-pointer hover:bg-blue-50 text-gray-700 truncate border-b border-gray-50 last:border-0"
+                className="px-4 py-2 cursor-pointer hover:bg-primary-tint text-gray-700 truncate border-b border-gray-50 last:border-0"
               >
                 {item.display_name}
               </li>
@@ -187,7 +187,7 @@ export default function AddressSearch({ onSelectListing, onLookupResult }) {
         {result && lookupState === null && (
           <button
             onClick={handleLookup}
-            className="mt-1 w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow px-4 py-2 transition-colors"
+            className="mt-1 w-full bg-primary hover:bg-primary-hover text-white text-sm font-medium rounded-lg shadow px-4 py-2 transition-colors"
           >
             Find listings here
           </button>
@@ -196,7 +196,7 @@ export default function AddressSearch({ onSelectListing, onLookupResult }) {
         {/* Lookup states */}
         {lookupState === 'loading' && (
           <div className="mt-1 bg-white rounded-lg shadow px-4 py-2.5 text-sm text-gray-600 flex items-center gap-2">
-            <svg className="animate-spin h-4 w-4 text-blue-500" viewBox="0 0 24 24" fill="none">
+            <svg className="animate-spin h-4 w-4 text-primary" viewBox="0 0 24 24" fill="none">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
             </svg>

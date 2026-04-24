@@ -87,7 +87,7 @@ export default function ListingComparison({ listing, radiusM: externalRadius, on
             step={50}
             value={radiusM}
             onChange={e => setRadiusM(Number(e.target.value))}
-            className="w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-blue-600"
+            className="w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-primary"
           />
           <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
             <span>250m</span><span>1km</span><span>2km</span>
@@ -98,12 +98,12 @@ export default function ListingComparison({ listing, radiusM: externalRadius, on
         <div className="flex gap-3 mb-3">
           <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
             <input type="checkbox" checked={matchType} onChange={e => setMatchType(e.target.checked)}
-              className="rounded border-gray-300 text-blue-600 w-3.5 h-3.5" />
+              className="rounded border-gray-300 text-primary w-3.5 h-3.5" />
             {t.filterByType || 'Same type'}
           </label>
           <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
             <input type="checkbox" checked={matchBeds} onChange={e => setMatchBeds(e.target.checked)}
-              className="rounded border-gray-300 text-blue-600 w-3.5 h-3.5" />
+              className="rounded border-gray-300 text-primary w-3.5 h-3.5" />
             {t.filterByBedrooms || 'Same bedrooms'}
           </label>
         </div>
@@ -134,7 +134,7 @@ export default function ListingComparison({ listing, radiusM: externalRadius, on
                   <div className="absolute top-0 h-2 w-0.5 bg-gray-500" style={{ left: `${medianPos}%` }} />
                   {/* Listing position */}
                   <div
-                    className="absolute -top-1 w-4 h-4 rounded-full border-2 border-white shadow bg-blue-600"
+                    className="absolute -top-1 w-4 h-4 rounded-full border-2 border-white shadow bg-primary"
                     style={{ left: `calc(${listingPos}% - 8px)` }}
                   />
                   <div className="flex justify-between text-[10px] text-gray-400 mt-1">
@@ -157,7 +157,7 @@ export default function ListingComparison({ listing, radiusM: externalRadius, on
 
             {/* Comparable listings mini-list */}
             <details className="group">
-              <summary className="text-xs text-blue-600 cursor-pointer hover:underline">
+              <summary className="text-xs text-primary cursor-pointer hover:underline">
                 {t.showComparables || 'Show comparable listings'} ({comparables.length})
               </summary>
               <div className="mt-2 space-y-1.5 max-h-60 overflow-y-auto">
@@ -165,7 +165,7 @@ export default function ListingComparison({ listing, radiusM: externalRadius, on
                   const insight = personaInsight(c, personaId)
                   return (
                     <div key={`${c.source}-${c.id}`} className="flex items-center gap-2 text-xs text-gray-600 py-1 border-b border-gray-100">
-                      <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded text-[10px] font-medium w-12 text-center shrink-0">
+                      <span className="bg-primary-tint text-primary px-1.5 py-0.5 rounded text-[10px] font-medium w-12 text-center shrink-0">
                         {c.distance_m}m
                       </span>
                       <span className="flex-1 truncate min-w-0">{c.address || 'Unknown'}</span>
@@ -288,7 +288,7 @@ export default function ListingComparison({ listing, radiusM: externalRadius, on
                   <span className="bg-red-100 text-red-700 px-1 py-0.5 rounded text-[10px]">sold</span>
                 )}
                 <span className={`px-1 py-0.5 rounded text-[10px] ${
-                  m.listing_type === 'rent' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                  m.listing_type === 'rent' ? 'bg-green-100 text-green-700' : 'bg-primary-tint text-primary'
                 }`}>
                   {m.listing_type === 'rent' ? 'rent' : 'sale'}
                 </span>
@@ -306,7 +306,7 @@ function ComparableInsight({ insight }) {
     ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
     : insight.tone === 'bad'
       ? 'bg-red-100 text-red-700 border-red-200'
-      : 'bg-blue-50 text-blue-800 border-blue-200'
+      : 'bg-primary-tint text-primary border-primary-border'
   return (
     <span
       title={`${insight.label}: ${insight.value}`}

@@ -207,7 +207,7 @@ export default function FlipRentScorecard({ listing }) {
         </div>
         <button
           onClick={() => setExpanded(e => !e)}
-          className="text-xs text-blue-600 hover:underline"
+          className="text-xs text-primary hover:underline"
         >
           {expanded ? 'Hide signals' : 'Review signals'}
         </button>
@@ -267,7 +267,7 @@ export default function FlipRentScorecard({ listing }) {
           min="400" max="3500" step="50"
           value={effectiveRenoPerSqm || 1500}
           onChange={(e) => setRenoPerSqm(parseFloat(e.target.value))}
-          className="w-full accent-blue-600"
+          className="w-full accent-primary"
           aria-label="Renovation cost per m²"
         />
         <div className="flex justify-between text-[10px] text-gray-400">
@@ -277,7 +277,7 @@ export default function FlipRentScorecard({ listing }) {
         </div>
         {renoPerSqm != null && (
           <button
-            className="text-[11px] text-blue-600 hover:underline mt-1"
+            className="text-[11px] text-primary hover:underline mt-1"
             onClick={() => setRenoPerSqm(null)}
           >
             reset to default
@@ -348,7 +348,7 @@ export default function FlipRentScorecard({ listing }) {
         <div className="mt-4 border-t border-gray-100 pt-3">
           <div className="text-xs text-gray-500 mb-2">
             Uncheck to see what each signal contributes. Toggles affect the scores above only; underlying data is unchanged.
-            {loading && <span className="ml-2 text-blue-500">…</span>}
+            {loading && <span className="ml-2 text-primary">…</span>}
             {error && <span className="ml-2 text-red-500">{error}</span>}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1">

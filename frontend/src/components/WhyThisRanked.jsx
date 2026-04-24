@@ -78,7 +78,7 @@ export default function WhyThisRanked({ listing, personaId, weights }) {
                 </div>
                 <div className="h-1 bg-gray-100 rounded overflow-hidden mt-0.5">
                   <div
-                    className="h-full bg-blue-500"
+                    className="h-full bg-primary"
                     style={{ width: `${Math.max(0, Math.min(100, it.value))}%` }}
                   />
                 </div>

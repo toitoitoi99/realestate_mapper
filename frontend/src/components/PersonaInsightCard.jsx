@@ -180,10 +180,10 @@ export default function PersonaInsightCard({ listing, personaId }) {
   const bundle = readBundle(listing)
 
   return (
-    <div className="rounded-lg border border-blue-200 bg-blue-50/30 p-4">
+    <div className="rounded-lg border border-primary-border bg-primary-tint/30 p-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-semibold text-gray-900 text-sm">{PERSONA_TITLE[personaId]}</h3>
-        <span className="text-[10px] uppercase tracking-wider text-blue-700">Persona</span>
+        <span className="text-[10px] uppercase tracking-wider text-primary">Persona</span>
       </div>
       <View listing={listing} bundle={bundle} />
     </div>
@@ -213,7 +213,7 @@ function Row({ label, value, highlight, muted, bold }) {
 }
 
 function Divider() {
-  return <div className="border-t border-blue-100 my-1.5" />
+  return <div className="border-t border-primary-border my-1.5" />
 }
 
 function SectionHeading({ children }) {

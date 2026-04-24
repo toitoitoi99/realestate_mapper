@@ -108,7 +108,7 @@ function ScoreBandsEditor({ current, onSaved }) {
       <button
         onClick={save}
         disabled={saving}
-        className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
+        className="px-2 py-1 text-xs bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-50 cursor-pointer"
       >
         {saving ? 'Saving…' : 'Save'}
       </button>
@@ -136,7 +136,7 @@ function WeightBar({ value, max = 0.5 }) {
   const pct = Math.min(100, Math.round((value / max) * 100))
   return (
     <div className="h-1.5 w-24 bg-gray-100 rounded overflow-hidden">
-      <div className="h-full bg-blue-500" style={{ width: `${pct}%` }} />
+      <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
     </div>
   )
 }

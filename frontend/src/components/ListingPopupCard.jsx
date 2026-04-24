@@ -93,7 +93,7 @@ export default function ListingPopupCard({ listing: l }) {
           href={l.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-blue-600 text-xs font-medium hover:underline"
+          className="text-primary text-xs font-medium hover:underline"
         >
           {t.viewListing}
         </a>

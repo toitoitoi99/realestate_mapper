@@ -20,19 +20,19 @@ export default function ListingCard({ listing, onSelect, highlighted, reaction, 
       onClick={() => onSelect(listing)}
       className={`block p-3 rounded-lg transition-all text-left cursor-pointer ${
         highlighted
-          ? 'bg-blue-50 border-2 border-blue-400 shadow-sm'
+          ? 'bg-primary-tint border-2 border-primary-border shadow-sm'
           : isLiked
             ? 'bg-green-50/50 border border-green-200 hover:border-green-400 hover:shadow-sm'
             : isDisliked
               ? 'bg-gray-50 border border-gray-200 opacity-70 hover:opacity-100'
-              : 'border border-gray-100 hover:border-blue-300 hover:shadow-sm'
+              : 'border border-gray-100 hover:border-primary-border hover:shadow-sm'
       }`}
     >
       <div className="flex justify-between items-start gap-2 mb-1">
         <span className="font-semibold text-gray-900 text-sm leading-tight line-clamp-2">
           {listing.title || `T${listing.rooms ?? '?'} ${t.inArea(listing.neighborhood || 'Lisboa')}`}
         </span>
-        <span className="shrink-0 text-blue-700 font-bold text-sm">
+        <span className="shrink-0 text-primary font-bold text-sm">
           €{fmt(listing.price_amount)}
         </span>
       </div>
@@ -84,7 +84,7 @@ function PersonaInsightBadge({ insight, why }) {
     ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
     : insight.tone === 'bad'
       ? 'bg-red-100 text-red-800 border-red-300'
-      : 'bg-blue-50 text-blue-800 border-blue-200'
+      : 'bg-primary-tint text-primary border-primary-border'
   return (
     <div className="mt-1.5 inline-flex items-center">
       <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded border ${cls}`}>

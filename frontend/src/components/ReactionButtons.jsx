@@ -64,13 +64,13 @@ export default function ReactionButtons({
         {variant === 'full' && current && reaction?.comment && !editing && (
           <button
             onClick={(e) => { e.stopPropagation(); setEditing(true) }}
-            className="text-xs text-blue-600 hover:text-blue-800 cursor-pointer ml-2"
+            className="text-xs text-primary hover:text-primary cursor-pointer ml-2"
           >Edit note</button>
         )}
         {variant === 'full' && current && !reaction?.comment && !editing && (
           <button
             onClick={(e) => { e.stopPropagation(); setEditing(true) }}
-            className="text-xs text-blue-600 hover:text-blue-800 cursor-pointer ml-2"
+            className="text-xs text-primary hover:text-primary cursor-pointer ml-2"
           >Add note</button>
         )}
       </div>
@@ -83,13 +83,13 @@ export default function ReactionButtons({
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 placeholder={current === 'like' ? 'Why do you like it?' : 'Why don’t you like it?'}
-                className="w-full text-xs border border-gray-300 rounded p-2 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                className="w-full text-xs border border-gray-300 rounded p-2 focus:outline-none focus:ring-1 focus:ring-primary"
                 rows={2}
               />
               <div className="flex gap-2 mt-1">
                 <button
                   onClick={saveComment}
-                  className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 cursor-pointer"
+                  className="text-xs bg-primary text-white px-2 py-1 rounded hover:bg-primary-hover cursor-pointer"
                 >Save</button>
                 <button
                   onClick={(e) => { e.stopPropagation(); setEditing(false); setComment(reaction?.comment || '') }}

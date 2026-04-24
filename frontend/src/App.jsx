@@ -502,7 +502,7 @@ export default function App() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {returnTo === 'admin' && (
-        <div className="bg-blue-600 text-white text-xs px-4 py-1.5 flex items-center gap-3">
+        <div className="bg-primary text-white text-xs px-4 py-1.5 flex items-center gap-3">
           <button onClick={() => { setReturnTo(null); setAdminInitialTab('calibrate'); setView('admin') }}
             className="flex items-center gap-1.5 hover:underline cursor-pointer font-medium">
             ← Back to Calibrate

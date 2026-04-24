@@ -19,7 +19,7 @@ function ComparisonCard({ name, stats, onRemove }) {
   return (
     <div className="bg-gray-50 rounded p-2 text-xs flex-1 min-w-0">
       <div className="flex items-center justify-between mb-1.5">
-        <span className="font-medium text-blue-700 truncate">{name}</span>
+        <span className="font-medium text-primary truncate">{name}</span>
         <button onClick={() => onRemove(name)} className="text-gray-400 hover:text-gray-600 cursor-pointer ml-1">✕</button>
       </div>
       <div className="space-y-1">
@@ -74,7 +74,7 @@ function ComparisonTable({ parishes, parishStats, onRemove }) {
           <tr className="border-b border-gray-200">
             <th className="text-left py-1 pr-2 text-gray-500 font-normal sticky left-0 bg-white"></th>
             {names.map(name => (
-              <th key={name} className="text-left py-1 px-1 font-medium text-blue-700 whitespace-nowrap">
+              <th key={name} className="text-left py-1 px-1 font-medium text-primary whitespace-nowrap">
                 <div className="flex items-center gap-1">
                   <span className="truncate max-w-[80px]">{name}</span>
                   <button onClick={() => onRemove(name)} className="text-gray-400 hover:text-gray-600 cursor-pointer shrink-0">✕</button>
@@ -111,14 +111,14 @@ export default function NeighbourhoodComparison({ selectedParishes, parishStats,
   const parishes = [...selectedParishes]
 
   return (
-    <div className="border-y border-blue-100 bg-blue-50/50 px-3 py-2 shrink-0">
+    <div className="border-y border-primary-border bg-primary-tint/50 px-3 py-2 shrink-0">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-semibold text-blue-700">
+        <span className="text-xs font-semibold text-primary">
           {t.comparison ?? 'Comparison'} ({count})
         </span>
         <button
           onClick={onClearAll}
-          className="text-xs text-blue-400 hover:text-blue-600 cursor-pointer"
+          className="text-xs text-primary hover:text-primary cursor-pointer"
         >
           {t.clearComparison ?? 'Clear'}
         </button>
