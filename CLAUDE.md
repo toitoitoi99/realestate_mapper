@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Design system
+
+Read `DESIGN.md` before any UI work. It is the authoritative source for colors, typography, spacing, border radius, shadow, and component patterns. Do not introduce new visual values without checking it first.
+
 ## Stack
 
 - **Backend**: Python 3.9 (system `/usr/bin/python3`), Tornado web framework, SQLite (WAL mode)
