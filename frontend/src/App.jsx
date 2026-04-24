@@ -597,6 +597,7 @@ export default function App() {
           onSetReaction={handleSetReaction}
           onClearReaction={handleClearReaction}
           scoreShow={activePersona?.primaryScore ?? 'both'}
+          onRated={isAdmin ? (id) => setReviewedIds(prev => new Set([...prev, id])) : undefined}
         />
         <Map
           areaConfig={areas[currentArea]}

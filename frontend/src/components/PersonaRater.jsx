@@ -104,7 +104,7 @@ function Row({ persona, score, rating, onAgree, onDisagree, onClear, saving }) {
  * Admin-only: per-persona agreement with the model's score.
  * Rendered inside listing detail when useIsAdmin() is true.
  */
-export default function PersonaRater({ listing }) {
+export default function PersonaRater({ listing, onRated }) {
   const kind = listing.listing_type || 'sale'
   const [ratings, setRatings] = useState({ flip: null, rent: null })
   const [saving, setSaving] = useState(false)
@@ -132,6 +132,7 @@ export default function PersonaRater({ listing }) {
     try {
       const row = await apiSetRating(kind, listing.id, persona, agree, comment)
       setRatings(prev => ({ ...prev, [persona]: row }))
+      onRated?.(listing.id)
     } catch (e) {
       console.error('setRating failed', e)
     } finally { setSaving(false) }
