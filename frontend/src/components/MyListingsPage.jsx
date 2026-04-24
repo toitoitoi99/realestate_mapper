@@ -60,7 +60,7 @@ export default function MyListingsPage({ onBack, onViewListing, embedded = false
       const enriched = await Promise.all((data ?? []).map(async r => {
         try {
           const d = await fetchListingDetail(r.listing_id, r.listing_kind === 'rent' ? 'rent' : 'sale')
-          return { ...r, listing: d.listing ?? null }
+          return { ...r, listing: d?.id ? d : null }
         } catch { return { ...r, listing: null } }
       }))
       setRows(enriched)

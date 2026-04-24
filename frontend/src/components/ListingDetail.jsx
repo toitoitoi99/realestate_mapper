@@ -50,7 +50,7 @@ function PctBadge({ pct, invert = false }) {
   return <span className={`text-xs font-semibold ${color}`}>{sign}{pct.toFixed(0)}%</span>
 }
 
-export default function ListingDetail({ listing, onBack, parishStats, ineStats, reaction, onSetReaction, onClearReaction, personaId }) {
+export default function ListingDetail({ listing, onBack, parishStats, ineStats, reaction, onSetReaction, onClearReaction, personaId, onRated }) {
   const { lang, t } = useLanguage()
   const isAdmin = useIsAdmin()
   const [descriptionEn, setDescriptionEn] = useState(null)
@@ -305,7 +305,7 @@ export default function ListingDetail({ listing, onBack, parishStats, ineStats, 
           )}
 
           {/* Admin: per-persona score agreement (tunes the model) */}
-          {isAdmin && <PersonaRater listing={listing} />}
+          {isAdmin && <PersonaRater listing={listing} onRated={onRated} />}
 
           {/* ============ VALUE SUMMARY CARD ============ */}
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">

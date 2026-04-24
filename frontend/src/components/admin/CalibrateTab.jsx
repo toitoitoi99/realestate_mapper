@@ -149,12 +149,12 @@ export default function CalibrateTab({ onViewListing }) {
   const [flipComment, setFlipComment] = useState('')
   const [rentAgree, setRentAgree] = useState(null)
   const [rentComment, setRentComment] = useState('')
+  const [excludeTypes, setExcludeTypes] = useState(new Set(['land']))
 
-  const buildQueue = useCallback((listings, ratings, mode) => {
+  const buildQueue = useCallback((listings, ratings, mode, excluded) => {
     const ratedPairs = new Set(ratings.map(r => `${r.listing_kind}-${r.listing_id}-${r.persona}`))
     let pool
     if (mode === 'unreviewed') {
-      // Keep listings where at least one of flip/rent is unrated
       pool = listings.filter(l => {
         const k = l.listing_type || 'sale'
         const flipRated = ratedPairs.has(`${k}-${l.id}-flip`)
@@ -162,9 +162,11 @@ export default function CalibrateTab({ onViewListing }) {
         return !flipRated || !rentRated
       })
     } else {
-      // disagreements: at least one disagree
       const disagreeIds = new Set(ratings.filter(r => r.agree === 'disagree').map(r => r.listing_id))
       pool = listings.filter(l => disagreeIds.has(l.id))
+    }
+    if (excluded && excluded.size > 0) {
+      pool = pool.filter(l => !excluded.has(l.property_type))
     }
     setCandidates([...pool].sort(() => Math.random() - 0.5))
     setIdx(0)
@@ -188,10 +190,10 @@ export default function CalibrateTab({ onViewListing }) {
     return () => { cancelled = true }
   }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Rebuild queue when data or mode changes
+  // Rebuild queue when data, mode, or type filter changes
   useEffect(() => {
-    if (loaded) buildQueue(allListings, userRatings, queue)
-  }, [loaded, queue, buildQueue]) // allListings and userRatings intentionally excluded — rebuilt only on load/queue change
+    if (loaded) buildQueue(allListings, userRatings, queue, excludeTypes)
+  }, [loaded, queue, excludeTypes, buildQueue]) // allListings and userRatings intentionally excluded — rebuilt only on load/queue change
 
   // Pre-fill draft when listing changes
   const current = candidates[idx] || null
@@ -269,6 +271,26 @@ export default function CalibrateTab({ onViewListing }) {
           className="ml-auto px-2 py-1 text-xs border border-gray-200 rounded text-gray-500 disabled:opacity-30 cursor-pointer">
           ← Prev
         </button>
+      </div>
+
+      {/* Property type filter */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs text-gray-400">Hide:</span>
+        {['land', 'garage', 'commercial', 'office'].map(type => {
+          const excluded = excludeTypes.has(type)
+          return (
+            <button key={type} onClick={() => setExcludeTypes(prev => {
+              const next = new Set(prev)
+              excluded ? next.delete(type) : next.add(type)
+              return next
+            })}
+              className={`px-2 py-0.5 text-xs rounded-full border cursor-pointer transition-colors ${
+                excluded ? 'bg-gray-800 text-white border-gray-800' : 'bg-white border-gray-300 text-gray-500 hover:border-gray-500'
+              }`}>
+              {type}
+            </button>
+          )
+        })}
       </div>
 
       {/* Listing card */}
