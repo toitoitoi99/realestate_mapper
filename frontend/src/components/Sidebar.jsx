@@ -37,6 +37,7 @@ export default function Sidebar({
   reactionFor, onSetReaction, onClearReaction,
   preferences, personaId, personaWeights,
   scoreShow = 'both',
+  onRated,
 }) {
   const { t } = useLanguage()
   const [collapsed, setCollapsed] = useState(false)
@@ -126,6 +127,7 @@ export default function Sidebar({
             onSetReaction={onSetReaction}
             onClearReaction={onClearReaction}
             personaId={personaId}
+            onRated={onRated}
           />
         </div>
       </div>
