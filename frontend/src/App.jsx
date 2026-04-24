@@ -11,6 +11,7 @@ import { useFilters } from './useFilters'
 import { CATEGORIES } from './projectCategories'
 import { DEFAULT_BASE_MAP } from './baseMaps'
 import { buildGroups } from './neighborhoodGroups'
+import { useIsAdmin } from './lib/admin'
 import StatsBar from './components/StatsBar'
 import Sidebar from './components/Sidebar'
 import Map from './components/Map'
@@ -57,7 +58,9 @@ export default function App() {
   // Map of `${kind}-${id}` → { reaction, comment }
   const [reactions, setReactions] = useState({})
   const [showDisliked, setShowDisliked] = useState(false)
-  const [view, setView] = useState('map')  // 'map' | 'admin' | 'my-page'
+  const [hideReviewed, setHideReviewed] = useState(true)
+  const [reviewedIds, setReviewedIds] = useState(new Set())
+  const [view, setView] = useState('map')  // 'map' | 'admin' | 'my-page' | 'compare'
   const [myPageTab, setMyPageTab] = useState('impressions')
   const [returnTo, setReturnTo] = useState(null)  // 'admin' when navigating to map from admin
   const [adminInitialTab, setAdminInitialTab] = useState('scrapers')
@@ -67,6 +70,7 @@ export default function App() {
   // Auth + persona — when a user is signed in with a persona, listings get
   // a `persona_score` column and the map ranks/colors by that.
   const { profile, user, signOut } = useAuth()
+  const isAdmin = useIsAdmin()
   const navigate = useNavigate()
   const activePersonaId = profile?.persona ?? null
   const activePersona = getPersona(activePersonaId)
@@ -145,6 +149,14 @@ export default function App() {
   useEffect(() => {
     fetchAreas().then(setAreas).catch(console.error)
   }, [])
+
+  // Admin: fetch IDs of all calibrated (rated) listings to hide from the map
+  useEffect(() => {
+    if (!isAdmin || !user || !supabase) { setReviewedIds(new Set()); return }
+    supabase.from('listing_ratings').select('listing_id').eq('user_id', user.id)
+      .then(({ data }) => setReviewedIds(new Set((data ?? []).map(r => r.listing_id))))
+      .catch(() => setReviewedIds(new Set()))
+  }, [isAdmin, user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetchStats().then(setStats).catch(console.error)
@@ -358,6 +370,10 @@ export default function App() {
         return r?.reaction !== 'dislike'
       })
     }
+    // Admin: hide calibrated listings
+    if (isAdmin && hideReviewed && reviewedIds.size > 0) {
+      base = base.filter(l => !reviewedIds.has(l.id))
+    }
 
     if (!showNeighborhoods) return base
 
@@ -374,7 +390,7 @@ export default function App() {
       if (hiddenParishes.has(l.neighborhood)) return false
       return true
     })
-  }, [listings, reactions, showDisliked, showNeighborhoods, hiddenParishes, parishToGroup, visibleGroups, selectedParishes])
+  }, [listings, reactions, showDisliked, isAdmin, hideReviewed, reviewedIds, showNeighborhoods, hiddenParishes, parishToGroup, visibleGroups, selectedParishes])
 
   const handleSetReaction = useCallback(async (listing, reaction, comment) => {
     const kind = listing.listing_type || 'sale'
@@ -614,6 +630,8 @@ export default function App() {
           reactionFor={reactionFor}
           showDisliked={showDisliked}
           onToggleShowDisliked={() => setShowDisliked(p => !p)}
+          hideReviewed={isAdmin ? hideReviewed : undefined}
+          onToggleHideReviewed={isAdmin ? () => setHideReviewed(p => !p) : undefined}
           onLookupResult={(newListings) => {
             setListings(prev => {
               const ids = new Set(prev.map(l => `${l.id}-${l.listing_type}`))

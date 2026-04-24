@@ -3,7 +3,7 @@ import { useLanguage } from '../LanguageContext'
 import { BASE_MAPS } from '../baseMaps'
 import { useScoreBands } from '../ScoreBandsContext'
 
-export default function MapLegend({ baseMap, onChangeBaseMap, listingTypeFilter = 'sale', showDisliked, onToggleShowDisliked }) {
+export default function MapLegend({ baseMap, onChangeBaseMap, listingTypeFilter = 'sale', showDisliked, onToggleShowDisliked, hideReviewed, onToggleHideReviewed }) {
   const { t } = useLanguage()
   const { bands } = useScoreBands()
   const [collapsed, setCollapsed] = useState(false)
@@ -95,6 +95,21 @@ export default function MapLegend({ baseMap, onChangeBaseMap, listingTypeFilter 
               className="cursor-pointer"
             />
             <span className="text-gray-700">Show disliked</span>
+          </label>
+        </div>
+      )}
+
+      {/* Admin: hide calibrated listings */}
+      {onToggleHideReviewed && (
+        <div className="mt-1">
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={!!hideReviewed}
+              onChange={onToggleHideReviewed}
+              className="cursor-pointer"
+            />
+            <span className="text-gray-700">Hide calibrated</span>
           </label>
         </div>
       )}
