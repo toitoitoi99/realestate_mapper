@@ -1,7 +1,5 @@
-import { useEffect, useRef, useState, useMemo } from 'react'
-import { GeoJSON, useMap } from 'react-leaflet'
-import L from 'leaflet'
-import 'leaflet.heat'
+import { useMemo } from 'react'
+import { GeoJSON } from 'react-leaflet'
 import { useLanguage } from '../LanguageContext'
 
 /**
@@ -30,51 +28,9 @@ function pctChangeColor(pct) {
   }
 }
 
-function SoldHeatmap({ points }) {
-  const map = useMap()
-  const heatLayerRef = useRef(null)
-
-  useEffect(() => {
-    if (heatLayerRef.current) {
-      map.removeLayer(heatLayerRef.current)
-    }
-
-    if (points.length === 0) {
-      heatLayerRef.current = null
-      return
-    }
-
-    heatLayerRef.current = L.heatLayer(points, {
-      radius: 18,
-      blur: 25,
-      maxZoom: 16,
-      max: 1.0,
-      minOpacity: 0.2,
-      gradient: {
-        0.0: 'rgba(59,130,246,0)',
-        0.15: '#93c5fd',
-        0.35: '#dbeafe',
-        0.5: '#fef3c7',
-        0.7: '#fca5a5',
-        0.85: '#ef4444',
-        1.0: '#991b1b',
-      },
-    }).addTo(map)
-
-    return () => {
-      if (heatLayerRef.current) {
-        map.removeLayer(heatLayerRef.current)
-      }
-    }
-  }, [points, map])
-
-  return null
-}
-
 export default function SoldTrendsLayer({
   parishFeatures,
   trends,
-  points,
 }) {
   const { t } = useLanguage()
 
@@ -87,31 +43,13 @@ export default function SoldTrendsLayer({
     return map
   }, [trends])
 
-  // Heatmap points: [lat, lon, intensity]
-  // Intensity is based on the parish's pct_change, normalized to 0-1
-  const heatPoints = useMemo(() => {
-    if (!points || points.length === 0) return []
-
-    return points
-      .filter(p => {
-        const tr = trendMap[p.parish]
-        return tr && p.lat && p.lon
-      })
-      .map(p => {
-        const tr = trendMap[p.parish]
-        // Map pct_change to 0-1: -15% → 0, 0% → 0.5, +15% → 1
-        const intensity = Math.max(0, Math.min(1, (tr.pct_change + 15) / 30))
-        return [p.lat, p.lon, intensity]
-      })
-  }, [points, trendMap])
-
   // Choropleth overlay on parish polygons
   const visibleFeatures = useMemo(() => {
     if (!parishFeatures?.length) return []
     return parishFeatures.filter(f => trendMap[f.properties.name])
   }, [parishFeatures, trendMap])
 
-  if (visibleFeatures.length === 0 && heatPoints.length === 0) return null
+  if (visibleFeatures.length === 0) return null
 
   const geojson = { type: 'FeatureCollection', features: visibleFeatures }
 
@@ -161,14 +99,11 @@ export default function SoldTrendsLayer({
   const key = JSON.stringify(trends.map(t => [t.parish, t.pct_change]).sort())
 
   return (
-    <>
-      <GeoJSON
-        key={key}
-        data={geojson}
-        style={style}
-        onEachFeature={onEachFeature}
-      />
-      <SoldHeatmap points={heatPoints} />
-    </>
+    <GeoJSON
+      key={key}
+      data={geojson}
+      style={style}
+      onEachFeature={onEachFeature}
+    />
   )
 }
