@@ -67,7 +67,7 @@ export default function SavedSearches({ filters, area, onApply }) {
       className="relative"
       onToggle={(e) => setOpen(e.currentTarget.open)}
     >
-      <summary className="list-none cursor-pointer text-blue-700 hover:underline select-none">
+      <summary className="list-none cursor-pointer text-primary hover:underline select-none">
         Saved&nbsp;searches{items.length > 0 && ` (${items.length})`} {open ? '\u25b4' : '\u25be'}
       </summary>
 
@@ -75,7 +75,7 @@ export default function SavedSearches({ filters, area, onApply }) {
         <button
           onClick={save}
           disabled={saving}
-          className="w-full text-left px-2 py-1.5 rounded text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+          className="w-full text-left px-2 py-1.5 rounded text-xs font-medium text-primary hover:bg-primary-tint disabled:opacity-50"
         >
           + Save current filters\u2026
         </button>

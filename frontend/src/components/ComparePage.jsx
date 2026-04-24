@@ -73,7 +73,7 @@ function Slot({ label, listing, likedListings, onPick, onClear }) {
                 href={listing.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-[11px] text-blue-600 hover:underline mt-1 inline-block"
+                className="text-[11px] text-primary hover:underline mt-1 inline-block"
               >View listing ↗</a>
             )}
           </div>
@@ -87,7 +87,7 @@ function Slot({ label, listing, likedListings, onPick, onClear }) {
       <div className="font-semibold text-gray-700 text-sm mb-2">{label}</div>
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full border-2 border-dashed border-gray-300 rounded-lg p-6 text-sm text-gray-400 hover:border-blue-400 hover:text-blue-500 transition-colors"
+        className="w-full border-2 border-dashed border-gray-300 rounded-lg p-6 text-sm text-gray-400 hover:border-primary-border hover:text-primary transition-colors"
       >
         {open ? '▲ Close picker' : '+ Pick a listing'}
       </button>
@@ -99,7 +99,7 @@ function Slot({ label, listing, likedListings, onPick, onClear }) {
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder="Filter by name, neighborhood…"
-              className="w-full text-xs border border-gray-200 rounded px-2 py-1 outline-none focus:border-blue-400"
+              className="w-full text-xs border border-gray-200 rounded px-2 py-1 outline-none focus:border-primary-border"
               autoFocus
             />
           </div>
@@ -111,7 +111,7 @@ function Slot({ label, listing, likedListings, onPick, onClear }) {
                 <button
                   key={`${item.listing_kind}-${item.listing_id}`}
                   onClick={() => { onPick(item); setOpen(false); setQuery('') }}
-                  className="w-full text-left hover:bg-blue-50 rounded transition-colors"
+                  className="w-full text-left hover:bg-primary-tint rounded transition-colors"
                 >
                   <ListingRefCard
                     listing={item.listing}
@@ -237,7 +237,7 @@ export default function ComparePage({ onBack, onViewListing, embedded = false })
                 <button
                   onClick={handleCompare}
                   disabled={!canCompare}
-                  className="px-6 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  className="px-6 py-2 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {comparing ? (
                     <>
@@ -289,9 +289,9 @@ export default function ComparePage({ onBack, onViewListing, embedded = false })
 
                 {/* Recommendation */}
                 {result.recommendation && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h4 className="text-sm font-semibold text-blue-800 mb-1">🎯 Recommendation</h4>
-                    <p className="text-sm text-blue-900">{result.recommendation}</p>
+                  <div className="bg-primary-tint border border-primary-border rounded-lg p-4">
+                    <h4 className="text-sm font-semibold text-primary mb-1">🎯 Recommendation</h4>
+                    <p className="text-sm text-primary">{result.recommendation}</p>
                   </div>
                 )}
 

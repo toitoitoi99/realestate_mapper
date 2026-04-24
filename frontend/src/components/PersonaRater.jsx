@@ -69,11 +69,11 @@ function Row({ persona, score, rating, onAgree, onDisagree, onClear, saving }) {
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 placeholder={current === 'disagree' ? 'Why is the score wrong?' : 'Why is the score right?'}
-                className="w-full text-xs border border-gray-300 rounded p-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                className="w-full text-xs border border-gray-300 rounded p-1.5 focus:outline-none focus:ring-1 focus:ring-primary"
                 rows={2}
               />
               <div className="flex gap-2 mt-1">
-                <button onClick={save} className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded hover:bg-blue-700 cursor-pointer">Save</button>
+                <button onClick={save} className="text-xs bg-primary text-white px-2 py-0.5 rounded hover:bg-primary-hover cursor-pointer">Save</button>
                 <button
                   onClick={() => { setEditing(false); setComment(rating?.comment || '') }}
                   className="text-xs text-gray-500 hover:text-gray-700 cursor-pointer"
@@ -85,13 +85,13 @@ function Row({ persona, score, rating, onAgree, onDisagree, onClear, saving }) {
               <p className="text-xs text-gray-700 italic whitespace-pre-line flex-1">“{rating.comment}”</p>
               <button
                 onClick={() => setEditing(true)}
-                className="text-xs text-blue-600 hover:text-blue-800 cursor-pointer shrink-0"
+                className="text-xs text-primary hover:text-primary cursor-pointer shrink-0"
               >Edit</button>
             </div>
           ) : (
             <button
               onClick={() => setEditing(true)}
-              className="text-xs text-blue-600 hover:text-blue-800 cursor-pointer"
+              className="text-xs text-primary hover:text-primary cursor-pointer"
             >Add note</button>
           )}
         </div>

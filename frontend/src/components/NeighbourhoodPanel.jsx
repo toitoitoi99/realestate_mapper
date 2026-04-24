@@ -90,7 +90,7 @@ function NeighbourhoodCard({
   return (
     <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-blue-50 border-b border-blue-100">
+      <div className="flex items-center justify-between px-3 py-2 bg-primary-tint border-b border-primary-border">
         <div>
           <div className="font-semibold text-gray-800 text-sm">{name}</div>
           {municipalityName !== name && (
@@ -352,7 +352,7 @@ export default function NeighbourhoodPanel({
               placeholder="Search..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 mb-2"
+              className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary mb-2"
             />
 
             {/* Municipality + parish list */}
@@ -397,7 +397,7 @@ export default function NeighbourhoodPanel({
                                 key={name}
                                 className={`flex items-center justify-between py-0.5 px-1.5 rounded cursor-pointer text-xs leading-tight transition-colors ${
                                   isSelected
-                                    ? 'bg-blue-100 text-blue-700 font-medium'
+                                    ? 'bg-primary-tint text-primary font-medium'
                                     : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
                                 }`}
                                 onClick={() => handleSelect(name)}

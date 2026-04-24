@@ -34,7 +34,7 @@ export default function MyPage({ onBack, onViewListing, initialTab = 'impression
               onClick={() => setTab(t.id)}
               className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                 tab === t.id
-                  ? 'border-blue-600 text-blue-700'
+                  ? 'border-primary text-primary'
                   : 'border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300'
               }`}
             >

@@ -223,7 +223,7 @@ export default function Sidebar({
           <select
             value={filters.sort_by}
             onChange={e => setFilter('sort_by', e.target.value)}
-            className="border border-gray-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+            className="border border-gray-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary bg-white"
           >
             <option value="default">{t.sortDefault}</option>
             {personaId && <option value="persona">{t.sortForYou}</option>}
@@ -243,11 +243,11 @@ export default function Sidebar({
 
       {/* Selected neighborhood indicator */}
       {selectedNeighborhood && (
-        <div className="flex items-center justify-between px-4 py-2 bg-blue-50 border-b border-blue-100 text-sm shrink-0">
-          <span className="text-blue-700 font-medium truncate">{selectedNeighborhood}</span>
+        <div className="flex items-center justify-between px-4 py-2 bg-primary-tint border-b border-primary-border text-sm shrink-0">
+          <span className="text-primary font-medium truncate">{selectedNeighborhood}</span>
           <button
             onClick={onClearNeighborhood}
-            className="text-blue-400 hover:text-blue-600 ml-2 shrink-0 cursor-pointer"
+            className="text-primary hover:text-primary ml-2 shrink-0 cursor-pointer"
           >✕</button>
         </div>
       )}
@@ -279,7 +279,7 @@ export default function Sidebar({
               />
               <button
                 onClick={onClearHighlight}
-                className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded-full bg-blue-100 text-blue-500 hover:bg-blue-200 hover:text-blue-700 text-xs cursor-pointer"
+                className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded-full bg-primary-tint text-primary hover:bg-primary-border hover:text-primary text-xs cursor-pointer"
               >✕</button>
             </div>
 
@@ -345,7 +345,7 @@ export default function Sidebar({
         {!loading && listings?.length > visibleCount && (
           <button
             onClick={() => setVisibleCount(v => v + PAGE_SIZE)}
-            className="py-2 px-4 text-sm text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg border border-blue-200 transition-colors cursor-pointer"
+            className="py-2 px-4 text-sm text-primary hover:text-primary hover:bg-primary-tint rounded-lg border border-primary-border transition-colors cursor-pointer"
           >
             Show more ({listings.length - visibleCount} remaining)
           </button>
