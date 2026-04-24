@@ -448,7 +448,6 @@ export default function Map({
             <SoldTrendsLayer
               parishFeatures={parishFeatures}
               trends={soldTrendsData.trends}
-              points={soldTrendsData.points}
             />
           )}
 
