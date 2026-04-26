@@ -374,6 +374,12 @@ export default function App() {
     if (isAdmin && hideReviewed && reviewedIds.size > 0) {
       base = base.filter(l => !reviewedIds.has(l.id))
     }
+    // When a persona is active, hide listings that couldn't be scored for it
+    // (no flip/rent signal data). These render as grey unscored markers and
+    // are not useful in persona mode — only show the ones that actually matched.
+    if (activePersonaId) {
+      base = base.filter(l => l.persona_score != null)
+    }
 
     if (!showNeighborhoods) return base
 
@@ -390,7 +396,7 @@ export default function App() {
       if (hiddenParishes.has(l.neighborhood)) return false
       return true
     })
-  }, [listings, reactions, showDisliked, isAdmin, hideReviewed, reviewedIds, showNeighborhoods, hiddenParishes, parishToGroup, visibleGroups, selectedParishes])
+  }, [listings, reactions, showDisliked, isAdmin, hideReviewed, reviewedIds, showNeighborhoods, hiddenParishes, parishToGroup, visibleGroups, selectedParishes, activePersonaId])
 
   const handleSetReaction = useCallback(async (listing, reaction, comment) => {
     const kind = listing.listing_type || 'sale'
