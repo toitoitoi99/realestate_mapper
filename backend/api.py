@@ -728,15 +728,6 @@ class AddressHistoryHandler(BaseHandler):
         self.write_json({"count": len(matches), "matches": matches})
 
 
-class ReactionsHandler(BaseHandler):
-    """GET /api/reactions — list all like/dislike reactions.
-       Pass ?details=true to include the joined listing row."""
-
-    def get(self):
-        details = self.get_argument("details", "false").lower() in ("1", "true", "yes")
-        reactions = db.get_reactions_with_listings() if details else db.get_reactions()
-        self.write_json({"count": len(reactions), "reactions": reactions})
-
 
 class AdminHealthHandler(BaseHandler):
     """GET /api/admin/health — aggregate DB/source health snapshot."""
@@ -983,84 +974,6 @@ class ScoreBandsHandler(BaseHandler):
         self.write_json({"score_bands": _effective_score_bands()})
 
 
-class ReactionDetailHandler(BaseHandler):
-    """PUT /api/reactions/:kind/:id   set like/dislike (+ optional comment)
-       DELETE /api/reactions/:kind/:id  clear reaction"""
-
-    def put(self, listing_kind, listing_id):
-        try:
-            payload = json.loads(self.request.body or b"{}")
-        except json.JSONDecodeError:
-            self.write_error_json("invalid JSON body", 400)
-            return
-        reaction = payload.get("reaction")
-        comment = payload.get("comment")
-        try:
-            row = db.set_reaction(listing_kind, int(listing_id), reaction, comment)
-        except ValueError as e:
-            self.write_error_json(str(e), 400)
-            return
-        self.write_json(row)
-
-    def delete(self, listing_kind, listing_id):
-        if listing_kind not in ("sale", "rent"):
-            self.write_error_json(f"invalid listing_kind: {listing_kind}", 400)
-            return
-        removed = db.delete_reaction(listing_kind, int(listing_id))
-        self.write_json({"removed": removed})
-
-
-class RatingsHandler(BaseHandler):
-    """GET /api/ratings — admin-only per-persona score agreement.
-
-    Query params:
-      ?details=true   include joined listing columns
-      ?persona=flip|rent   filter to one persona
-      ?agree=agree|disagree   filter to one side
-    """
-
-    def get(self):
-        details = self.get_argument("details", "false").lower() in ("1", "true", "yes")
-        persona = self.get_argument("persona", None) or None
-        agree = self.get_argument("agree", None) or None
-        if persona and persona not in db.RATING_PERSONAS:
-            self.write_error_json(f"invalid persona: {persona}", 400)
-            return
-        if agree and agree not in ("agree", "disagree"):
-            self.write_error_json(f"invalid agree: {agree}", 400)
-            return
-        rows = (
-            db.get_ratings_with_listings(persona=persona, agree=agree)
-            if details else db.get_ratings(persona=persona, agree=agree)
-        )
-        self.write_json({"count": len(rows), "ratings": rows})
-
-
-class RatingDetailHandler(BaseHandler):
-    """PUT /api/ratings/:kind/:id/:persona   set agree/disagree (+ optional comment)
-       DELETE /api/ratings/:kind/:id/:persona  clear rating"""
-
-    def put(self, listing_kind, listing_id, persona):
-        try:
-            payload = json.loads(self.request.body or b"{}")
-        except json.JSONDecodeError:
-            self.write_error_json("invalid JSON body", 400)
-            return
-        agree = payload.get("agree")
-        comment = payload.get("comment")
-        try:
-            row = db.set_rating(listing_kind, int(listing_id), persona, agree, comment)
-        except ValueError as e:
-            self.write_error_json(str(e), 400)
-            return
-        self.write_json(row)
-
-    def delete(self, listing_kind, listing_id, persona):
-        if persona not in db.RATING_PERSONAS:
-            self.write_error_json(f"invalid persona: {persona}", 400)
-            return
-        removed = db.delete_rating(listing_kind, int(listing_id), persona)
-        self.write_json({"removed": removed})
 
 
 class NeighbourhoodTypologiesHandler(BaseHandler):
@@ -1599,10 +1512,6 @@ def make_app() -> tornado.web.Application:
             (r"/api/parish-stats",          ParishStatsHandler),
             (r"/api/nearby-projects",       NearbyProjectsHandler),
             (r"/api/address-lookup",        AddressLookupHandler),
-            (r"/api/reactions",             ReactionsHandler),
-            (r"/api/reactions/(sale|rent)/(\d+)", ReactionDetailHandler),
-            (r"/api/ratings",               RatingsHandler),
-            (r"/api/ratings/(sale|rent)/(\d+)/(flip|rent)", RatingDetailHandler),
             (r"/api/admin/tuning",          AdminTuningHandler),
             (r"/api/admin/health",          AdminHealthHandler),
             (r"/api/admin/tuning/score-bands", ScoreBandsHandler),
