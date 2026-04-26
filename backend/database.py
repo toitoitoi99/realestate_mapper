@@ -2155,68 +2155,53 @@ def get_ine_stats(geocod: Optional[str] = "1A01106", latest_only: bool = True) -
 # ── Sold Transactions ────────────────────────────────────────────────────────
 
 def get_sold_trends(
-    start_date: str,
-    end_date: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> List[dict]:
     """
-    Compute per-parish price trends for sold transactions within a date range.
-    Splits the range in half: compares avg price/sqm in the first half vs second half.
-    Returns a list of dicts with parish, pct_change, avg_early, avg_late, count, etc.
+    Compute per-parish price change signals from listing_history.
+    For each parish, aggregates all price_amount changes (new vs old value)
+    and returns the average % change — positive = rising, negative = falling.
     """
     conn = get_connection()
     try:
-        # Ensure the table exists
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS sold_transactions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                parish TEXT NOT NULL,
-                lat REAL NOT NULL, lon REAL NOT NULL,
-                price_amount REAL NOT NULL,
-                price_per_sqm REAL NOT NULL,
-                size_sqm REAL NOT NULL,
-                rooms INTEGER, property_type TEXT,
-                sold_date TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-        """)
+        params: list = []
+        where_clauses = ["h.field = 'price_amount'", "s.parish IS NOT NULL", "CAST(h.old_value AS REAL) > 0"]
+        if start_date:
+            where_clauses.append("h.changed_at >= ?")
+            params.append(start_date)
+        if end_date:
+            where_clauses.append("h.changed_at <= ?")
+            params.append(end_date + "T23:59:59")
 
-        # Get midpoint of the date range
-        from datetime import datetime as dt
-        d_start = dt.strptime(start_date, "%Y-%m-%d")
-        d_end = dt.strptime(end_date, "%Y-%m-%d")
-        d_mid = d_start + (d_end - d_start) / 2
-        mid_date = d_mid.strftime("%Y-%m-%d")
-
-        # Get per-parish stats for early and late halves
-        rows = conn.execute("""
+        where = " AND ".join(where_clauses)
+        rows = conn.execute(f"""
             SELECT
-                parish,
-                AVG(CASE WHEN sold_date < ? THEN price_per_sqm END) AS avg_early,
-                COUNT(CASE WHEN sold_date < ? THEN 1 END) AS count_early,
-                AVG(CASE WHEN sold_date >= ? THEN price_per_sqm END) AS avg_late,
-                COUNT(CASE WHEN sold_date >= ? THEN 1 END) AS count_late,
-                COUNT(*) AS total_count,
-                AVG(price_per_sqm) AS avg_price_per_sqm
-            FROM sold_transactions
-            WHERE sold_date >= ? AND sold_date <= ?
-            GROUP BY parish
-            HAVING count_early > 0 AND count_late > 0
-        """, (mid_date, mid_date, mid_date, mid_date, start_date, end_date)).fetchall()
+                s.parish,
+                COUNT(*) AS change_count,
+                AVG((CAST(h.new_value AS REAL) - CAST(h.old_value AS REAL))
+                    / CAST(h.old_value AS REAL) * 100) AS avg_pct_change,
+                AVG(CAST(h.old_value AS REAL)) AS avg_old_price,
+                AVG(CAST(h.new_value AS REAL)) AS avg_new_price
+            FROM listing_history h
+            JOIN sales s ON h.listing_id = s.id AND h.listing_type = 'sale'
+            WHERE {where}
+            GROUP BY s.parish
+            HAVING change_count >= 1
+            ORDER BY avg_pct_change
+        """, params).fetchall()
 
         results = []
         for r in rows:
-            avg_early = r["avg_early"]
-            avg_late = r["avg_late"]
-            pct_change = ((avg_late - avg_early) / avg_early) * 100 if avg_early else 0
+            pct = r["avg_pct_change"] or 0
             results.append({
                 "parish": r["parish"],
-                "avg_early": round(avg_early, 2) if avg_early else None,
-                "avg_late": round(avg_late, 2) if avg_late else None,
-                "pct_change": round(pct_change, 1),
-                "count": r["total_count"],
-                "count_early": r["count_early"],
-                "count_late": r["count_late"],
-                "avg_price_per_sqm": round(r["avg_price_per_sqm"], 2),
+                "pct_change": round(pct, 1),
+                "avg_early": round(r["avg_old_price"], 0) if r["avg_old_price"] else None,
+                "avg_late": round(r["avg_new_price"], 0) if r["avg_new_price"] else None,
+                "count": r["change_count"],
+                "count_early": r["change_count"],
+                "count_late": r["change_count"],
             })
 
         return results
