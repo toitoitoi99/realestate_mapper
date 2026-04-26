@@ -150,7 +150,7 @@ export default function FilterPanel({ filters, setFilter, reset }) {
       {/* Price — compact single row */}
       <div>
         <label className="text-xs text-gray-500 mb-1 block">
-          {filters.listing_type === 'rent' ? t.monthlyRent : t.price} (€)
+          {filters.listing_type === 'rent' ? t.monthlyRent : t.price}
         </label>
         <div className="flex gap-1.5">
           {numInput('min_price', 'Min')}
