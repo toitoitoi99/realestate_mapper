@@ -119,7 +119,7 @@ export default function PersonaBar({
           <>
             <span className="text-gray-400">|</span>
             <button
-              onClick={() => onOpenMyPage('impressions')}
+              onClick={() => onOpenMyPage('overview')}
               className="text-primary hover:underline"
             >
               👤 My page

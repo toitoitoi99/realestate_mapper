@@ -69,7 +69,7 @@ export default function App() {
   const [hideReviewed, setHideReviewed] = useState(true)
   const [reviewedIds, setReviewedIds] = useState(new Set())
   const [view, setView] = useState('map')  // 'map' | 'admin' | 'my-page' | 'compare'
-  const [myPageTab, setMyPageTab] = useState('impressions')
+  const [myPageTab, setMyPageTab] = useState('overview')
   const [returnTo, setReturnTo] = useState(null)  // 'admin' when navigating to map from admin
   const [adminInitialTab, setAdminInitialTab] = useState('scrapers')
 
@@ -552,7 +552,7 @@ export default function App() {
         }}
         onEditProfile={() => { setMyPageTab('profile'); setView('my-page') }}
         onSignOut={async () => { await signOut(); navigate('/') }}
-        onOpenMyPage={(tab = 'impressions') => { setMyPageTab(tab); setView('my-page') }}
+        onOpenMyPage={(tab = 'overview') => { setMyPageTab(tab); setView('my-page') }}
       />
       <StatsBar
         stats={stats}
