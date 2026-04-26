@@ -181,44 +181,6 @@ export async function fetchPreferenceDeck({ persona, n = 12, city, parish, minPr
   return api(`${BASE}/preference-deck${qs ? `?${qs}` : ''}`)
 }
 
-export async function fetchReactions({ details = false } = {}) {
-  const params = details ? '?details=true' : ''
-  return api(`${BASE}/reactions${params}`)
-}
-
-export async function setReaction(listingKind, listingId, reaction, comment = null) {
-  return api(`${BASE}/reactions/${listingKind}/${listingId}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reaction, comment }),
-  })
-}
-
-export async function clearReaction(listingKind, listingId) {
-  return api(`${BASE}/reactions/${listingKind}/${listingId}`, { method: 'DELETE' })
-}
-
-// Admin-only: per-persona agreement with the model's flip / rent score.
-export async function fetchRatings({ details = false, persona = null, agree = null } = {}) {
-  const params = new URLSearchParams()
-  if (details) params.set('details', 'true')
-  if (persona) params.set('persona', persona)
-  if (agree) params.set('agree', agree)
-  const qs = params.toString()
-  return api(`${BASE}/ratings${qs ? `?${qs}` : ''}`)
-}
-
-export async function setRating(listingKind, listingId, persona, agree, comment = null) {
-  return api(`${BASE}/ratings/${listingKind}/${listingId}/${persona}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ agree, comment }),
-  })
-}
-
-export async function clearRating(listingKind, listingId, persona) {
-  return api(`${BASE}/ratings/${listingKind}/${listingId}/${persona}`, { method: 'DELETE' })
-}
 
 export async function fetchAdminTuning() {
   return api(`${BASE}/admin/tuning`)

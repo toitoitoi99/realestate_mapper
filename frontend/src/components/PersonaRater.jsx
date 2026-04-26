@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { fetchRatings, setRating as apiSetRating, clearRating as apiClearRating } from '../api'
+import { useAuth } from '../contexts/AuthContext'
+import { supabase } from '../lib/supabase'
 import { useScoreBands, ratingFor } from '../ScoreBandsContext'
 
 const PERSONA_META = {
@@ -105,33 +106,42 @@ function Row({ persona, score, rating, onAgree, onDisagree, onClear, saving }) {
  * Rendered inside listing detail when useIsAdmin() is true.
  */
 export default function PersonaRater({ listing, onRated }) {
+  const { user } = useAuth()
   const kind = listing.listing_type || 'sale'
   const [ratings, setRatings] = useState({ flip: null, rent: null })
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
+    if (!user || !supabase) return
     let cancelled = false
-    fetchRatings()
-      .then(d => {
+    supabase
+      .from('listing_ratings')
+      .select('persona, agree, comment, updated_at')
+      .eq('user_id', user.id)
+      .eq('listing_kind', kind)
+      .eq('listing_id', listing.id)
+      .then(({ data }) => {
         if (cancelled) return
         const mine = { flip: null, rent: null }
-        for (const r of (d.ratings ?? [])) {
-          if (r.listing_kind === kind && r.listing_id === listing.id && PERSONA_META[r.persona]) {
-            mine[r.persona] = r
-          }
+        for (const r of (data ?? [])) {
+          if (PERSONA_META[r.persona]) mine[r.persona] = r
         }
         setRatings(mine)
       })
-      .catch(() => {})
     return () => { cancelled = true }
-  }, [listing.id, kind])
+  }, [listing.id, kind, user?.id])
 
   const save = async (persona, agree, comment) => {
+    if (!user || !supabase) return
     setSaving(true)
     setRatings(prev => ({ ...prev, [persona]: { ...(prev[persona] || {}), persona, agree, comment } }))
     try {
-      const row = await apiSetRating(kind, listing.id, persona, agree, comment)
-      setRatings(prev => ({ ...prev, [persona]: row }))
+      const { error } = await supabase.from('listing_ratings')
+        .upsert(
+          { user_id: user.id, listing_kind: kind, listing_id: listing.id, persona, agree, comment: comment || null, updated_at: new Date().toISOString() },
+          { onConflict: 'user_id,listing_kind,listing_id,persona' }
+        )
+      if (error) throw error
       onRated?.(listing.id)
     } catch (e) {
       console.error('setRating failed', e)
@@ -139,10 +149,17 @@ export default function PersonaRater({ listing, onRated }) {
   }
 
   const clear = async (persona) => {
+    if (!user || !supabase) return
     setSaving(true)
     setRatings(prev => ({ ...prev, [persona]: null }))
     try {
-      await apiClearRating(kind, listing.id, persona)
+      const { error } = await supabase.from('listing_ratings')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('listing_kind', kind)
+        .eq('listing_id', listing.id)
+        .eq('persona', persona)
+      if (error) throw error
     } catch (e) {
       console.error('clearRating failed', e)
     } finally { setSaving(false) }
