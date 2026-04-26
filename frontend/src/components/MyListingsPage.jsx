@@ -39,15 +39,26 @@ function Column({ title, icon, items, onClear, onViewOnMap, emptyHint }) {
   )
 }
 
-export default function MyListingsPage({ onBack, onViewListing, embedded = false }) {
+// When embedded in MyPage, rows/loading/error/onClear are passed from the parent.
+// When used standalone, it fetches its own data.
+export default function MyListingsPage({
+  onBack, onViewListing, embedded = false,
+  rows: rowsProp, loading: loadingProp, error: errorProp, onRetry, onClear: onClearProp,
+}) {
   const { user } = useAuth()
-  const [rows, setRows] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const [rowsOwn, setRowsOwn] = useState([])
+  const [loadingOwn, setLoadingOwn] = useState(true)
+  const [errorOwn, setErrorOwn] = useState(null)
+
+  const controlled = rowsProp !== undefined
+  const rows = controlled ? rowsProp : rowsOwn
+  const loading = controlled ? (loadingProp ?? false) : loadingOwn
+  const error = controlled ? (errorProp ?? null) : errorOwn
 
   const load = async () => {
-    if (!user || !supabase) { setRows([]); setLoading(false); return }
-    setLoading(true); setError(null)
+    if (controlled) { onRetry?.(); return }
+    if (!user || !supabase) { setRowsOwn([]); setLoadingOwn(false); return }
+    setLoadingOwn(true); setErrorOwn(null)
     try {
       const { data, error: err } = await supabase
         .from('listing_reactions')
@@ -55,39 +66,37 @@ export default function MyListingsPage({ onBack, onViewListing, embedded = false
         .eq('user_id', user.id)
         .order('updated_at', { ascending: false })
       if (err) throw err
-
-      // Enrich with listing details from backend
       const enriched = await Promise.all((data ?? []).map(async r => {
         try {
           const d = await fetchListingDetail(r.listing_id, r.listing_kind === 'rent' ? 'rent' : 'sale')
           return { ...r, listing: d?.id ? d : null }
         } catch { return { ...r, listing: null } }
       }))
-      setRows(enriched)
+      setRowsOwn(enriched)
     } catch (e) {
-      setError(String(e?.message ?? e))
+      setErrorOwn(String(e?.message ?? e))
     } finally {
-      setLoading(false)
+      setLoadingOwn(false)
     }
   }
-  useEffect(() => { load() }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!controlled) load() }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const { liked, disliked } = useMemo(() => ({
     liked: rows.filter(r => r.reaction === 'like'),
     disliked: rows.filter(r => r.reaction === 'dislike'),
   }), [rows])
 
-  const handleClear = async (item) => {
+  const handleClear = onClearProp ?? (async (item) => {
     if (!user || !supabase) return
-    const prev = rows
-    setRows(rows.filter(r => !(r.listing_kind === item.listing_kind && r.listing_id === item.listing_id)))
+    const prev = rowsOwn
+    setRowsOwn(rowsOwn.filter(r => !(r.listing_kind === item.listing_kind && r.listing_id === item.listing_id)))
     const { error: err } = await supabase.from('listing_reactions')
       .delete()
       .eq('user_id', user.id)
       .eq('listing_kind', item.listing_kind)
       .eq('listing_id', item.listing_id)
-    if (err) { setRows(prev); setError(`Failed to clear: ${err.message}`) }
-  }
+    if (err) { setRowsOwn(prev); setErrorOwn(`Failed to clear: ${err.message}`) }
+  })
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
@@ -96,7 +105,7 @@ export default function MyListingsPage({ onBack, onViewListing, embedded = false
           <button onClick={onBack} className="text-xs text-gray-600 hover:text-gray-900 cursor-pointer">
             ← Back to map
           </button>
-          <span className="font-semibold text-gray-800">⭐ My listings</span>
+          <span className="font-semibold text-gray-800">Shortlist</span>
         </div>
       )}
 
@@ -105,12 +114,12 @@ export default function MyListingsPage({ onBack, onViewListing, embedded = false
           <div className="text-sm text-gray-500">Loading…</div>
         ) : error ? (
           <div className="text-sm text-red-600">
-            {error} <button onClick={load} className="underline ml-2">Retry</button>
+            {error} <button onClick={load} className="underline ml-2 cursor-pointer">Retry</button>
           </div>
         ) : (
           <>
             <div className="text-xs text-gray-500 mb-3">
-              Properties you've reacted to. <b>Hidden</b> ones are dismissed from the map by default — you can bring them back from the map legend.
+              Properties you've reacted to. Passed listings are hidden from the map by default.
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Column
@@ -122,12 +131,12 @@ export default function MyListingsPage({ onBack, onViewListing, embedded = false
                 emptyHint="Nothing liked yet. Use 👍 on a listing to save it."
               />
               <Column
-                title="Not liked"
+                title="Passed"
                 icon="👎"
                 items={disliked}
                 onClear={handleClear}
                 onViewOnMap={onViewListing}
-                emptyHint="Nothing disliked yet."
+                emptyHint="Nothing passed yet."
               />
             </div>
           </>
