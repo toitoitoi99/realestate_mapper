@@ -113,11 +113,11 @@ export default function MapLegend({ baseMap, onChangeBaseMap, listingTypeFilter 
           </label>
           {showSoldTrends && (
             <div className="mt-1.5 flex items-center gap-1">
-              <span className="text-[10px] text-blue-600">↓ falling</span>
+              <span className="text-[10px] text-red-600">↓ falling</span>
               <div className="flex-1 h-2 rounded" style={{
-                background: 'linear-gradient(to right, rgb(0,149,255), rgb(255,255,255), rgb(255,50,50))'
+                background: 'linear-gradient(to right, rgb(255,50,50), rgb(255,255,255), rgb(30,180,30))'
               }} />
-              <span className="text-[10px] text-red-600">↑ rising</span>
+              <span className="text-[10px] text-green-600">↑ rising</span>
             </div>
           )}
         </div>

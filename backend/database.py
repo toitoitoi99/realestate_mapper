@@ -2166,7 +2166,8 @@ def get_sold_trends(
     conn = get_connection()
     try:
         params: list = []
-        where_clauses = ["h.field = 'price_amount'", "s.parish IS NOT NULL", "CAST(h.old_value AS REAL) > 0"]
+        where_clauses = ["h.field = 'price_per_sqm'", "s.parish IS NOT NULL",
+                         "CAST(h.old_value AS REAL) >= 500", "CAST(h.new_value AS REAL) >= 500"]
         if start_date:
             where_clauses.append("h.changed_at >= ?")
             params.append(start_date)
@@ -2181,8 +2182,8 @@ def get_sold_trends(
                 COUNT(*) AS change_count,
                 AVG((CAST(h.new_value AS REAL) - CAST(h.old_value AS REAL))
                     / CAST(h.old_value AS REAL) * 100) AS avg_pct_change,
-                AVG(CAST(h.old_value AS REAL)) AS avg_old_price,
-                AVG(CAST(h.new_value AS REAL)) AS avg_new_price
+                AVG(CAST(h.old_value AS REAL)) AS avg_old_psm,
+                AVG(CAST(h.new_value AS REAL)) AS avg_new_psm
             FROM listing_history h
             JOIN sales s ON h.listing_id = s.id AND h.listing_type = 'sale'
             WHERE {where}
@@ -2197,8 +2198,8 @@ def get_sold_trends(
             results.append({
                 "parish": r["parish"],
                 "pct_change": round(pct, 1),
-                "avg_early": round(r["avg_old_price"], 0) if r["avg_old_price"] else None,
-                "avg_late": round(r["avg_new_price"], 0) if r["avg_new_price"] else None,
+                "avg_early": round(r["avg_old_psm"], 0) if r["avg_old_psm"] else None,
+                "avg_late": round(r["avg_new_psm"], 0) if r["avg_new_psm"] else None,
                 "count": r["change_count"],
                 "count_early": r["change_count"],
                 "count_late": r["change_count"],

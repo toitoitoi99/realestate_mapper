@@ -7,11 +7,13 @@ function pctChangeColor(pct) {
   const t = (clamped + 15) / 30 // 0 = -15%, 0.5 = flat, 1 = +15%
 
   if (t >= 0.5) {
+    // 0% to +15%: white → green (rising)
     const s = (t - 0.5) * 2
-    return `rgb(255,${Math.round(255 * (1 - s * 0.8))},${Math.round(255 * (1 - s * 0.9))})`
+    return `rgb(${Math.round(255 * (1 - s * 0.9))},${Math.round(180 + 75 * (1 - s))},${Math.round(255 * (1 - s * 0.9))})`
   } else {
+    // -15% to 0%: red → white (falling)
     const s = t * 2
-    return `rgb(${Math.round(255 * s)},${Math.round(200 + 55 * s)},255)`
+    return `rgb(255,${Math.round(255 * s)},${Math.round(255 * s)})`
   }
 }
 
@@ -51,7 +53,7 @@ export default function SoldTrendsLayer({ parishFeatures, trends }) {
 
     const fmt = (n) => n != null ? Math.round(n).toLocaleString('pt-PT') : '—'
     const sign = tr.pct_change >= 0 ? '+' : ''
-    const changeColor = tr.pct_change >= 0 ? '#dc2626' : '#2563eb'
+    const changeColor = tr.pct_change >= 0 ? '#16a34a' : '#dc2626'
 
     layer.bindPopup(`
       <div style="font-size:13px;font-weight:600">${name}</div>
@@ -59,15 +61,13 @@ export default function SoldTrendsLayer({ parishFeatures, trends }) {
         ${sign}${tr.pct_change.toFixed(1)}%
       </div>
       <div style="font-size:11px;color:#6b7280">
-        ${t.earlyPeriod ?? 'Early period'}: <b>€${fmt(tr.avg_early)}/m²</b>
-        <span style="color:#9ca3af">(${tr.count_early} ${t.sales ?? 'sales'})</span>
+        Before: <b>€${fmt(tr.avg_early)}/m²</b>
       </div>
       <div style="font-size:11px;color:#6b7280">
-        ${t.latePeriod ?? 'Late period'}: <b>€${fmt(tr.avg_late)}/m²</b>
-        <span style="color:#9ca3af">(${tr.count_late} ${t.sales ?? 'sales'})</span>
+        After: <b>€${fmt(tr.avg_late)}/m²</b>
       </div>
       <div style="font-size:10px;color:#9ca3af;margin-top:4px">
-        ${tr.count} ${t.totalSales ?? 'total sales'}
+        ${tr.count} price change${tr.count !== 1 ? 's' : ''} tracked
       </div>
     `, { maxWidth: 260 })
 
