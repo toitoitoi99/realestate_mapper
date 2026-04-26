@@ -54,6 +54,8 @@ function ImageCarousel({ images }) {
               alt={`Photo ${i + 1}`}
               className="w-full h-full object-cover block"
               loading="lazy"
+              referrerPolicy="no-referrer"
+              onError={e => { e.currentTarget.style.display = 'none' }}
             />
           </div>
         ))}
