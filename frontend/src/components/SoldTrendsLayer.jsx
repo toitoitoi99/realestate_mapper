@@ -1,125 +1,42 @@
-import { useEffect, useRef, useState, useMemo } from 'react'
-import { GeoJSON, useMap } from 'react-leaflet'
-import L from 'leaflet'
-import 'leaflet.heat'
+import { useMemo } from 'react'
+import { GeoJSON } from 'react-leaflet'
 import { useLanguage } from '../LanguageContext'
 
-/**
- * Color scale for price change: red (increase) through white (flat) to blue (decrease).
- * Matches real estate conventions where "hot" = rising prices.
- */
 function pctChangeColor(pct) {
-  // Clamp to [-15, +15] range for color mapping
   const clamped = Math.max(-15, Math.min(15, pct))
-  const t = (clamped + 15) / 30 // 0 = -15%, 0.5 = 0%, 1 = +15%
+  const t = (clamped + 15) / 30 // 0 = -15%, 0.5 = flat, 1 = +15%
 
   if (t >= 0.5) {
-    // 0% to +15%: white → red
-    const s = (t - 0.5) * 2 // 0 to 1
-    const r = 255
-    const g = Math.round(255 * (1 - s * 0.8))
-    const b = Math.round(255 * (1 - s * 0.9))
-    return `rgb(${r},${g},${b})`
+    const s = (t - 0.5) * 2
+    return `rgb(255,${Math.round(255 * (1 - s * 0.8))},${Math.round(255 * (1 - s * 0.9))})`
   } else {
-    // -15% to 0%: blue → white
-    const s = t * 2 // 0 to 1
-    const r = Math.round(255 * s)
-    const g = Math.round(200 + 55 * s)
-    const b = 255
-    return `rgb(${r},${g},${b})`
+    const s = t * 2
+    return `rgb(${Math.round(255 * s)},${Math.round(200 + 55 * s)},255)`
   }
 }
 
-function SoldHeatmap({ points }) {
-  const map = useMap()
-  const heatLayerRef = useRef(null)
-
-  useEffect(() => {
-    if (heatLayerRef.current) {
-      map.removeLayer(heatLayerRef.current)
-    }
-
-    if (points.length === 0) {
-      heatLayerRef.current = null
-      return
-    }
-
-    heatLayerRef.current = L.heatLayer(points, {
-      radius: 18,
-      blur: 25,
-      maxZoom: 16,
-      max: 1.0,
-      minOpacity: 0.2,
-      gradient: {
-        0.0: 'rgba(59,130,246,0)',
-        0.15: '#93c5fd',
-        0.35: '#dbeafe',
-        0.5: '#fef3c7',
-        0.7: '#fca5a5',
-        0.85: '#ef4444',
-        1.0: '#991b1b',
-      },
-    }).addTo(map)
-
-    return () => {
-      if (heatLayerRef.current) {
-        map.removeLayer(heatLayerRef.current)
-      }
-    }
-  }, [points, map])
-
-  return null
-}
-
-export default function SoldTrendsLayer({
-  parishFeatures,
-  trends,
-  points,
-}) {
+export default function SoldTrendsLayer({ parishFeatures, trends }) {
   const { t } = useLanguage()
 
-  // Build a trend lookup by parish
   const trendMap = useMemo(() => {
     const map = {}
-    for (const tr of trends) {
-      map[tr.parish] = tr
-    }
+    for (const tr of trends) map[tr.parish] = tr
     return map
   }, [trends])
 
-  // Heatmap points: [lat, lon, intensity]
-  // Intensity is based on the parish's pct_change, normalized to 0-1
-  const heatPoints = useMemo(() => {
-    if (!points || points.length === 0) return []
-
-    return points
-      .filter(p => {
-        const tr = trendMap[p.parish]
-        return tr && p.lat && p.lon
-      })
-      .map(p => {
-        const tr = trendMap[p.parish]
-        // Map pct_change to 0-1: -15% → 0, 0% → 0.5, +15% → 1
-        const intensity = Math.max(0, Math.min(1, (tr.pct_change + 15) / 30))
-        return [p.lat, p.lon, intensity]
-      })
-  }, [points, trendMap])
-
-  // Choropleth overlay on parish polygons
   const visibleFeatures = useMemo(() => {
     if (!parishFeatures?.length) return []
     return parishFeatures.filter(f => trendMap[f.properties.name])
   }, [parishFeatures, trendMap])
 
-  if (visibleFeatures.length === 0 && heatPoints.length === 0) return null
+  if (visibleFeatures.length === 0) return null
 
   const geojson = { type: 'FeatureCollection', features: visibleFeatures }
 
   const style = (feature) => {
     const tr = trendMap[feature.properties.name]
-    const pct = tr ? tr.pct_change : 0
     return {
-      fillColor: pctChangeColor(pct),
+      fillColor: pctChangeColor(tr ? tr.pct_change : 0),
       fillOpacity: 0.45,
       color: '#6b7280',
       weight: 1.5,
@@ -158,17 +75,14 @@ export default function SoldTrendsLayer({
     layer.on('mouseout', () => layer.setStyle({ fillOpacity: 0.45 }))
   }
 
-  const key = JSON.stringify(trends.map(t => [t.parish, t.pct_change]).sort())
+  const key = JSON.stringify(trends.map(tr => [tr.parish, tr.pct_change]).sort())
 
   return (
-    <>
-      <GeoJSON
-        key={key}
-        data={geojson}
-        style={style}
-        onEachFeature={onEachFeature}
-      />
-      <SoldHeatmap points={heatPoints} />
-    </>
+    <GeoJSON
+      key={key}
+      data={geojson}
+      style={style}
+      onEachFeature={onEachFeature}
+    />
   )
 }

@@ -217,7 +217,7 @@ export default function Map({
   neighborhoodGroups, parishToGroup,
   parishFeatures, hiddenParishes,
   selectedListing,
-  showSoldTrends, soldTrendsData,
+  showSoldTrends, onToggleSoldTrends, soldTrendsData,
   selectedParishes,
   reactionFor,
   showDisliked,
@@ -475,6 +475,8 @@ export default function Map({
         listingTypeFilter={listingTypeFilter}
         showDisliked={showDisliked}
         onToggleShowDisliked={onToggleShowDisliked}
+        showSoldTrends={showSoldTrends}
+        onToggleSoldTrends={onToggleSoldTrends}
       />
     </div>
   )
