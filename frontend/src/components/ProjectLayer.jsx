@@ -1,89 +1,14 @@
-import { useEffect, useRef, useState, useMemo } from 'react'
-import { CircleMarker, Popup, useMap } from 'react-leaflet'
-import L from 'leaflet'
-import 'leaflet.heat'
+import { useMemo } from 'react'
+import { CircleMarker, Popup } from 'react-leaflet'
 import { useLanguage } from '../LanguageContext'
 import { CATEGORIES, getCategory } from '../projectCategories'
-
-const HEATMAP_ZOOM_THRESHOLD = 15
-
-// Weight by category importance for heatmap intensity
-const CATEGORY_WEIGHT = {
-  new_construction: 1.0,
-  government: 0.9,
-  extension: 0.7,
-  demolition: 0.8,
-  planning: 0.5,
-  conservation: 0.4,
-  alteration: 0.3,
-  unidentified: 0.2,
-}
-
-function ProjectHeatmap({ points }) {
-  const map = useMap()
-  const heatLayerRef = useRef(null)
-
-  useEffect(() => {
-    if (heatLayerRef.current) {
-      map.removeLayer(heatLayerRef.current)
-    }
-
-    if (points.length === 0 || typeof L.heatLayer !== 'function') {
-      heatLayerRef.current = null
-      return
-    }
-
-    try {
-      heatLayerRef.current = L.heatLayer(points, {
-        radius: 14,
-        blur: 26,
-        maxZoom: 16,
-        max: 1.0,
-        minOpacity: 0.15,
-        gradient: {
-          0.0: 'rgba(0,255,255,0)',
-          0.2: '#e0f7fa',
-          0.4: '#4dd0e1',
-          0.6: '#0097a7',
-          0.8: '#01579b',
-          1.0: '#0d1b5e',
-        },
-      }).addTo(map)
-    } catch { heatLayerRef.current = null }
-
-    return () => {
-      if (heatLayerRef.current) {
-        map.removeLayer(heatLayerRef.current)
-      }
-    }
-  }, [points, map])
-
-  return null
-}
-
-function ZoomTracker({ onZoomChange }) {
-  const map = useMap()
-
-  useEffect(() => {
-    const handler = () => onZoomChange(map.getZoom())
-    map.on('zoomend', handler)
-    onZoomChange(map.getZoom())
-    return () => map.off('zoomend', handler)
-  }, [map, onZoomChange])
-
-  return null
-}
 
 export default function ProjectLayer({
   projects, visibleCategories,
   showNeighborhoods, visibleGroups, hiddenParishes, parishToGroup,
 }) {
   const { t, translateTerm } = useLanguage()
-  const [zoom, setZoom] = useState(10)
 
-  const showDots = zoom >= HEATMAP_ZOOM_THRESHOLD
-
-  // Filter projects once
   const filteredProjects = useMemo(() => {
     return projects.filter(p => {
       if (!p.centroid_lat || !p.centroid_lon) return false
@@ -96,24 +21,11 @@ export default function ProjectLayer({
       }
       return true
     })
-  }, [projects, visibleCategories, showNeighborhoods, visibleGroups, hiddenParishes])
-
-  // Heatmap data points: [lat, lon, intensity]
-  const heatPoints = useMemo(() => {
-    if (showDots) return []
-    return filteredProjects.map(p => {
-      const weight = CATEGORY_WEIGHT[getCategory(p.operation)] ?? 0.3
-      return [p.centroid_lat, p.centroid_lon, weight]
-    })
-  }, [filteredProjects, showDots])
+  }, [projects, visibleCategories, showNeighborhoods, visibleGroups, hiddenParishes, parishToGroup])
 
   return (
     <>
-      <ZoomTracker onZoomChange={setZoom} />
-
-      {!showDots && <ProjectHeatmap points={heatPoints} />}
-
-      {showDots && filteredProjects.map(p => {
+      {filteredProjects.map(p => {
         const catKey = getCategory(p.operation)
         const cat = CATEGORIES[catKey]
 
