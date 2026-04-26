@@ -40,7 +40,12 @@ export default function App() {
   const [hiddenParishes, setHiddenParishes] = useState(new Set())
   const [showSoldTrends, setShowSoldTrends] = useState(false)
   const [soldTrendsData, setSoldTrendsData] = useState({ trends: [], points: [] })
-  const [soldDateRange, setSoldDateRange] = useState({ start: '2024-06-01', end: '2025-12-31' })
+  const [soldDateRange, setSoldDateRange] = useState(() => {
+    const end = new Date()
+    const start = new Date(end)
+    start.setFullYear(start.getFullYear() - 1)
+    return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) }
+  })
   const [baseMap, setBaseMap] = useState(DEFAULT_BASE_MAP)
   const [loading, setLoading] = useState(false)
   const [scraping, setScraping] = useState(false)
