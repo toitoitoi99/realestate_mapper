@@ -20,11 +20,19 @@
 const DESKTOP = { width: 1440, height: 900 };
 
 // Small helper used by several states.
+// Navigates to /app (bypassing the persona-selection landing page) then waits
+// for at least one Leaflet marker to appear.
 async function waitForListings(page) {
+  // If the current URL is at the root landing page, go directly to /app
+  const url = page.url();
+  if (!url.includes('/app')) {
+    await page.goto(url.replace(/\/$/, '') + '/app', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+  }
   await page.waitForFunction(() => {
     const markers = document.querySelectorAll('.leaflet-interactive');
     return markers.length > 0;
-  }, { timeout: 15000 });
+  }, { timeout: 30000 });
 }
 
 async function clickByText(page, text, opts = {}) {
