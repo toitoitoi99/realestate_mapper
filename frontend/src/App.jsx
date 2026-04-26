@@ -57,6 +57,14 @@ export default function App() {
   const [selectedParishes, setSelectedParishes] = useState(new Set())
   // Map of `${kind}-${id}` → { reaction, comment }
   const [reactions, setReactions] = useState({})
+  const [visitedListings, setVisitedListings] = useState(() => {
+    try {
+      const stored = localStorage.getItem('visitedListings')
+      return stored ? new Set(JSON.parse(stored)) : new Set()
+    } catch {
+      return new Set()
+    }
+  })
   const [showDisliked, setShowDisliked] = useState(false)
   const [hideReviewed, setHideReviewed] = useState(true)
   const [reviewedIds, setReviewedIds] = useState(new Set())
@@ -64,6 +72,14 @@ export default function App() {
   const [myPageTab, setMyPageTab] = useState('impressions')
   const [returnTo, setReturnTo] = useState(null)  // 'admin' when navigating to map from admin
   const [adminInitialTab, setAdminInitialTab] = useState('scrapers')
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('visitedListings', JSON.stringify([...visitedListings]))
+    } catch {
+      // ignore storage errors
+    }
+  }, [visitedListings])
 
   const { filters, setFilter, reset, replaceAll: replaceAllFilters } = useFilters()
 
@@ -612,7 +628,10 @@ export default function App() {
           onSelectListing={(l) => {
             setHighlightedListing(l)
             setSelectedListing(prev => prev ? l : prev)
+            const key = `${l.listing_type || 'sale'}-${l.id}`
+            setVisitedListings(prev => prev.has(key) ? prev : new Set([...prev, key]))
           }}
+          visitedListings={visitedListings}
           selectedListing={highlightedListing}
           projects={projects}
           showProjects={showProjects}

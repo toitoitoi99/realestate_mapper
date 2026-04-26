@@ -2,12 +2,11 @@ import { useState, useCallback } from 'react'
 
 const DEFAULT_FILTERS = {
   listing_type: 'sale',
-  show_sold: 'active',
+  show_sold: 'both',
   min_price: '',
   max_price: '',
   min_sqm: '',
   max_sqm: '',
-  rooms: '',
   neighborhood: '',
   sold_after: '',
   sold_before: '',

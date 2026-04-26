@@ -53,7 +53,7 @@ function ratingBarWidth(score) {
  *   'flip'           — show flip only
  *   'rent'           — show rent only
  */
-export function FlipRentBadges({ flip, rent, show = 'both' }) {
+export function FlipRentBadges({ flip, rent, show = 'both', className = 'mt-1.5' }) {
   if (flip == null && rent == null) return null
   const { bands } = useScoreBands()
   const f = Math.round(flip || 0)
@@ -64,7 +64,7 @@ export function FlipRentBadges({ flip, rent, show = 'both' }) {
   const showRent = (show === 'both' || show === 'rent') && rent != null
   if (!showFlip && !showRent) return null
   return (
-    <div className="flex gap-1.5 mt-1.5">
+    <div className={`flex gap-1.5 ${className}`}>
       {showFlip && (
         <span
           className={`inline-flex items-center gap-1 text-xs font-semibold px-1.5 py-0.5 rounded ${ratingClasses(fRating).pill}`}

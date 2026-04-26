@@ -223,6 +223,7 @@ export default function Map({
   showDisliked,
   onToggleShowDisliked,
   onLookupResult,
+  visitedListings,
   listingTypeFilter = 'sale',
   // True when the persona-weight override is active (>= MIN_SWIPES_FOR_OVERRIDE
   // signals). Switches the band-stroke color to purple so users see the
@@ -375,6 +376,15 @@ export default function Map({
               }
             }
 
+            // If visited (but not selected, reacted, or sold), mute the stroke
+            // to a slate grey so score fill remains readable but the ring shows it's been seen.
+            const visitedKey = `${l.listing_type || 'sale'}-${l.id}`
+            const isVisited = visitedListings?.has(visitedKey)
+            const showVisitedStroke = isVisited && !isSelected && !userReaction && !isSold && !isReserved
+            if (showVisitedStroke) {
+              markerColor = { ...markerColor, color: '#64748b' }
+            }
+
             const popupContent = (
               <Popup>
                 <ListingPopupCard listing={l} />
@@ -413,7 +423,10 @@ export default function Map({
                   fillOpacity,
                   // Thicker stroke when personalised so the purple ring is
                   // actually visible at typical zoom levels.
-                  weight: (isSold || isReserved) ? mSize.weight + 1 : (personalized ? mSize.weight + 1 : mSize.weight),
+                  // Visited pins get a slightly wider stroke so the muted grey ring reads clearly.
+                  weight: (isSold || isReserved) ? mSize.weight + 1
+                    : (personalized || showVisitedStroke) ? mSize.weight + 1
+                    : mSize.weight,
                 }}
                 eventHandlers={{ click: handleClick }}
               >
