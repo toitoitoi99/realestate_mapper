@@ -3,7 +3,7 @@ import { useLanguage } from '../LanguageContext'
 import { BASE_MAPS } from '../baseMaps'
 import { useScoreBands } from '../ScoreBandsContext'
 
-export default function MapLegend({ baseMap, onChangeBaseMap, listingTypeFilter = 'sale', showDisliked, onToggleShowDisliked, hideReviewed, onToggleHideReviewed }) {
+export default function MapLegend({ baseMap, onChangeBaseMap, listingTypeFilter = 'sale', showDisliked, onToggleShowDisliked, hideReviewed, onToggleHideReviewed, showSoldTrends, onToggleSoldTrends }) {
   const { t } = useLanguage()
   const { bands } = useScoreBands()
   const [collapsed, setCollapsed] = useState(false)
@@ -96,6 +96,30 @@ export default function MapLegend({ baseMap, onChangeBaseMap, listingTypeFilter 
             />
             <span className="text-gray-700">Show disliked</span>
           </label>
+        </div>
+      )}
+
+      {/* Price trends overlay */}
+      {onToggleSoldTrends && (
+        <div className="mt-2 pt-2 border-t border-gray-100">
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={!!showSoldTrends}
+              onChange={onToggleSoldTrends}
+              className="cursor-pointer"
+            />
+            <span className="text-gray-700">Price trends</span>
+          </label>
+          {showSoldTrends && (
+            <div className="mt-1.5 flex items-center gap-1">
+              <span className="text-[10px] text-blue-600">↓ falling</span>
+              <div className="flex-1 h-2 rounded" style={{
+                background: 'linear-gradient(to right, rgb(0,149,255), rgb(255,255,255), rgb(255,50,50))'
+              }} />
+              <span className="text-[10px] text-red-600">↑ rising</span>
+            </div>
+          )}
         </div>
       )}
 

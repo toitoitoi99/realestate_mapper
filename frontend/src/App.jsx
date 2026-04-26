@@ -651,6 +651,7 @@ export default function App() {
           parishFeatures={parishFeatures}
           hiddenParishes={hiddenParishes}
           showSoldTrends={showSoldTrends}
+          onToggleSoldTrends={() => setShowSoldTrends(p => !p)}
           soldTrendsData={soldTrendsData}
           selectedParishes={selectedParishes}
           reactionFor={reactionFor}
