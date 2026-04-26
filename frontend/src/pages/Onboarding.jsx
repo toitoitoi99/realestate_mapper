@@ -1,124 +1,127 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import { getPersona, PERSONAS } from '../lib/personas'
+import { getPersona, PERSONAS, PERSONA_ORDER } from '../lib/personas'
 import {
   EMPTY_PREFERENCES, STYLE_OPTIONS, RENOVATION_OPTIONS, BEDROOM_OPTIONS,
 } from '../lib/preferences'
 import { extractImageTags, extractPreferences, fetchPreferenceDeck } from '../api'
 import { supabase } from '../lib/supabase'
 
-// Single-page preference wizard. Persona at top, then chips/ranges for the
-// rest. Saves both `persona` and `preferences` jsonb to the profile row.
+const TOTAL_STEPS = 5
+
+// Friendly renovation labels for onboarding (maps to the same IDs)
+const RENO_ONBOARDING_OPTIONS = [
+  { id: 'turnkey',         label: 'Ready to move in' },
+  { id: 'cosmetic',        label: 'OK with some work' },
+  { id: 'full_renovation', label: 'Happy to renovate' },
+]
+
+const PROPERTY_TYPE_OPTIONS = [
+  { id: 'apartment', label: 'Apartment' },
+  { id: 'house',     label: 'House' },
+  { id: null,        label: 'Either' },
+]
+
+// Revised persona copy (friendlier for first-impression onboarding)
+const PERSONA_ONBOARDING = {
+  home_buyer: {
+    headline: 'I want to buy a home to live in',
+    description: 'Looking for the right place — light, neighborhood feel, and a style you\'ll actually want to wake up in.',
+  },
+  home_renter: {
+    headline: 'I\'m looking for a place to rent',
+    description: 'Rental listings ranked by price, commute, and vibe. Move fast with fewer commitments.',
+  },
+  rental_investor: {
+    headline: 'I\'m buying to rent out',
+    description: 'Find sale listings with strong rental yield and durable tenant demand.',
+  },
+  flipper: {
+    headline: 'I buy, renovate, and sell',
+    description: 'Listings priced below neighborhood comps with renovation upside baked in.',
+  },
+}
+
 export default function Onboarding({ onDone } = {}) {
   const { user, profile, loading, refreshProfile } = useAuth()
   const navigate = useNavigate()
   const done = () => { if (onDone) onDone(); else navigate('/app') }
+
+  // Step navigation
+  const [step, setStep] = useState(1)
+
+  // Core preference state — all preserved from original
   const [personaId, setPersonaId] = useState('')
   const [prefs, setPrefs] = useState(EMPTY_PREFERENCES)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
-  // Reference image state — preview, extracted tags, in-flight + error.
+  // Reference image state
   const [refImageUrl, setRefImageUrl] = useState(null)
-  const [refTags, setRefTags] = useState(null)        // {style_primary, color_palette, ...}
+  const [refTags, setRefTags] = useState(null)
   const [refExtracting, setRefExtracting] = useState(false)
   const [refError, setRefError] = useState(null)
   const fileInputRef = useRef(null)
 
-  // Chat state — natural-language input that merges into the wizard.
-  const [chatInput, setChatInput] = useState('')
-  const [chatBusy, setChatBusy] = useState(false)
-  const [chatSummary, setChatSummary] = useState(null)
-  const [chatError, setChatError] = useState(null)
+  // Chat state — kept in state for extractPreferences, but not rendered in the new flow
+  const [chatInput] = useState('')
 
-  // Swipe deck state — loaded lazily once a persona is picked.
-  const [deck, setDeck] = useState(null)               // array of items, or null until loaded
+  // Swipe deck state
+  const [deck, setDeck] = useState(null)
   const [deckIndex, setDeckIndex] = useState(0)
   const [deckLoading, setDeckLoading] = useState(false)
   const [deckError, setDeckError] = useState(null)
   const [swipeCounts, setSwipeCounts] = useState({ like: 0, dislike: 0, skip: 0 })
   const lastDeckPersonaRef = useRef(null)
 
-  async function sendChat() {
-    const msg = chatInput.trim()
-    if (!msg) return
-    setChatBusy(true); setChatError(null)
+  // ── localStorage draft persistence ──────────────────────────────────────────
+  // Restore on mount (runs once, before profile hydration)
+  useEffect(() => {
+    const raw = localStorage.getItem('onboarding_draft')
+    if (!raw) return
     try {
-      const result = await extractPreferences(msg, { ...prefs, persona: personaId })
-      // Merge only the keys the model returned. budget/size are objects;
-      // shallow-merge those so partial updates (e.g. only max) preserve min.
-      setPrefs(prev => {
-        const next = { ...prev }
-        if (result.budget) next.budget = { ...prev.budget, ...result.budget }
-        if (result.size)   next.size   = { ...prev.size,   ...result.size }
-        if (result.bedrooms_min != null)    next.bedrooms_min = result.bedrooms_min
-        if (result.style)                   next.style = result.style
-        if (result.outdoor_required != null) next.outdoor_required = result.outdoor_required
-        if (result.max_renovation)          next.max_renovation = result.max_renovation
-        return next
-      })
-      if (result.persona) setPersonaId(result.persona)
-      setChatSummary(result.summary || 'Got it.')
-      setChatInput('')
-    } catch (e) {
-      setChatError(e.message || 'Could not understand that')
-    } finally {
-      setChatBusy(false)
-    }
-  }
+      const draft = JSON.parse(raw)
+      if (draft.personaId) setPersonaId(draft.personaId)
+      if (draft.prefs)     setPrefs({ ...EMPTY_PREFERENCES, ...draft.prefs })
+      if (draft.refTags)   setRefTags(draft.refTags)
+      if (draft.step && draft.step > 1) setStep(draft.step)
+    } catch { /* ignore parse errors */ }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Save on every relevant state change
+  useEffect(() => {
+    const draft = { step, personaId, prefs, refTags }
+    localStorage.setItem('onboarding_draft', JSON.stringify(draft))
+  }, [step, personaId, prefs, refTags])
+
+  // ── Profile hydration ───────────────────────────────────────────────────────
   // Hydrate from existing profile + any persona stashed during sign-in.
+  // Runs after profile loads; only applies if no localStorage draft was found.
   useEffect(() => {
     const stashed = sessionStorage.getItem('pending_persona')
-    setPersonaId(stashed || profile?.persona || '')
+    if (stashed || profile?.persona) {
+      setPersonaId(prev => prev || stashed || profile?.persona || '')
+    }
     if (profile?.preferences) {
-      setPrefs({ ...EMPTY_PREFERENCES, ...profile.preferences })
+      setPrefs(prev => {
+        // Only hydrate if prefs are still empty (draft takes priority)
+        const isEmpty = JSON.stringify(prev) === JSON.stringify(EMPTY_PREFERENCES)
+        return isEmpty ? { ...EMPTY_PREFERENCES, ...profile.preferences } : prev
+      })
     }
     if (profile?.reference_image_tags) {
-      setRefTags(profile.reference_image_tags)
+      setRefTags(prev => prev || profile.reference_image_tags)
     }
   }, [profile])
 
-  async function onPickImage(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setRefError(null)
-    setRefExtracting(true)
-    setRefTags(null)
-    // Local preview while we wait for the API.
-    const previewUrl = URL.createObjectURL(file)
-    setRefImageUrl(previewUrl)
-    try {
-      const tags = await extractImageTags(file)
-      setRefTags(tags)
-      // Auto-fill preference chips from the extracted tags (only fields the
-      // wizard exposes — user can still override).
-      setPrefs(prev => ({
-        ...prev,
-        style: tags.style_primary || prev.style,
-        outdoor_required: prev.outdoor_required || (tags.outdoor_type && tags.outdoor_type !== 'none'),
-      }))
-    } catch (err) {
-      setRefError(err.message || 'Extraction failed')
-    } finally {
-      setRefExtracting(false)
-    }
-  }
-
-  function clearRefImage() {
-    setRefImageUrl(null)
-    setRefTags(null)
-    setRefError(null)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
+  // ── Auth guard ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!loading && !user) navigate('/')
   }, [loading, user, navigate])
 
-  // Fetch a fresh deck whenever the persona changes (don't refetch on every
-  // chip nudge — would be jarring mid-swipe).
+  // ── Deck loading ────────────────────────────────────────────────────────────
+  // Pre-fetch deck as soon as persona is selected (step 1 completion), not at step 5
   useEffect(() => {
     if (!personaId) return
     if (lastDeckPersonaRef.current === personaId) return
@@ -138,24 +141,23 @@ export default function Onboarding({ onDone } = {}) {
     }).catch(e => {
       setDeckError(e.message || 'Could not load deck')
     }).finally(() => setDeckLoading(false))
-  }, [personaId])
+  }, [personaId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Swipe recording ─────────────────────────────────────────────────────────
   async function recordSwipe(item, action) {
     if (!item) return
     setSwipeCounts(prev => ({ ...prev, [action]: prev[action] + 1 }))
     setDeckIndex(i => i + 1)
     if (!user) return
-    // Fire-and-forget; conflict on (user_id, listing_source, listing_id)
-    // means this listing was already swiped — overwrite the action.
     try {
       await supabase.from('profile_swipes').upsert({
-        user_id:        user.id,
-        listing_id:     item.id,
-        listing_source: item.source,
-        listing_type:   item.listing_type,
+        user_id:          user.id,
+        listing_id:       item.id,
+        listing_source:   item.source,
+        listing_type:     item.listing_type,
         action,
-        persona:        personaId || null,
-        axis_bins:      item.axis_bins || {},
+        persona:          personaId || null,
+        axis_bins:        item.axis_bins || {},
         factor_positives: item.factor_positives || {},
       }, { onConflict: 'user_id,listing_source,listing_id' })
     } catch (e) {
@@ -163,8 +165,38 @@ export default function Onboarding({ onDone } = {}) {
     }
   }
 
-  const persona = getPersona(personaId)
+  // ── Image handling ──────────────────────────────────────────────────────────
+  async function onPickImage(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setRefError(null)
+    setRefExtracting(true)
+    setRefTags(null)
+    const previewUrl = URL.createObjectURL(file)
+    setRefImageUrl(previewUrl)
+    try {
+      const tags = await extractImageTags(file)
+      setRefTags(tags)
+      setPrefs(prev => ({
+        ...prev,
+        style: tags.style_primary || prev.style,
+        outdoor_required: prev.outdoor_required || (tags.outdoor_type && tags.outdoor_type !== 'none'),
+      }))
+    } catch (err) {
+      setRefError(err.message || 'Extraction failed')
+    } finally {
+      setRefExtracting(false)
+    }
+  }
 
+  function clearRefImage() {
+    setRefImageUrl(null)
+    setRefTags(null)
+    setRefError(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  // ── Preference updater ──────────────────────────────────────────────────────
   function update(path, value) {
     setPrefs(prev => {
       const next = { ...prev }
@@ -178,6 +210,7 @@ export default function Onboarding({ onDone } = {}) {
     })
   }
 
+  // ── Save ────────────────────────────────────────────────────────────────────
   async function save() {
     if (!user || !personaId) return
     setSaving(true); setError(null)
@@ -191,6 +224,7 @@ export default function Onboarding({ onDone } = {}) {
       })
       if (e) throw e
       sessionStorage.removeItem('pending_persona')
+      localStorage.removeItem('onboarding_draft')
       await refreshProfile()
       done()
     } catch (e) {
@@ -200,75 +234,87 @@ export default function Onboarding({ onDone } = {}) {
     }
   }
 
+  const persona = getPersona(personaId)
+
+  // ── Step navigation helpers ─────────────────────────────────────────────────
+  function goNext() { setStep(s => Math.min(s + 1, 6)) }
+  function goBack() { setStep(s => Math.max(s - 1, 1)) }
+
+  // canAdvance per step
+  const canAdvance = step === 1 ? !!personaId : true
+
+  // ── Loading state ───────────────────────────────────────────────────────────
   if (loading) return <div className="p-8 text-gray-500">Loading&hellip;</div>
 
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white py-10">
-      <div className="max-w-2xl mx-auto px-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-gray-900">Tune your map</h1>
-          <button
-            onClick={done}
-            className="text-sm text-gray-500 hover:text-gray-800"
-          >
-            Skip
-          </button>
+  // ── Step renderers ──────────────────────────────────────────────────────────
+
+  function renderStep1() {
+    return (
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900">What brings you here?</h2>
+        <p className="mt-2 text-sm text-gray-500">This shapes which listings and scores we show you.</p>
+        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {PERSONA_ORDER.map(pid => {
+            const p = PERSONAS[pid]
+            const copy = PERSONA_ONBOARDING[pid]
+            const isActive = personaId === pid
+            return (
+              <button
+                key={pid}
+                type="button"
+                onClick={() => setPersonaId(pid)}
+                className={`text-left rounded-xl border-2 p-5 transition-all ${
+                  isActive
+                    ? 'border-primary bg-primary-tint/40'
+                    : 'border-gray-200 bg-white hover:border-primary/50 hover:bg-gray-50'
+                }`}
+              >
+                <div className="text-4xl mb-3">{p.icon}</div>
+                <div className={`text-sm font-semibold ${isActive ? 'text-primary' : 'text-gray-900'}`}>
+                  {copy.headline}
+                </div>
+                <div className="mt-1 text-xs text-gray-500 leading-relaxed">
+                  {copy.description}
+                </div>
+              </button>
+            )
+          })}
         </div>
+      </div>
+    )
+  }
+
+  function renderStep2() {
+    const isRenter = personaId === 'home_renter'
+    return (
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900">What are you looking for?</h2>
         <p className="mt-2 text-sm text-gray-500">
-          Pick what matters. Anything left blank means &ldquo;no preference.&rdquo; You can change all of this later.
+          Let&rsquo;s narrow down the budget and property type.
         </p>
 
-        {/* Chat — fills the chips for you */}
-        <Section
-          title="Tell us what you're looking for"
-          subtitle="Skip the chips — type naturally and we'll fill the form. e.g. &ldquo;modern 2-bed under 450k, balcony, willing to renovate&rdquo;">
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={chatInput}
-              onChange={e => setChatInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !chatBusy) sendChat() }}
-              placeholder="Describe your ideal place\u2026"
-              disabled={chatBusy}
-              className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent disabled:opacity-60"
-            />
-            <button
-              onClick={sendChat}
-              disabled={chatBusy || !chatInput.trim()}
-              className="rounded-md bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 text-sm font-medium text-white"
-            >
-              {chatBusy ? '\u2026' : 'Apply'}
-            </button>
-          </div>
-          {chatSummary && (
-            <div className="mt-3 text-xs rounded-md bg-emerald-50 border border-emerald-200 p-2 text-emerald-800">
-              <span className="font-medium">Got it: </span>{chatSummary}
+        {!isRenter && (
+          <div className="mt-6">
+            <div className="text-sm font-medium text-gray-700 mb-2">Property type</div>
+            <div className="flex flex-wrap gap-2">
+              {PROPERTY_TYPE_OPTIONS.map(opt => (
+                <button
+                  key={String(opt.id)}
+                  type="button"
+                  onClick={() => update('property_type', opt.id)}
+                  className={chipClass(prefs.property_type === opt.id)}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
-          )}
-          {chatError && (
-            <div className="mt-3 text-xs text-red-600">{chatError}</div>
-          )}
-        </Section>
-
-        {/* Persona */}
-        <Section title="What are you doing?">
-          <div className="grid grid-cols-2 gap-2">
-            {Object.values(PERSONAS).map(p => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => setPersonaId(p.id)}
-                className={chipClass(personaId === p.id)}
-              >
-                <span className="mr-1">{p.icon}</span>
-                {p.label}
-              </button>
-            ))}
           </div>
-        </Section>
+        )}
 
-        {/* Budget */}
-        <Section title={persona?.defaultView === 'rent' ? 'Monthly budget (€)' : 'Budget (€)'}>
+        <div className="mt-6">
+          <div className="text-sm font-medium text-gray-700 mb-2">
+            {isRenter ? 'Monthly rent (€)' : 'Budget (€)'}
+          </div>
           <RangeRow
             min={prefs.budget.min}
             max={prefs.budget.max}
@@ -276,13 +322,27 @@ export default function Onboarding({ onDone } = {}) {
             onMax={v => update('budget.max', v)}
             placeholderMin="No min"
             placeholderMax="No max"
-            step={persona?.defaultView === 'rent' ? 50 : 10000}
+            step={isRenter ? 50 : 10000}
           />
-        </Section>
+          <div className="mt-2 text-xs text-gray-400">
+            {isRenter
+              ? 'Median rent in Lisboa is ~€1,400/mo for a 2-bed.'
+              : 'Median sale price in Lisboa municipality is ~€4,500/m².'}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
-        {/* Size + bedrooms */}
-        <Section title="Size & rooms">
-          <div className="text-xs text-gray-500 mb-1">Living area (m²)</div>
+  function renderStep3() {
+    const isFlipper = personaId === 'flipper'
+    return (
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900">What does your ideal place look like?</h2>
+        <p className="mt-2 text-sm text-gray-500">Skip anything you&rsquo;re not fussy about.</p>
+
+        <div className="mt-6">
+          <div className="text-sm font-medium text-gray-700 mb-2">Living area (m²)</div>
           <RangeRow
             min={prefs.size.min}
             max={prefs.size.max}
@@ -292,30 +352,75 @@ export default function Onboarding({ onDone } = {}) {
             placeholderMax="No max"
             step={5}
           />
-          <div className="text-xs text-gray-500 mt-3 mb-1">Bedrooms</div>
+        </div>
+
+        <div className="mt-6">
+          <div className="text-sm font-medium text-gray-700 mb-2">Bedrooms</div>
           <ChipGroup
             options={BEDROOM_OPTIONS}
             value={prefs.bedrooms_min}
             onChange={v => update('bedrooms_min', v)}
             allowClear
           />
-        </Section>
+        </div>
 
-        {/* Style */}
-        <Section title="Interior style"
-          subtitle="One choice — applies once we have photo tags for a listing.">
-          <ChipGroup
-            options={STYLE_OPTIONS}
-            value={prefs.style}
-            onChange={v => update('style', v)}
-            allowClear
-          />
-        </Section>
+        <div className="mt-6">
+          <div className="text-sm font-medium text-gray-700 mb-3">Preferences</div>
 
-        {/* Reference image */}
-        <Section
-          title="Show us a vibe (optional)"
-          subtitle="Upload a photo of an interior you love — Pinterest, magazine, anything. We'll auto-fill style chips below.">
+          <div className="mb-3">
+            <div className="text-xs text-gray-500 mb-1.5">Interior style</div>
+            <ChipGroup
+              options={STYLE_OPTIONS}
+              value={prefs.style}
+              onChange={v => update('style', v)}
+              allowClear
+            />
+          </div>
+
+          <div className="mb-3">
+            <button
+              type="button"
+              onClick={() => update('outdoor_required', !prefs.outdoor_required)}
+              className={`inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm transition-colors ${
+                prefs.outdoor_required
+                  ? 'border-primary bg-primary-tint/40 text-primary font-medium'
+                  : 'border-gray-300 bg-white text-gray-700 hover:border-primary/50'
+              }`}
+            >
+              <span>{prefs.outdoor_required ? '✓' : '○'}</span>
+              Outdoor space required
+            </button>
+          </div>
+
+          <div>
+            <div className="text-xs text-gray-500 mb-1.5">
+              Renovation tolerance
+              {isFlipper && (
+                <span className="ml-2 text-amber-600">— pre-selected for you</span>
+              )}
+            </div>
+            <ChipGroup
+              options={RENO_ONBOARDING_OPTIONS}
+              value={prefs.max_renovation}
+              onChange={v => update('max_renovation', v)}
+              allowClear
+            />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  function renderStep4() {
+    return (
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900">Got a vibe in mind?</h2>
+        <p className="mt-2 text-sm text-gray-500">
+          Upload a photo of an interior you love — Pinterest, magazine, anything.
+          We&rsquo;ll auto-fill your style chips.
+        </p>
+
+        <div className="mt-6">
           <input
             ref={fileInputRef}
             type="file"
@@ -327,18 +432,18 @@ export default function Onboarding({ onDone } = {}) {
           {!refImageUrl ? (
             <label
               htmlFor="ref-image-input"
-              className="block w-full rounded-lg border-2 border-dashed border-gray-300 hover:border-primary-border hover:bg-primary-tint/30 cursor-pointer p-6 text-center"
+              className="block w-full rounded-xl border-2 border-dashed border-gray-300 hover:border-primary/50 hover:bg-primary-tint/20 cursor-pointer p-10 text-center transition-colors"
             >
-              <div className="text-3xl">🖼️</div>
-              <div className="mt-2 text-sm font-medium text-gray-700">Click to upload</div>
-              <div className="mt-0.5 text-xs text-gray-400">JPG, PNG, or WebP &middot; up to 6 MB</div>
+              <div className="text-4xl">🖼️</div>
+              <div className="mt-3 text-sm font-medium text-gray-700">Click to upload</div>
+              <div className="mt-1 text-xs text-gray-400">JPG, PNG, or WebP &middot; up to 6 MB</div>
             </label>
           ) : (
             <div className="flex gap-4">
               <img
                 src={refImageUrl}
                 alt="Reference"
-                className="w-32 h-32 object-cover rounded-lg border border-gray-200 shrink-0"
+                className="w-36 h-36 object-cover rounded-xl border border-gray-200 shrink-0"
               />
               <div className="flex-1 min-w-0">
                 {refExtracting && (
@@ -349,6 +454,9 @@ export default function Onboarding({ onDone } = {}) {
                 )}
                 {refTags && !refExtracting && (
                   <div>
+                    <div className="text-xs text-emerald-700 font-medium mb-2">
+                      We&rsquo;ve updated your style preference.
+                    </div>
                     {refTags.summary && (
                       <div className="text-sm italic text-gray-600 mb-2">
                         &ldquo;{refTags.summary}&rdquo;
@@ -379,105 +487,216 @@ export default function Onboarding({ onDone } = {}) {
               </div>
             </div>
           )}
-        </Section>
+        </div>
+      </div>
+    )
+  }
 
-        {/* Lifestyle */}
-        <Section title="Lifestyle">
-          <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
-            <input
-              type="checkbox"
-              checked={prefs.outdoor_required}
-              onChange={e => update('outdoor_required', e.target.checked)}
-              className="h-4 w-4"
-            />
-            Must have outdoor space (balcony, terrace, garden, or rooftop)
-          </label>
+  function renderStep5() {
+    const swipeSubtitle =
+      personaId === 'home_renter'
+        ? 'Rental listings — tap like or skip to help us tune your results.'
+        : personaId === 'flipper'
+        ? 'Sale listings with renovation upside — like what catches your eye.'
+        : personaId === 'rental_investor'
+        ? 'Sale listings to buy and rent out — like what looks promising.'
+        : 'Sale listings — tap like or skip to help us tune your results.'
 
-          <div className="text-xs text-gray-500 mt-4 mb-1">
-            Renovation tolerance{persona?.id === 'flipper' && ' — flippers usually pick "Anything"'}
-          </div>
-          <ChipGroup
-            options={RENOVATION_OPTIONS}
-            value={prefs.max_renovation}
-            onChange={v => update('max_renovation', v)}
-            allowClear
-            withHints
+    return (
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900">Like what you see?</h2>
+        <p className="mt-2 text-sm text-gray-500">{swipeSubtitle}</p>
+        <div className="mt-6">
+          <SwipeDeck
+            loading={deckLoading}
+            error={deckError}
+            deck={deck}
+            index={deckIndex}
+            counts={swipeCounts}
+            persona={personaId}
+            onAction={recordSwipe}
           />
+        </div>
+      </div>
+    )
+  }
 
-          <div className="mt-5 pt-4 border-t border-gray-100">
-            <label className="flex items-start gap-2 cursor-pointer text-sm text-gray-700">
-              <input
-                type="checkbox"
-                checked={prefs.strict_tags}
-                onChange={e => update('strict_tags', e.target.checked)}
-                className="h-4 w-4 mt-0.5"
-              />
-              <span>
-                Strict tag match
-                <span className="block text-xs text-gray-500 mt-0.5 leading-snug">
-                  Hide listings we haven&rsquo;t photo-tagged yet (we&rsquo;re tagging them in batches; coverage grows over time). Off by default so you don&rsquo;t miss matches.
-                </span>
-              </span>
-            </label>
+  function renderStep6() {
+    const budgetLabel = (() => {
+      const { min, max } = prefs.budget
+      if (!min && !max) return 'No preference'
+      if (min && max)   return `€${min.toLocaleString()} – €${max.toLocaleString()}`
+      if (min)          return `From €${min.toLocaleString()}`
+      return `Up to €${max.toLocaleString()}`
+    })()
+
+    const styleLabel = prefs.style
+      ? STYLE_OPTIONS.find(o => o.id === prefs.style)?.label || prefs.style
+      : 'Any'
+
+    const personaCopy = personaId ? PERSONA_ONBOARDING[personaId]?.headline : ''
+    const total = swipeCounts.like + swipeCounts.dislike + swipeCounts.skip
+
+    return (
+      <div>
+        <div className="text-4xl mb-4">🎉</div>
+        <h2 className="text-2xl font-bold text-gray-900">You&rsquo;re all set.</h2>
+        <p className="mt-2 text-sm text-gray-500">Here&rsquo;s what we learned:</p>
+
+        <div className="mt-6 rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
+          <div className="flex items-baseline justify-between px-5 py-3">
+            <span className="text-xs text-gray-500 font-medium">Your goal</span>
+            <span className="text-sm text-gray-900">{personaCopy}</span>
           </div>
-        </Section>
+          <div className="flex items-baseline justify-between px-5 py-3">
+            <span className="text-xs text-gray-500 font-medium">Budget</span>
+            <span className="text-sm text-gray-900">{budgetLabel}</span>
+          </div>
+          <div className="flex items-baseline justify-between px-5 py-3">
+            <span className="text-xs text-gray-500 font-medium">Style</span>
+            <span className="text-sm text-gray-900">{styleLabel}</span>
+          </div>
+          {total > 0 && (
+            <div className="flex items-baseline justify-between px-5 py-3">
+              <span className="text-xs text-gray-500 font-medium">Swipes</span>
+              <span className="text-sm text-gray-900">
+                {swipeCounts.like} liked &middot; {swipeCounts.dislike} passed
+              </span>
+            </div>
+          )}
+        </div>
 
-        {/* Swipe deck — only after a persona is picked, since axes depend on it */}
-        {personaId && (
-          <Section
-            title="Quick swipes"
-            subtitle={
-              personaId === 'home_renter'
-                ? 'Rental listings — tap like or skip to help us tune your results.'
-                : personaId === 'flipper'
-                ? 'Sale listings with renovation upside — like what catches your eye.'
-                : personaId === 'rental_investor'
-                ? 'Sale listings to buy and rent out — like what looks promising.'
-                : 'Sale listings — tap like or skip to help us tune your results.'
-            }>
-            <SwipeDeck
-              loading={deckLoading}
-              error={deckError}
-              deck={deck}
-              index={deckIndex}
-              counts={swipeCounts}
-              persona={personaId}
-              onAction={recordSwipe}
-            />
-          </Section>
-        )}
+        {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
 
-        {error && <p className="mt-6 text-sm text-red-600">{error}</p>}
-
-        <div className="mt-8 flex items-center gap-3">
+        <div className="mt-8 flex flex-col gap-3">
           <button
             onClick={save}
-            disabled={!personaId || saving}
-            className="rounded-md bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed px-5 py-2.5 text-sm font-semibold text-white"
+            disabled={saving}
+            className="w-full rounded-lg bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed px-5 py-3 text-sm font-semibold text-white"
           >
-            {saving ? 'Saving\u2026' : 'Save and continue'}
+            {saving ? 'Saving\u2026' : 'Open the map →'}
           </button>
           <button
-            onClick={() => setPrefs(EMPTY_PREFERENCES)}
-            className="text-sm text-gray-500 hover:text-gray-800"
+            onClick={() => setStep(3)}
+            className="w-full rounded-lg border border-gray-300 bg-white hover:bg-gray-50 px-5 py-3 text-sm font-medium text-gray-700"
           >
-            Reset preferences
+            Edit preferences
           </button>
         </div>
+      </div>
+    )
+  }
+
+  // ── Navigation bar ──────────────────────────────────────────────────────────
+  function renderNav() {
+    if (step === 6) return null // Step 6 has its own CTAs
+
+    const isStep4 = step === 4
+    const isStep5 = step === 5
+    const isSkippable = isStep4 || isStep5
+
+    return (
+      <div className="mt-8 flex items-center justify-between">
+        <div className="w-24">
+          {step > 1 && (
+            <button
+              onClick={goBack}
+              className="text-sm text-gray-500 hover:text-gray-800"
+            >
+              ← Back
+            </button>
+          )}
+        </div>
+
+        <div className="text-xs text-gray-400">
+          Step {step} of {TOTAL_STEPS}
+        </div>
+
+        <div className="w-24 flex items-center justify-end gap-3">
+          {isSkippable && (
+            <button
+              onClick={goNext}
+              className="text-sm text-gray-500 hover:text-gray-800"
+            >
+              Skip
+            </button>
+          )}
+          {isStep4 && (
+            <button
+              onClick={goNext}
+              className="rounded-lg bg-primary hover:bg-primary-hover px-4 py-2 text-sm font-semibold text-white"
+            >
+              Next →
+            </button>
+          )}
+          {isStep5 && (
+            <button
+              onClick={goNext}
+              className="rounded-lg bg-primary hover:bg-primary-hover px-4 py-2 text-sm font-semibold text-white"
+            >
+              Finish
+            </button>
+          )}
+          {!isSkippable && (
+            <button
+              onClick={goNext}
+              disabled={!canAdvance}
+              className="rounded-lg bg-primary hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2 text-sm font-semibold text-white"
+            >
+              Next →
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // ── Main render ─────────────────────────────────────────────────────────────
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
+      {/* Progress bar */}
+      {step < 6 && (
+        <div className="w-full bg-gray-100 h-1">
+          <div
+            className="bg-primary h-1 transition-all duration-300"
+            style={{ width: `${(step / TOTAL_STEPS) * 100}%` }}
+          />
+        </div>
+      )}
+
+      {/* Progress dots */}
+      {step < 6 && (
+        <div className="flex items-center justify-center gap-2 pt-5 pb-1">
+          {Array.from({ length: TOTAL_STEPS }, (_, i) => (
+            <div
+              key={i}
+              className={`rounded-full transition-all duration-300 ${
+                i < step
+                  ? 'bg-primary w-5 h-1.5'
+                  : i === step - 1
+                  ? 'bg-primary w-5 h-1.5'
+                  : 'bg-gray-300 w-3 h-1.5'
+              }`}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className="max-w-2xl mx-auto px-6 py-8">
+        {step === 1 && renderStep1()}
+        {step === 2 && renderStep2()}
+        {step === 3 && renderStep3()}
+        {step === 4 && renderStep4()}
+        {step === 5 && renderStep5()}
+        {step === 6 && renderStep6()}
+
+        {renderNav()}
       </div>
     </div>
   )
 }
 
-function Section({ title, subtitle, children }) {
-  return (
-    <section className="mt-6 rounded-lg border border-gray-200 bg-white p-5">
-      <div className="text-sm font-semibold text-gray-900">{title}</div>
-      {subtitle && <div className="mt-0.5 text-xs text-gray-500">{subtitle}</div>}
-      <div className="mt-3">{children}</div>
-    </section>
-  )
-}
+// ── Sub-components (unchanged from original) ────────────────────────────────
 
 function chipClass(active) {
   return `inline-flex items-center justify-center px-3 py-1.5 rounded-full text-sm border transition-colors ${

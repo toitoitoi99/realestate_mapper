@@ -829,6 +829,12 @@ def upsert_listing(listing: Listing) -> tuple:
         logger.info(f"[DB] Excluded non-property listing (description): {listing.source_id}")
         return (None, False)
 
+    # Sanitise price sentinels and obviously corrupt values
+    if listing.price_amount is not None:
+        if listing.price_amount <= 0 or listing.price_amount > 500_000_000:
+            listing.price_amount = None
+            listing.price_per_sqm = None
+
     table = _table_for(getattr(listing, "listing_type", None) or "sale")
     conn = get_connection()
     try:

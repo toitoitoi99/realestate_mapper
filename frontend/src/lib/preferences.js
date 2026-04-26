@@ -14,6 +14,7 @@ export const EMPTY_PREFERENCES = {
   budget: { min: null, max: null },
   size: { min: null, max: null },
   bedrooms_min: null,
+  property_type: null,   // 'apartment' | 'house' | null (either)
   style: null,
   outdoor_required: false,
   max_renovation: null,
